@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
+  // VITE_BASE is set in CI for GitHub Pages (/OrcaWeb/app/); locally it's /
+  base: process.env.VITE_BASE ?? '/',
   plugins: [react()],
   worker: {
     format: 'es',
@@ -12,10 +14,8 @@ export default defineConfig({
       'Cross-Origin-Embedder-Policy': 'require-corp',
     },
   },
-  // Allow large WASM files without size warnings
   build: {
     chunkSizeWarningLimit: 10000,
   },
-  // Serve .wasm and .data with correct MIME types
   assetsInclude: ['**/*.wasm'],
 })

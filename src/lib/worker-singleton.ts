@@ -45,9 +45,10 @@ export function getWorker(): Worker {
     listeners.forEach((fn) => fn(msg))
   }
 
-  // Kick off WASM loading immediately
+  // VITE_WASM_BASE_URL is set in CI to a GitHub Releases URL; locally falls back to /wasm
+  const wasmBase = import.meta.env.VITE_WASM_BASE_URL ?? '/wasm'
   wasmStatus = 'loading'
-  worker.postMessage({ type: 'LOAD_WASM', url: '/wasm/slicer.js' })
+  worker.postMessage({ type: 'LOAD_WASM', url: `${wasmBase}/slicer.js` })
 
   return worker
 }
