@@ -1,0 +1,8 @@
+node_modules/
+dist/
+cli/dist/
+artifacts/slicer.js
+artifacts/slicer.wasm
+artifacts/slicer.data
+.env
+.claude/
