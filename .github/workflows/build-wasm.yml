@@ -95,11 +95,7 @@ jobs:
           ./bootstrap.sh --with-toolset=clang
 
           echo "[boost] writing user-config.jam for emscripten toolset…"
-          cat > ~/user-config.jam << 'JAM'
-using clang : emscripten : em++ :
-<archiver>emar
-<ranlib>emranlib ;
-JAM
+          printf "using clang : emscripten : em++ :\n<archiver>emar\n<ranlib>emranlib ;\n" > ~/user-config.jam
 
           echo "[boost] building with b2 (emscripten, static, single-threaded)…"
           ./b2 \
