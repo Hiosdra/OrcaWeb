@@ -119,7 +119,8 @@ jobs:
 
           # ── GMP ──────────────────────────────────────────────────────
           echo "[gmp] building…"
-          curl -fL "https://gmplib.org/download/gmp/gmp-${GMP_VERSION}.tar.xz" | tar xJ -C "${DL}"
+          # Use GNU FTP mirror (gmplib.org blocks GitHub Actions runners)
+          curl -fL --retry 3 "https://ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz" | tar xJ -C "${DL}"
           cd "${DL}/gmp-${GMP_VERSION}"
           emconfigure ./configure --prefix="${INSTALL}" --disable-shared --enable-static --disable-assembly ABI=32
           emmake make -j"$(nproc)"
@@ -127,7 +128,8 @@ jobs:
 
           # ── MPFR ─────────────────────────────────────────────────────
           echo "[mpfr] building…"
-          curl -fL "https://www.mpfr.org/mpfr-current/mpfr-${MPFR_VERSION}.tar.xz" | tar xJ -C "${DL}"
+          # Use GNU FTP mirror for MPFR too
+          curl -fL --retry 3 "https://ftp.gnu.org/gnu/mpfr/mpfr-${MPFR_VERSION}.tar.xz" | tar xJ -C "${DL}"
           cd "${DL}/mpfr-${MPFR_VERSION}"
           emconfigure ./configure --prefix="${INSTALL}" --with-gmp="${INSTALL}" --disable-shared --enable-static
           emmake make -j"$(nproc)"
