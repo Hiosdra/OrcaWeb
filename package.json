@@ -11,14 +11,14 @@
     "setup": "node scripts/download-wasm.mjs"
   },
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "three": "^0.170.0",
     "clsx": "^2.1.1"
   },
   "devDependencies": {
-    "@types/react": "^18.3.11",
-    "@types/react-dom": "^18.3.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "@types/three": "^0.170.0",
     "@vitejs/plugin-react": "^6.0.2",
     "typescript": "^5.6.3",
