@@ -1,0 +1,6 @@
+[submodule "orca-wasm/orca"]
+	path = orca-wasm/orca
+	url = https://github.com/SoftFever/OrcaSlicer.git
+	branch = v2.3.2
+	shallow = true
+	ignore = all
