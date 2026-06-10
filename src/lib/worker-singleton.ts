@@ -45,8 +45,10 @@ export function getWorker(): Worker {
     listeners.forEach((fn) => fn(msg))
   }
 
-  // VITE_WASM_BASE_URL is set in CI to a GitHub Releases URL; locally falls back to /wasm
-  const wasmBase = import.meta.env.VITE_WASM_BASE_URL ?? '/wasm'
+  // In production Vite sets BASE_URL to the app base (e.g. /OrcaWeb/app/).
+  // WASM files live in public/wasm/ which gets deployed at <BASE_URL>wasm/.
+  const wasmBase = import.meta.env.VITE_WASM_BASE_URL
+    ?? `${import.meta.env.BASE_URL}wasm`
   wasmStatus = 'loading'
   worker.postMessage({ type: 'LOAD_WASM', url: `${wasmBase}/slicer.js` })
 

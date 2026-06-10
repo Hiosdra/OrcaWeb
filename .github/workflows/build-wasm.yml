@@ -1,0 +1,135 @@
+name: Build WASM
+
+# Trigger manually or on a tag v*.*.* that signals a new OrcaSlicer target.
+# The compiled artifacts are uploaded as a release asset on OrcaWeb and then
+# pulled into the deploy workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      orca_version:
+        description: 'OrcaSlicer tag to build (e.g. v2.3.2)'
+        default: 'v2.3.2'
+        required: true
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write  # needed to create/update releases
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      ORCA_VERSION: ${{ github.event.inputs.orca_version || github.ref_name }}
+      EMSDK: /opt/emsdk
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false  # initialise orca submodule below with correct tag
+
+      # ── Emscripten ──────────────────────────────────────────────────
+      - name: Install Emscripten
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git /opt/emsdk
+          /opt/emsdk/emsdk install latest
+          /opt/emsdk/emsdk activate latest
+
+      # ── System deps ─────────────────────────────────────────────────
+      - name: Install build tools
+        run: sudo apt-get install -y ninja-build python3 cmake
+
+      # ── Restore cached WASM deps (Boost, GMP, MPFR, CGAL) ──────────
+      - name: Restore dep cache
+        id: dep-cache
+        uses: actions/cache@v4
+        with:
+          path: orca-wasm/deps
+          key: wasm-deps-${{ runner.os }}-v3
+
+      # ── OrcaSlicer submodule at requested tag ────────────────────────
+      - name: Checkout OrcaSlicer ${{ env.ORCA_VERSION }}
+        run: |
+          git submodule update --init --depth 1 -- orca-wasm/orca
+          git -C orca-wasm/orca fetch --tags --depth 1 origin "$ORCA_VERSION"
+          git -C orca-wasm/orca checkout "$ORCA_VERSION"
+
+      # ── Build dependencies (skipped if cache hit) ────────────────────
+      - name: Build Boost for WASM
+        if: steps.dep-cache.outputs.cache-hit != 'true'
+        run: |
+          source /opt/emsdk/emsdk_env.sh
+          export ORCA_WASM_DIR="$(pwd)/orca-wasm"
+          source orca-wasm/deps/build_boost.sh
+
+      - name: Build GMP / MPFR / CGAL for WASM
+        if: steps.dep-cache.outputs.cache-hit != 'true'
+        run: |
+          source /opt/emsdk/emsdk_env.sh
+          export ORCA_WASM_DIR="$(pwd)/orca-wasm"
+          source orca-wasm/deps/build_math.sh
+
+      # ── Apply WASM patches ───────────────────────────────────────────
+      - name: Patch OrcaSlicer source
+        run: python3 orca-wasm/patches/apply.py
+
+      # ── Configure + Build ────────────────────────────────────────────
+      - name: Build WASM module
+        run: |
+          source /opt/emsdk/emsdk_env.sh
+          export ORCA_WASM_DIR="$(pwd)/orca-wasm"
+          source orca-wasm/deps/build_boost.sh  # re-exports env vars from cache
+          source orca-wasm/deps/build_math.sh
+
+          mkdir -p orca-wasm/build-wasm
+          emcmake cmake \
+            -S orca-wasm \
+            -B orca-wasm/build-wasm \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSLIC3R_WASM=ON \
+            -DBOOST_ROOT="${BOOST_WASM_ROOT}" \
+            -DBOOST_INC="${BOOST_WASM_ROOT}/include" \
+            -DGMP_INCLUDE_DIR="${GMP_WASM_INC}" \
+            -DGMP_LIBRARIES="${GMP_WASM_LIB}" \
+            -DMPFR_INCLUDE_DIR="${MPFR_WASM_INC}" \
+            -DMPFR_LIBRARIES="${MPFR_WASM_LIB}" \
+            -DCGAL_DIR="${CGAL_WASM_DIR}" \
+            -DORCA_SRC="$(pwd)/orca-wasm/orca/src" \
+            -DORCA_DEPS="$(pwd)/orca-wasm/orca/deps_src"
+
+          emmake cmake --build orca-wasm/build-wasm --target slicer -j 4
+
+      # ── Package artifacts ────────────────────────────────────────────
+      - name: Package WASM artifacts
+        run: |
+          mkdir -p wasm-artifacts
+          cp public/wasm/slicer.js   wasm-artifacts/
+          cp public/wasm/slicer.wasm wasm-artifacts/
+          cp public/wasm/slicer.data wasm-artifacts/
+          ls -lh wasm-artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: orca-wasm-${{ env.ORCA_VERSION }}
+          path: wasm-artifacts/
+          retention-days: 90
+
+      # ── Create / update GitHub release with WASM assets ─────────────
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="wasm-$ORCA_VERSION"
+          # Create release if it doesn't exist
+          gh release create "$TAG" \
+            --title "WASM build for OrcaSlicer $ORCA_VERSION" \
+            --notes "Pre-built WASM artifacts for OrcaSlicer $ORCA_VERSION.\n\nUsed internally by the deploy workflow." \
+            --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+          # Upload / overwrite assets
+          for f in wasm-artifacts/*; do
+            gh release upload "$TAG" "$f" --clobber --repo "$GITHUB_REPOSITORY"
+          done

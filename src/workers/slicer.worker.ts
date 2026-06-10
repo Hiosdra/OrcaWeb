@@ -55,6 +55,41 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         URL.revokeObjectURL(blobUrl)
       }
 
+      // Patch fetch so Emscripten's preload of slicer.data transparently
+      // reassembles from two *.part0 / *.part1 chunks (each < 100 MB so
+      // they fit in git on GitHub Pages).  Falls back to a single file for
+      // local dev where the full slicer.data lives in public/wasm/.
+      const nativeFetch = self.fetch.bind(self)
+      ;(self as unknown as { fetch: typeof self.fetch }).fetch = async function (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) {
+        const url = typeof input === 'string' ? input
+          : input instanceof URL ? input.href
+          : (input as Request).url
+        if (url.endsWith('/slicer.data')) {
+          const r0 = await nativeFetch(url + '.part0', init)
+          if (r0.ok) {
+            const [buf0, buf1] = await Promise.all([
+              r0.arrayBuffer(),
+              nativeFetch(url + '.part1', init).then((r) => {
+                if (!r.ok) throw new Error(`HTTP ${r.status} fetching slicer.data.part1`)
+                return r.arrayBuffer()
+              }),
+            ])
+            const out = new Uint8Array(buf0.byteLength + buf1.byteLength)
+            out.set(new Uint8Array(buf0), 0)
+            out.set(new Uint8Array(buf1), buf0.byteLength)
+            return new Response(out.buffer, {
+              status: 200,
+              headers: { 'Content-Type': 'application/octet-stream' },
+            })
+          }
+          // part0 not found → fall through to fetch the whole file (local dev)
+        }
+        return nativeFetch(input, init)
+      }
+
       orcaModule = await factory({
         wasmBinary,
         // slicer.data is resolved relative to wasmBase (e.g. /wasm/slicer.data)

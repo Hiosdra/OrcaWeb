@@ -23,13 +23,34 @@ jobs:
 
       - run: npm ci
 
+      # ── Download WASM artifacts ──────────────────────────────────────
+      # We serve WASM from the same origin as the app (GitHub Pages) so
+      # no CORS headers are needed.  slicer.data is 144 MB — above git's
+      # 100 MB per-file limit — so it is split into two ≈72 MB chunks.
+      # The worker transparently reassembles them via the fetch patch in
+      # src/workers/slicer.worker.ts.
+      - name: Download & split WASM artifacts
+        run: |
+          mkdir -p public/wasm
+          BASE="https://github.com/allanwrench28/orcaslicer-wasm/releases/download/v1.1"
+          curl -fL "$BASE/slicer.js"   -o public/wasm/slicer.js
+          curl -fL "$BASE/slicer.wasm" -o public/wasm/slicer.wasm
+          curl -fL "$BASE/slicer.data" -o public/wasm/slicer.data.full
+          # Split into two chunks, each ≈72 MB (well under GitHub's 100 MB limit)
+          split -b 75497472 public/wasm/slicer.data.full public/wasm/slicer.data.part
+          mv public/wasm/slicer.data.partaa public/wasm/slicer.data.part0
+          mv public/wasm/slicer.data.partab public/wasm/slicer.data.part1
+          rm  public/wasm/slicer.data.full
+          ls -lh public/wasm/
+
+      # ── Build Vite app ───────────────────────────────────────────────
       - name: Build Vite app
         run: npm run build
         env:
-          # App served at /OrcaWeb/app/
+          # App served at /OrcaWeb/app/ on GitHub Pages
           VITE_BASE: /OrcaWeb/app/
-          # WASM fetched from GitHub Releases at runtime (CORS: objects.githubusercontent.com)
-          VITE_WASM_BASE_URL: https://github.com/allanwrench28/orcaslicer-wasm/releases/download/v1.1
+          # WASM served from same origin — no external URL needed.
+          # worker-singleton.ts uses import.meta.env.BASE_URL + 'wasm'
 
       # ── Python / MkDocs ─────────────────────────────────────────────
       - uses: actions/setup-python@v5

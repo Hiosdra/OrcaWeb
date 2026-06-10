@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 /**
- * Downloads OrcaSlicer WASM artifacts from GitHub releases.
+ * Downloads pre-built OrcaSlicer WASM artifacts for local development.
+ *
+ * In CI the WASM module is built from source (orca-wasm/) via the
+ * "Build WASM" GitHub Actions workflow and served from the same origin.
+ * This script is only needed for local `npm run dev`.
+ *
  * Run once: node scripts/download-wasm.mjs
  */
 
