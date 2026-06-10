@@ -131,21 +131,9 @@ patch("src/libslic3r/CMakeLists.txt", [
     ),
 ])
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 3. src/libslic3r/GCode.cpp — sequential pipeline under __EMSCRIPTEN__
-# OrcaSlicer uses tbb::parallel_pipeline to export layers concurrently.
-# In WASM (single-threaded) we process them sequentially.
-# ─────────────────────────────────────────────────────────────────────────────
-patch("src/libslic3r/GCode.cpp", [
-    # Wrap tbb::parallel_pipeline calls
-    (
-        r'(tbb::parallel_pipeline\s*\()',
-        r'#ifndef __EMSCRIPTEN__\n\1',
-        0,
-    ),
-    # Close the guard after the semicolon ending the parallel_pipeline call
-    # (this is fragile — the build.sh verify step will catch failures)
-])
+# Note: GCode.cpp uses tbb::parallel_pipeline for layer generation — this IS
+# the critical G-code export path.  Our tbb/parallel_pipeline.h shim implements
+# a correct sequential version, so no source-level guarding is needed here.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. src/libslic3r/FuzzySkin.cpp — thread_local RNG not allowed in WASM
