@@ -286,6 +286,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${DEP_INSTALL}" \
             -DCMAKE_MODULE_PATH="${WORK}/orca-wasm/cmake" \
+            -DCMAKE_PROJECT_INCLUDE_BEFORE="${WORK}/orca-wasm/cmake/wasm_find_paths.cmake" \
             -DSLIC3R_WASM=ON \
             -DSLIC3R_GUI=OFF \
             -DSLIC3R_STATIC=ON \
