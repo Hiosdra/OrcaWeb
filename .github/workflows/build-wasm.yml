@@ -65,17 +65,17 @@ jobs:
         uses: actions/cache@v5
         with:
           path: orca-wasm/deps-install
-          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v7
+          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v8
 
       # ── Boost ────────────────────────────────────────────────────────
-      # Build Boost using its CMake build system so that BoostConfig.cmake is
+      # Build Boost using its CMake build system (1.85.0 is the first version to
+      # ship CMakeLists.txt in the standard tarball) so that BoostConfig.cmake is
       # installed alongside the libraries.  OrcaSlicer v2.3.2 sets CMP0167 NEW
-      # (even though we patch it to OLD), so having the config files avoids any
-      # lingering FindBoost.cmake header-search quirks.
+      # which requires config-mode Boost; CMake-built Boost satisfies this.
       - name: Build WASM deps — Boost
         run: |
           source /opt/emsdk/emsdk_env.sh
-          BOOST_VERSION="1.83.0"
+          BOOST_VERSION="1.85.0"
           BOOST_UNDERSCORE="${BOOST_VERSION//./_}"
           INSTALL="$(pwd)/orca-wasm/deps-install"
           STAMP="${INSTALL}/.boost_built"
