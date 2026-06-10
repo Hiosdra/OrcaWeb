@@ -103,6 +103,7 @@ jobs:
             variant=release \
             link=static \
             threading=single \
+            --layout=system \
             --prefix="${INSTALL}" \
             --with-atomic \
             --with-chrono \
