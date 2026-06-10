@@ -117,6 +117,7 @@ jobs:
             --with-system \
             --with-thread \
             "define=BOOST_LOG_NO_THREADS=1" \
+            "define=BOOST_LOG_WITHOUT_SYSLOG=1" \
             "define=BOOST_THREAD_DONT_USE_PTHREAD=1" \
             "boost.locale.iconv=off" \
             "boost.locale.posix=off" \
