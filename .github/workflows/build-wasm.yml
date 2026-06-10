@@ -65,9 +65,13 @@ jobs:
         uses: actions/cache@v5
         with:
           path: orca-wasm/deps-install
-          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v6
+          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v7
 
       # ── Boost ────────────────────────────────────────────────────────
+      # Build Boost using its CMake build system so that BoostConfig.cmake is
+      # installed alongside the libraries.  OrcaSlicer v2.3.2 sets CMP0167 NEW
+      # (even though we patch it to OLD), so having the config files avoids any
+      # lingering FindBoost.cmake header-search quirks.
       - name: Build WASM deps — Boost
         run: |
           source /opt/emsdk/emsdk_env.sh
@@ -80,24 +84,23 @@ jobs:
 
           echo "[boost] downloading Boost ${BOOST_VERSION}…"
           mkdir -p /tmp/boost
-          # archives.boost.org is the official mirror (jfrog.io redirects are broken)
           curl -fL --retry 3 \
             "https://archives.boost.org/release/${BOOST_VERSION}/source/boost_${BOOST_UNDERSCORE}.tar.gz" \
             | tar xz -C /tmp/boost
           cd "/tmp/boost/boost_${BOOST_UNDERSCORE}"
-          ./bootstrap.sh --without-libraries=python
-          printf 'using clang : emscripten : em++ : <compileflags>"-O2" <archiveflags>"" ;\n' \
-            > user-config.jam
-          ./b2 install \
-            --prefix="${INSTALL}" \
-            toolset=clang-emscripten \
-            link=static threading=single variant=release \
-            --with-filesystem --with-system --with-regex \
-            --with-thread --with-atomic --with-chrono \
-            --with-date_time --with-iostreams \
-            --with-locale --with-nowide --with-program_options \
-            --with-log \
-            -j"$(nproc)" 2>&1 | tail -10
+
+          echo "[boost] building with CMake (emcmake) for WASM…"
+          emcmake cmake -S . -B /tmp/boost-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${INSTALL}" \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBOOST_INCLUDE_LIBRARIES="atomic;chrono;date_time;filesystem;iostreams;locale;log;nowide;program_options;regex;system;thread"
+          emmake cmake --build /tmp/boost-build --target install -j"$(nproc)"
+
+          echo "[boost] installed headers:"
+          ls "${INSTALL}/include/boost/version.hpp" && echo "  boost/version.hpp OK"
+          echo "[boost] installed libs (sample):"
+          ls "${INSTALL}/lib/libboost_system"* 2>/dev/null | head -3 || echo "  no libboost_system found!"
           touch "${STAMP}"
 
       # ── GMP / MPFR / CGAL ────────────────────────────────────────────
@@ -239,7 +242,6 @@ jobs:
             -DORCA_WEB_WASM_DIR="${WORK}/orca-wasm/wasm" \
             -DORCA_WEB_SHIM_DIR="${WORK}/orca-wasm/wasm/shims" \
             -DBoost_NO_SYSTEM_PATHS=ON \
-            -DBoost_NO_BOOST_CMAKE=ON \
             -DBOOST_ROOT="${DEP_INSTALL}" \
             -DBoost_ROOT="${DEP_INSTALL}" \
             -DCGAL_DIR="${DEP_INSTALL}/lib/cmake/CGAL" \
