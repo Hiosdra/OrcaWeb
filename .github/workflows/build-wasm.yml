@@ -65,17 +65,19 @@ jobs:
         uses: actions/cache@v5
         with:
           path: orca-wasm/deps-install
-          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v8
+          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v9
 
       # ── Boost ────────────────────────────────────────────────────────
-      # Build Boost using its CMake build system (1.85.0 is the first version to
-      # ship CMakeLists.txt in the standard tarball) so that BoostConfig.cmake is
-      # installed alongside the libraries.  OrcaSlicer v2.3.2 sets CMP0167 NEW
-      # which requires config-mode Boost; CMake-built Boost satisfies this.
+      # Build Boost using b2 with the clang-emscripten toolset.  The standard
+      # archives.boost.org tarball does not ship CMakeLists.txt, so the CMake
+      # build approach never works without the GitHub super-project checkout.
+      # We instead use b2 and patch OrcaSlicer's CMP0167 to OLD so that the
+      # legacy FindBoost.cmake (module mode) is used — it works perfectly with
+      # b2-installed Boost given BOOST_ROOT + Boost_NO_BOOST_CMAKE=ON.
       - name: Build WASM deps — Boost
         run: |
           source /opt/emsdk/emsdk_env.sh
-          BOOST_VERSION="1.85.0"
+          BOOST_VERSION="1.83.0"
           BOOST_UNDERSCORE="${BOOST_VERSION//./_}"
           INSTALL="$(pwd)/orca-wasm/deps-install"
           STAMP="${INSTALL}/.boost_built"
@@ -89,13 +91,42 @@ jobs:
             | tar xz -C /tmp/boost
           cd "/tmp/boost/boost_${BOOST_UNDERSCORE}"
 
-          echo "[boost] building with CMake (emcmake) for WASM…"
-          emcmake cmake -S . -B /tmp/boost-build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="${INSTALL}" \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DBOOST_INCLUDE_LIBRARIES="atomic;chrono;date_time;filesystem;iostreams;locale;log;nowide;program_options;regex;system;thread"
-          emmake cmake --build /tmp/boost-build --target install -j"$(nproc)"
+          echo "[boost] bootstrapping b2…"
+          ./bootstrap.sh --with-toolset=clang
+
+          echo "[boost] writing user-config.jam for emscripten toolset…"
+          cat > ~/user-config.jam << 'JAM'
+using clang : emscripten : em++ :
+<archiver>emar
+<ranlib>emranlib ;
+JAM
+
+          echo "[boost] building with b2 (emscripten, static, single-threaded)…"
+          ./b2 \
+            toolset=clang-emscripten \
+            variant=release \
+            link=static \
+            threading=single \
+            --prefix="${INSTALL}" \
+            --without-python \
+            --with-atomic \
+            --with-chrono \
+            --with-date_time \
+            --with-filesystem \
+            --with-iostreams \
+            --with-locale \
+            --with-log \
+            --with-nowide \
+            --with-program_options \
+            --with-regex \
+            --with-system \
+            --with-thread \
+            "define=BOOST_LOG_NO_THREADS=1" \
+            "define=BOOST_THREAD_DONT_USE_PTHREAD=1" \
+            "boost.locale.iconv=off" \
+            "boost.locale.posix=off" \
+            -j"$(nproc)" \
+            install
 
           echo "[boost] installed headers:"
           ls "${INSTALL}/include/boost/version.hpp" && echo "  boost/version.hpp OK"
@@ -270,6 +301,7 @@ jobs:
             -DORCA_WEB_WASM_DIR="${WORK}/orca-wasm/wasm" \
             -DORCA_WEB_SHIM_DIR="${WORK}/orca-wasm/wasm/shims" \
             -DBoost_NO_SYSTEM_PATHS=ON \
+            -DBoost_NO_BOOST_CMAKE=ON \
             -DBOOST_ROOT="${DEP_INSTALL}" \
             -DBoost_ROOT="${DEP_INSTALL}" \
             -DCGAL_DIR="${DEP_INSTALL}/lib/cmake/CGAL" \
