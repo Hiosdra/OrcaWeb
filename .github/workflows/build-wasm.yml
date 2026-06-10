@@ -104,7 +104,6 @@ jobs:
             link=static \
             threading=single \
             --prefix="${INSTALL}" \
-            --without-python \
             --with-atomic \
             --with-chrono \
             --with-date_time \
