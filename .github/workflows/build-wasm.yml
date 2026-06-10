@@ -26,7 +26,7 @@ jobs:
       EMSDK: /opt/emsdk
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # ── Emscripten ──────────────────────────────────────────────────
       - name: Install Emscripten
@@ -61,7 +61,7 @@ jobs:
       # Bump the version suffix (v2, v3, …) to invalidate after script changes.
       - name: Restore dep cache
         id: dep-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: orca-wasm/deps-install
           key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v2
@@ -267,7 +267,7 @@ jobs:
           ls -lh wasm-artifacts/
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: orca-wasm-${{ env.ORCA_VERSION }}
           path: wasm-artifacts/
