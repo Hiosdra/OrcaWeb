@@ -75,8 +75,14 @@ patch("CMakeLists.txt", [
         r'if(NOT SLIC3R_WASM)\n\1\nendif()\nif(SLIC3R_WASM)\n  add_subdirectory(src)\nendif()',
         0,
     ),
-    # (CMP0167 is intentionally left as NEW — our CMake-built Boost installs
-    # BoostConfig.cmake which is what config-mode find_package requires.)
+    # Downgrade CMP0167 to OLD so the legacy FindBoost.cmake (module mode) is
+    # used.  Our Boost is built with b2 which does not install BoostConfig.cmake;
+    # config-mode detection (CMP0167 NEW) would fail on a b2-built Boost.
+    (
+        r'cmake_policy\s*\(\s*SET\s+CMP0167\s+NEW\s*\)',
+        r'cmake_policy(SET CMP0167 OLD)',
+        0,
+    ),
 ])
 
 # ─────────────────────────────────────────────────────────────────────────────
