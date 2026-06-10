@@ -2,7 +2,7 @@
 
 Ten dokument opisuje aktualny stan projektu: zaimplementowane funkcje, znane ograniczenia i planowane ulepszenia.
 
-Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (własny build v2.3.2 w toku — CI iteracyjnie naprawiany)
+Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (własny build v2.3.2 w toku — CI iteracyjnie naprawiany) · wersja aplikacji: **PR #8 merged**
 
 ---
 
@@ -13,11 +13,13 @@ Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (
 | Funkcja | Uwagi |
 |---------|-------|
 | Drag & drop pliku STL | ASCII i binary STL |
+| Import pliku 3MF | Ekstrakcja siatki + profili OrcaSlicera z metadanych archiwum |
 | Podgląd 3D modelu (Three.js) | Model na wirtualnym stole drukarskim w skali mm, OrbitControls |
-| Siatka stołu 250×250 mm | Widoczna siatka pomocnicza i obramowanie |
+| Siatka stołu — dynamiczny rozmiar | Rozmiar stołu pobierany z presetu drukarki lub profilu maszyny (np. 250×210 mm dla Prusa MK4) |
 | Zakładki Model / Settings / Slice | Płynna nawigacja, zakładki zablokowane do momentu wczytania pliku |
-| Panel ustawień | Wybór drukarki, filamentu, jakości |
+| Panel ustawień | Wybór drukarki (z rozmiarami stołu), filamentu, jakości |
 | Podgląd G-code (warstwa po warstwie) | Slider warstw, kolorowanie wg warstwy, ciemne tło |
+| Statystyki G-code | Czas druku, warstwy, filament (mm/g), rozmiar pliku — parsowane z nagłówka G-code |
 | Widok model + G-code obok siebie | Po slicowaniu — synchronizowany układ obok siebie |
 | Pobieranie G-code | Przycisk „Download .gcode" z poprawną nazwą pliku |
 | Status silnika (badge) | „Loading engine…" / „Engine error" w nagłówku |
@@ -37,8 +39,10 @@ Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (
 |---------|-------|
 | Wbudowane presety jakości | Draft (0.3 mm) / Standard (0.2 mm) / Fine (0.1 mm) |
 | Wbudowane filamenenty | PLA, PETG, ABS, TPU — temperatury i prędkości wentylatorów |
-| Wbudowane drukarki | Generic 0.4/0.6, Bambu Lab P1S/X1C, Prusa MK4, Creality Ender 3, Voron 2.4 |
+| Wbudowane drukarki | Generic 0.4/0.6, Bambu Lab P1S/X1C, Prusa MK4, Creality Ender 3, Voron 2.4 — z wymiarami stołu |
 | Import profilu JSON z OrcaSlicera | Plik `.json` z instalacji desktop; mapowanie `ORCA_FIELD_MAP` — 30+ pól |
+| Parsowanie `printable_area` | Wymiary stołu z pola `printable_area`/`bed_size` profilu maszyny |
+| Ekstrakcja profili z 3MF | `Metadata/*.json/.config` z archiwum — sortowanie wg priorytetu (machine < filament < process < project) |
 | Obsługa array-wrapped values | `["0.2"]` → `0.2` (format OrcaSlicera) |
 | Obsługa wartości procentowych | `"15%"` → `15`, `"0.15"` → `15` |
 
@@ -83,7 +87,6 @@ Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (
 
 | Problem | Szczegóły |
 |---------|-----------|
-| Stół hardcoded na 250×250 mm | `ModelViewer` i podgląd G-code zakładają 250×250 mm, niezależnie od wybranej drukarki |
 | Brak konfiguracji `bed_shape` | Bambu Lab P1S ma okrągły stół — nie jest to przekazywane do WASM |
 | Zakres temperatur niezweryfikowany | Presety printer+filament mogą być niespójne dla egzotycznych kombinacji |
 
@@ -93,7 +96,6 @@ Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (
 |---------|-----------|
 | Tylko ruchy z ekstrudowaniem | Ruchy przejazdu (travel moves) nie są wizualizowane |
 | Brak separacji typów ruchów | Nie rozróżniane: perimeter / infill / support / travel |
-| Brak statystyk G-code | Brak czasu druku, zużycia filamentu, liczby warstw |
 | Centrowanie toolpathów | Centroid G-code może nie pokrywać się idealne z modelem dla bardzo niecentrycznych kształtów |
 
 ### Importowanie profili
@@ -119,7 +121,6 @@ Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (
 
 | Funkcja | Priorytet |
 |---------|-----------|
-| 3MF import | 🔴 wysoki — standardowy format OrcaSlicera |
 | OBJ import | 🟡 średni |
 | STEP / IGES import | 🔴 nie możliwy w WASM — OCCT wyłączone |
 | Multi-plik (wiele STL naraz) | 🟡 średni |
@@ -143,7 +144,6 @@ Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (
 |---------|-----------|
 | Kolorowanie wg typu ruchu (perimeter / infill / support / travel) | 🔴 wysoki |
 | Wyświetlanie travel moves | 🟡 średni |
-| Statystyki (czas, filament, liczba warstw) | 🔴 wysoki |
 | Suwak odtwarzania (czas, nie warstwa) | 🟠 niski |
 
 ### Integracje
@@ -167,16 +167,20 @@ Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (
 ## 🗺️ Roadmap
 
 ```
-v0.2  ── Własny build WASM v2.3.2
-      ── Czas druku + zużycie filamentu z G-code
-      ── Kolorowanie G-code wg typu ruchu
-      ── 3MF import
+v0.1  ── ✅ STL import, 3D viewer, slicing, G-code viewer, download
+      ── ✅ Preset quality / filament / printer profiles
+      ── ✅ JSON profile import from OrcaSlicer
 
-v0.3  ── Konfigurowalny rozmiar stołu per drukarka
+v0.2  ── ✅ 3MF import (mesh + embedded profile extraction)
+      ── ✅ Per-printer bed size (dynamiczny stół w 3D viewer i G-code viewer)
+      ── ✅ Statystyki G-code (czas, warstwy, filament, waga)
+
+v0.3  ── Własny build WASM v2.3.2
+      ── Kolorowanie G-code wg typu ruchu (perimeter / infill / support / travel)
       ── PWA / Service Worker (tryb offline)
-      ── Multi-object plate
 
 v0.4  ── OctoPrint integration
+      ── Multi-object plate
       ── Variable layer height UI
 ```
 
@@ -186,20 +190,21 @@ v0.4  ── OctoPrint integration
 
 ```
 src/
-├── App.tsx                ✅ pełna logika UI, tabs, WASM orchestration
+├── App.tsx                ✅ pełna logika UI, tabs, WASM orchestration, 3MF loading
 ├── components/
-│   ├── FileUpload.tsx     ✅ drag & drop, walidacja STL
-│   ├── ModelViewer.tsx    ✅ Three.js, STLLoader, bed grid, OrbitControls
-│   ├── GcodeViewer.tsx    ✅ toolpaths, layer slider — ⚠️ brak travel, statystyk
+│   ├── FileUpload.tsx     ✅ drag & drop, STL + 3MF
+│   ├── ModelViewer.tsx    ✅ Three.js, STLLoader, dynamiczny rozmiar stołu (bedX/bedY)
+│   ├── GcodeViewer.tsx    ✅ toolpaths, layer slider, dynamiczny rozmiar stołu — ⚠️ brak travel
 │   ├── SettingsPanel.tsx  ✅ presety, import profili — ⚠️ niekompletne mapowanie
-│   └── SlicePanel.tsx     ✅ progress states, download G-code
+│   └── SlicePanel.tsx     ✅ progress states, statystyki G-code, download G-code
 ├── lib/
-│   ├── profiles.ts        ✅ presety, 30+ pól ORCA_FIELD_MAP — ⚠️ nie wszystkie pola
+│   ├── profiles.ts        ✅ presety z rozmiarami stołu, 30+ pól, parsowanie printable_area
+│   ├── parse3mf.ts        ✅ 3MF → binary STL + OrcaConfig (fflate, DOMParser)
 │   ├── wasm-loader.ts     ✅ orc_init / orc_slice / error codes
 │   └── worker-singleton.ts ✅ singleton, base URL z Vite BASE_URL
 ├── workers/
 │   └── slicer.worker.ts   ✅ WASM load + chunk reassembly + SLICE
-└── types/index.ts         ✅ OrcaConfig, WorkerMessages, SliceStatus
+└── types/index.ts         ✅ OrcaConfig (+ bed_size_x/y), GcodeStats, WorkerMessages, SliceStatus
 
 orca-wasm/                 ⚠️ infrastruktura gotowa, NIE SKOMPILOWANO jeszcze
 ├── bridge/slicer.cpp      ✅ napisany, nie testowany (wymaga buildu)

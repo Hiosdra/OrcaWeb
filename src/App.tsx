@@ -108,6 +108,8 @@ export default function App() {
       }
     } else {
       setFile(f)
+      // Clear any 3MF-extracted overrides so they don't bleed into plain STL slices
+      setConfigOverrides({})
     }
     setActiveTab('settings')
   // eslint-disable-next-line react-hooks/exhaustive-deps

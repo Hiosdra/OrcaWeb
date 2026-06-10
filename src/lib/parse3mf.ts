@@ -195,17 +195,23 @@ function trianglesToStl(tris: Tri3[]): Uint8Array {
 function extractOrcaConfig(files: Record<string, Uint8Array>): Partial<OrcaConfig> {
   const merged: Partial<OrcaConfig> = {}
 
-  // Prioritise files by name so that later/more-specific configs override earlier ones
+  // Prioritise files by name so that later/more-specific configs override earlier ones.
+  // Use lowercased paths throughout so that case variants (metadata/, .JSON, .Config)
+  // from different ZIP tools are handled correctly.
   const priority = (p: string): number => {
-    if (p.includes('project')) return 4
-    if (p.includes('process') || p.includes('print')) return 3
-    if (p.includes('filament')) return 2
-    if (p.includes('machine') || p.includes('printer')) return 1
+    const lower = p.toLowerCase()
+    if (lower.includes('project')) return 4
+    if (lower.includes('process') || lower.includes('print')) return 3
+    if (lower.includes('filament')) return 2
+    if (lower.includes('machine') || lower.includes('printer')) return 1
     return 0
   }
 
   const metaPaths = Object.keys(files)
-    .filter((k) => k.startsWith('Metadata/') && (k.endsWith('.json') || k.endsWith('.config')))
+    .filter((k) => {
+      const lower = k.toLowerCase()
+      return lower.startsWith('metadata/') && (lower.endsWith('.json') || lower.endsWith('.config'))
+    })
     .sort((a, b) => priority(a) - priority(b))
 
   for (const path of metaPaths) {

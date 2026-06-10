@@ -150,6 +150,8 @@ interface OrcaConfig {
   // Machine
   printer_model?: string           // e.g. "BambuLab X1C"
   nozzle_diameter?: number         // mm, e.g. 0.4
+  bed_size_x?: number              // print bed width in mm (used for model centering)
+  bed_size_y?: number              // print bed depth in mm
 
   // Filament
   filament_type?: string           // "PLA" | "PETG" | "ABS" | "TPU"
@@ -195,3 +197,40 @@ type SupportType =
 
 type SeamPosition = 'aligned' | 'nearest' | 'back' | 'random'
 ```
+
+---
+
+## G-code statistics
+
+`parseGcodeStats` (internal, called by `SlicePanel`) returns:
+
+```typescript
+interface GcodeStats {
+  bytes: number            // UTF-8 byte size of the G-code file
+  lines: number            // total line count
+  layers?: number          // from "; total layers count = N"
+  printTime?: string       // from "; estimated printing time = ..."
+  filamentMm?: number      // from "; total filament used [mm] = N"
+  filamentCm3?: number     // from "; total filament used [cm3] = N"
+  filamentG?: number       // from "; total filament weight [g] = N"
+}
+```
+
+Only the first 100 kB of the G-code string is scanned for header comments (stats are always at the top). File size uses `Blob.size` to avoid allocating a large `Uint8Array`.
+
+---
+
+## 3MF parser
+
+```typescript
+import { parse3mf } from './lib/parse3mf'
+
+interface Parse3mfResult {
+  stlBytes: Uint8Array        // binary STL converted from the 3MF mesh XML
+  config: Partial<OrcaConfig> // merged settings from Metadata/ profiles
+}
+
+function parse3mf(data: ArrayBuffer): Parse3mfResult
+```
+
+Throws if the archive has no `3D/3dmodel.model` entry or contains no geometry.

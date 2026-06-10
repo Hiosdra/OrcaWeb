@@ -97,8 +97,9 @@ export function SlicePanel({ status, wasmStatus, onSlice, disabled }: Props) {
 
 /** Parse key statistics from G-code header comments. */
 function parseGcodeStats(gcode: string): GcodeStats {
-  // Scan only the first 300 lines — stats are always in the header
-  const header = gcode.split('\n').slice(0, 300).join('\n')
+  // Slice a small chunk before splitting — avoids splitting a 50MB+ string
+  const chunk = gcode.slice(0, 100_000)
+  const header = chunk.split('\n').slice(0, 300).join('\n')
 
   const match = (pattern: RegExp): string | undefined =>
     header.match(pattern)?.[1]?.trim()
@@ -110,9 +111,14 @@ function parseGcodeStats(gcode: string): GcodeStats {
     return isNaN(n) ? undefined : n
   }
 
+  // Count lines via indexOf — avoids splitting the entire file into an array
+  let lines = 0
+  let pos = -1
+  while ((pos = gcode.indexOf('\n', pos + 1)) !== -1) lines++
+
   return {
-    bytes: new TextEncoder().encode(gcode).length,
-    lines: gcode.split('\n').length,
+    bytes: new Blob([gcode]).size, // Blob.size gives UTF-8 byte length without allocating a TypedArray
+    lines: lines + 1,
     printTime:    match(/;\s*estimated printing time[^=]*=\s*(.+)/i),
     layers:       numMatch(/;\s*total layers count\s*=\s*(\d+)/i),
     filamentMm:   numMatch(/;\s*total filament used \[mm\]\s*=\s*([\d.]+)/i),
@@ -156,7 +162,7 @@ function GcodeStatsGrid({ gcode }: { gcode: string }) {
 }
 
 function GcodePreview({ gcode }: { gcode: string }) {
-  const lines = gcode.split('\n').slice(0, 50).join('\n')
+  const lines = gcode.slice(0, 20_000).split('\n').slice(0, 50).join('\n')
   return (
     <details className="mt-1">
       <summary className="text-xs text-green-700 cursor-pointer hover:text-green-900 font-medium">
