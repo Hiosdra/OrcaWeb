@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import type { SliceStatus } from '../types'
+import type { SliceStatus, GcodeStats } from '../types'
 import type { WasmStatus } from '../lib/worker-singleton'
 
 interface Props {
@@ -60,13 +60,9 @@ export function SlicePanel({ status, wasmStatus, onSlice, disabled }: Props) {
         <div className="rounded-xl bg-green-50 border border-green-200 p-4 space-y-3">
           <div className="flex gap-3 items-start">
             <CheckIcon className="w-5 h-5 text-green-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-medium text-green-800 text-sm">Slicing complete!</p>
-              <p className="text-xs text-green-700 mt-0.5">
-                {formatGcodeStats(status.gcode)}
-              </p>
-            </div>
+            <p className="font-medium text-green-800 text-sm">Slicing complete!</p>
           </div>
+          <GcodeStatsGrid gcode={status.gcode} />
           <button
             onClick={() => downloadGcode(status.gcode, status.filename)}
             className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white font-semibold text-sm transition-colors"
@@ -97,6 +93,68 @@ export function SlicePanel({ status, wasmStatus, onSlice, disabled }: Props) {
   )
 }
 
+// ── G-code stats ──────────────────────────────────────────────────────────────
+
+/** Parse key statistics from G-code header comments. */
+function parseGcodeStats(gcode: string): GcodeStats {
+  // Scan only the first 300 lines — stats are always in the header
+  const header = gcode.split('\n').slice(0, 300).join('\n')
+
+  const match = (pattern: RegExp): string | undefined =>
+    header.match(pattern)?.[1]?.trim()
+
+  const numMatch = (pattern: RegExp): number | undefined => {
+    const s = match(pattern)
+    if (!s) return undefined
+    const n = parseFloat(s)
+    return isNaN(n) ? undefined : n
+  }
+
+  return {
+    bytes: new TextEncoder().encode(gcode).length,
+    lines: gcode.split('\n').length,
+    printTime:    match(/;\s*estimated printing time[^=]*=\s*(.+)/i),
+    layers:       numMatch(/;\s*total layers count\s*=\s*(\d+)/i),
+    filamentMm:   numMatch(/;\s*total filament used \[mm\]\s*=\s*([\d.]+)/i),
+    filamentCm3:  numMatch(/;\s*total filament used \[cm3\]\s*=\s*([\d.]+)/i),
+    filamentG:    numMatch(/;\s*total filament weight \[g\]\s*=\s*([\d.]+)/i),
+  }
+}
+
+function GcodeStatsGrid({ gcode }: { gcode: string }) {
+  const s = parseGcodeStats(gcode)
+
+  const tiles: { label: string; value: string; sub?: string }[] = []
+
+  if (s.printTime)
+    tiles.push({ label: 'Print time', value: s.printTime })
+  if (s.layers)
+    tiles.push({ label: 'Layers', value: s.layers.toLocaleString() })
+  if (s.filamentMm != null)
+    tiles.push({
+      label: 'Filament',
+      value: `${(s.filamentMm / 1000).toFixed(2)} m`,
+      sub: s.filamentG != null ? `${s.filamentG.toFixed(1)} g` : undefined,
+    })
+  if (s.filamentCm3 != null && s.filamentG == null)
+    tiles.push({ label: 'Volume', value: `${s.filamentCm3.toFixed(2)} cm³` })
+
+  // Always show file size
+  tiles.push({ label: 'G-code size', value: formatBytes(s.bytes) })
+
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {tiles.map(({ label, value, sub }) => (
+        <div key={label} className="bg-white rounded-lg border border-green-100 px-3 py-2">
+          <p className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">{label}</p>
+          <p className="text-sm font-semibold text-slate-800 leading-tight mt-0.5">{value}</p>
+          {sub && <p className="text-xs text-slate-400">{sub}</p>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function GcodePreview({ gcode }: { gcode: string }) {
   const lines = gcode.split('\n').slice(0, 50).join('\n')
   return (
@@ -109,14 +167,6 @@ function GcodePreview({ gcode }: { gcode: string }) {
       </pre>
     </details>
   )
-}
-
-function formatGcodeStats(gcode: string): string {
-  const lines = gcode.split('\n').length
-  const bytes = new TextEncoder().encode(gcode).length
-  const timeMatch = gcode.match(/; estimated printing time[^=]+=\s*(.+)/i)
-  const time = timeMatch ? ` · ${timeMatch[1].trim()}` : ''
-  return `${lines.toLocaleString()} lines · ${formatBytes(bytes)}${time}`
 }
 
 function formatBytes(bytes: number) {

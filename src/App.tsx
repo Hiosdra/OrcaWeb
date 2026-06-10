@@ -7,6 +7,7 @@ import { SlicePanel } from './components/SlicePanel'
 import { GcodeViewer } from './components/GcodeViewer'
 import type { OrcaConfig, SliceStatus, WorkerOutMessage } from './types'
 import { buildConfig } from './lib/profiles'
+import { parse3mf } from './lib/parse3mf'
 import {
   getWorker,
   addWorkerListener,
@@ -42,6 +43,9 @@ export default function App() {
     ...buildConfig(selectedPrinter, selectedFilament, selectedPreset),
     ...configOverrides,
   }
+
+  const bedX = config.bed_size_x ?? 256
+  const bedY = config.bed_size_y ?? 256
 
   useEffect(() => { fileRef.current = file }, [file])
 
@@ -80,10 +84,33 @@ export default function App() {
     return remove // just remove listener, don't kill the worker
   }, [])
 
-  const handleFileSelect = useCallback((f: File) => {
-    setFile(f)
+  const handleFileSelect = useCallback(async (f: File) => {
     setSliceStatus({ phase: 'idle' })
+    if (/\.3mf$/i.test(f.name)) {
+      try {
+        const buf = await f.arrayBuffer()
+        const { stlBytes, config: profileConfig } = parse3mf(buf)
+        // Apply any settings extracted from the 3MF metadata
+        if (Object.keys(profileConfig).length > 0) {
+          setConfigOverrides((prev) => ({ ...prev, ...profileConfig }))
+        }
+        // Wrap extracted STL bytes as a synthetic File so ModelViewer can read it
+        const stlFile = new File([stlBytes.buffer as ArrayBuffer], f.name.replace(/\.3mf$/i, '.stl'), {
+          type: 'model/stl',
+        })
+        setFile(stlFile)
+      } catch (err) {
+        setSliceStatus({
+          phase: 'error',
+          message: `Failed to parse 3MF: ${err instanceof Error ? err.message : String(err)}`,
+        })
+        return
+      }
+    } else {
+      setFile(f)
+    }
     setActiveTab('settings')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handlePresetChange = (name: string) => {
@@ -161,7 +188,7 @@ export default function App() {
             <FileUpload file={file} onFile={handleFileSelect} />
             {file && (
               <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white" style={{ height: 360 }}>
-                <ModelViewer file={file} />
+                <ModelViewer file={file} bedX={bedX} bedY={bedY} />
               </div>
             )}
             {file && (
@@ -181,7 +208,7 @@ export default function App() {
               className="rounded-2xl overflow-hidden border border-slate-200 bg-white order-last sm:order-first"
               style={{ height: 320 }}
             >
-              <ModelViewer file={file} />
+              <ModelViewer file={file} bedX={bedX} bedY={bedY} />
             </div>
             <div className="bg-white rounded-2xl border border-slate-200 p-5 overflow-y-auto">
               <SettingsPanel
@@ -211,13 +238,13 @@ export default function App() {
                 <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white" style={{ height: 420 }}>
                   <div className="px-4 pt-3 pb-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">Model</div>
                   <div style={{ height: 380 }}>
-                    <ModelViewer file={file} />
+                    <ModelViewer file={file} bedX={bedX} bedY={bedY} />
                   </div>
                 </div>
                 <div className="rounded-2xl overflow-hidden border border-slate-800" style={{ height: 420 }}>
                   <div className="px-4 pt-3 pb-1 text-xs font-semibold text-slate-400 uppercase tracking-wider bg-slate-900">G-code</div>
                   <div style={{ height: 380 }}>
-                    <GcodeViewer gcode={sliceStatus.gcode} />
+                    <GcodeViewer gcode={sliceStatus.gcode} bedX={bedX} bedY={bedY} />
                   </div>
                 </div>
               </div>

@@ -4,7 +4,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
 interface Props {
   gcode: string
-  bedSize?: number
+  bedX?: number
+  bedY?: number
 }
 
 interface Layer {
@@ -87,7 +88,7 @@ const LAYER_COLORS = [
   0xbf5af2, 0x64d2ff, 0xffd60a, 0xff6961,
 ]
 
-export function GcodeViewer({ gcode, bedSize = 250 }: Props) {
+export function GcodeViewer({ gcode, bedX = 256, bedY = 256 }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
   const [totalLayers, setTotalLayers] = useState(0)
   const [visibleLayers, setVisibleLayers] = useState(0)
@@ -117,11 +118,13 @@ export function GcodeViewer({ gcode, bedSize = 250 }: Props) {
     el.appendChild(renderer.domElement)
 
     // Bed
-    const bedGeo = new THREE.PlaneGeometry(bedSize, bedSize)
+    const bedGeo = new THREE.PlaneGeometry(bedX, bedY)
     bedGeo.rotateX(-Math.PI / 2)
     const bed = new THREE.Mesh(bedGeo, new THREE.MeshBasicMaterial({ color: 0x1e293b }))
     scene.add(bed)
-    const grid = new THREE.GridHelper(bedSize, bedSize / 10, 0x334155, 0x1e293b)
+    const gridDiv = Math.round(Math.max(bedX, bedY) / 10)
+    const grid = new THREE.GridHelper(Math.max(bedX, bedY), gridDiv, 0x334155, 0x1e293b)
+    grid.scale.set(bedX / Math.max(bedX, bedY), 1, bedY / Math.max(bedX, bedY))
     grid.position.y = 0.15
     scene.add(grid)
 
@@ -184,7 +187,7 @@ export function GcodeViewer({ gcode, bedSize = 250 }: Props) {
       bedGeo.dispose()
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement)
     }
-  }, [layers, bedSize])
+  }, [layers, bedX, bedY])
 
   // Update layer visibility when slider changes
   useEffect(() => {

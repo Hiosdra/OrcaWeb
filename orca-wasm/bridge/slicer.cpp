@@ -45,6 +45,10 @@ static Slic3r::FullPrintConfig g_defaults;
 static Slic3r::DynamicPrintConfig g_config;
 static bool g_initialized = false;
 static std::string g_last_error;
+// Bed centre in mm — computed from bed_size_x / bed_size_y in the config JSON.
+// Defaults to centre of a 256×256 mm bed (same as the historical hardcoded value).
+static double g_bed_cx = 128.0;
+static double g_bed_cy = 128.0;
 
 static void record_error(const char* msg) { g_last_error = msg ? msg : "unknown error"; }
 static void record_error(const std::string& s) { g_last_error = s; }
@@ -71,6 +75,23 @@ int orc_init(const char* json_data, int json_len) {
     try {
         auto j = nlohmann::json::parse(json_data, json_data + json_len);
         if (!j.is_object()) { record_error("config must be a JSON object"); return -2; }
+
+        // Extract bed dimensions (not native OrcaSlicer config keys — used only
+        // for model centering below).  The JS layer passes bed_size_x / bed_size_y
+        // from the printer preset or from a parsed printable_area.
+        {
+            auto pick = [&](const char* k, double fallback) -> double {
+                if (!j.contains(k)) return fallback;
+                const auto& v = j[k];
+                if (v.is_number()) return v.get<double>();
+                if (v.is_string()) {
+                    try { return std::stod(v.get<std::string>()); } catch (...) {}
+                }
+                return fallback;
+            };
+            g_bed_cx = pick("bed_size_x", 256.0) / 2.0;
+            g_bed_cy = pick("bed_size_y", 256.0) / 2.0;
+        }
 
         // Start from OrcaSlicer's built-in defaults so all required fields exist.
         g_config = Slic3r::DynamicPrintConfig();
@@ -135,9 +156,8 @@ int orc_slice(const void* stl_data, int stl_len,
             obj->center_around_origin();
             if (obj->instances.empty()) {
                 auto* inst = obj->add_instance();
-                // Place at centre of a 256×256 mm bed by default;
-                // the real bed size comes from the config if set.
-                inst->set_offset(Slic3r::Vec3d(128.0, 128.0, 0.0));
+                // Place at bed centre, derived from bed_size_x / bed_size_y in config.
+                inst->set_offset(Slic3r::Vec3d(g_bed_cx, g_bed_cy, 0.0));
             }
         }
 
