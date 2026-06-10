@@ -120,7 +120,9 @@ jobs:
             "https://ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz" | tar xJ -C "${DL}"
           cd "${DL}/gmp-${GMP_VERSION}"
           emconfigure ./configure \
-            --prefix="${INSTALL}" --disable-shared --enable-static --disable-assembly ABI=32
+            --prefix="${INSTALL}" \
+            --host=wasm32-unknown-emscripten \
+            --disable-shared --enable-static --disable-assembly
           emmake make -j"$(nproc)"
           make install
 
