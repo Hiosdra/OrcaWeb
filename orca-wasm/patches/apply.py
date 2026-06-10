@@ -95,6 +95,12 @@ patch("src/CMakeLists.txt", [
         r'if(NOT SLIC3R_WASM)\n\1\nendif()',
         0,
     ),
+    # libnoise is a GUI/texture dep not needed for headless WASM slicing
+    (
+        r'(find_package\s*\(\s*libnoise\b[^)]*\))',
+        r'if(NOT SLIC3R_WASM)\n\1\nendif()',
+        0,
+    ),
 ])
 
 # ─────────────────────────────────────────────────────────────────────────────
