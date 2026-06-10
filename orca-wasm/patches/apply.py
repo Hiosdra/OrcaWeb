@@ -57,12 +57,9 @@ patch("CMakeLists.txt", [
         r'\1\n\noption(SLIC3R_WASM "Build for WebAssembly with Emscripten" OFF)',
         1,
     ),
-    # Wrap find_package(TBB ...) so our FindTBB.cmake shim is used when WASM
-    (
-        r'(find_package\s*\(\s*TBB\b[^)]*\))',
-        r'if(NOT SLIC3R_WASM)\n\1\nendif()',
-        0,  # optional — already wrapped by a prior run
-    ),
+    # NOTE: find_package(TBB) is intentionally NOT guarded for WASM — our
+    # FindTBB.cmake shim (in CMAKE_MODULE_PATH) creates the TBB::tbb interface
+    # target pointing to wasm/shims/, which is required by clipper/libnest2d.
     # Skip wxWidgets & OpenGL in WASM mode
     (
         r'(find_package\s*\(\s*wxWidgets\b[^)]*\))',
@@ -169,6 +166,12 @@ patch("src/libslic3r/CMakeLists.txt", [
     (
         r'(target_link_libraries\s*\(\s*libslic3r\s+PRIVATE\s+fontconfig\s*\))',
         r'if(NOT SLIC3R_WASM)\n    \1\nendif()',
+        0,
+    ),
+    # noise::noise (libnoise) — guarded find_package above; also guard the link
+    (
+        r'\bnoise::noise\b',
+        r'$<$<NOT:$<BOOL:${SLIC3R_WASM}>>:noise::noise>',
         0,
     ),
 ])
