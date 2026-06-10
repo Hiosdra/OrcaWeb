@@ -1,0 +1,10 @@
+# Findglfw3.cmake — WASM stub.
+if(NOT TARGET glfw)
+  add_library(glfw INTERFACE IMPORTED GLOBAL)
+endif()
+if(NOT TARGET glfw3)
+  add_library(glfw3 INTERFACE IMPORTED GLOBAL)
+endif()
+set(glfw3_FOUND TRUE)
+set(GLFW3_FOUND TRUE)
+set(GLFW_LIBRARIES glfw)
