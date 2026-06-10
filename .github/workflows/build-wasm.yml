@@ -45,55 +45,173 @@ jobs:
             m4 texinfo libssl-dev
 
       # ── Checkout OrcaSlicer at requested tag ────────────────────────
-      # Do a plain shallow clone instead of git submodule (submodule is not
-      # registered in the index, only .gitmodules exists).
+      # Do a plain shallow clone — the git submodule is not registered in index.
       - name: Checkout OrcaSlicer ${{ env.ORCA_VERSION }}
         run: |
           git clone --depth 1 --branch "$ORCA_VERSION" \
             https://github.com/SoftFever/OrcaSlicer.git \
             orca-wasm/orca
 
-      # ── Apply WASM patches before dep build ─────────────────────────
+      # ── Apply WASM patches ───────────────────────────────────────────
       - name: Patch OrcaSlicer source
         run: python3 orca-wasm/patches/apply.py
 
-      # ── Restore cached WASM deps ────────────────────────────────────
+      # ── Restore cached WASM deps ─────────────────────────────────────
+      # Cache key: runner OS + OrcaSlicer version + deps script version.
+      # Bump the version suffix (v2, v3, …) to invalidate after script changes.
       - name: Restore dep cache
         id: dep-cache
         uses: actions/cache@v4
         with:
           path: orca-wasm/deps-install
-          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v1
+          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v2
 
-      # ── Build OrcaSlicer's bundled deps for WASM ────────────────────
-      # Uses OrcaSlicer's own cmake deps system; skips GUI-only & heavy deps.
-      # Only runs on a cache miss.
-      - name: Build OrcaSlicer deps for WASM
+      # ── Build WASM deps (only on cache miss) ─────────────────────────
+      # We build only the deps that libslic3r actually needs (no GUI, no OCCT).
+      # All deps install into orca-wasm/deps-install/ so a single
+      # CMAKE_PREFIX_PATH suffices for the OrcaSlicer cmake configure step.
+      - name: Build WASM deps — Boost
         if: steps.dep-cache.outputs.cache-hit != 'true'
         run: |
           source /opt/emsdk/emsdk_env.sh
-          WORK="$(pwd)"
-          mkdir -p orca-wasm/deps-build
+          export ORCA_WASM_DIR="$(pwd)/orca-wasm"
+          BOOST_VERSION="1.83.0"
+          BOOST_UNDERSCORE="${BOOST_VERSION//./_}"
+          INSTALL="${ORCA_WASM_DIR}/deps-install"
+          STAMP="${INSTALL}/.boost_built"
+          mkdir -p "${INSTALL}"
+          [[ -f "${STAMP}" ]] && echo "[boost] cached" && exit 0
 
-          emcmake cmake \
-            -S orca-wasm/orca/deps \
-            -B orca-wasm/deps-build \
-            -G Ninja \
+          echo "[boost] downloading…"
+          mkdir -p /tmp/boost
+          curl -fL "https://boostorg.jfrog.io/artifactory/main/release/${BOOST_VERSION}/source/boost_${BOOST_UNDERSCORE}.tar.gz" \
+            | tar xz -C /tmp/boost
+          cd "/tmp/boost/boost_${BOOST_UNDERSCORE}"
+          ./bootstrap.sh --without-libraries=python
+          cat > user-config.jam <<'JAM'
+          using clang : emscripten : em++ : <compileflags>"-O2" <archiveflags>"" ;
+          JAM
+          ./b2 install \
+            --prefix="${INSTALL}" \
+            toolset=clang-emscripten \
+            link=static threading=single variant=release \
+            --with-filesystem --with-system --with-regex \
+            --with-thread --with-atomic --with-chrono \
+            --with-date_time --with-iostreams \
+            --with-locale --with-nowide --with-program_options \
+            -j"$(nproc)" 2>&1 | tail -10
+          touch "${STAMP}"
+
+      - name: Build WASM deps — GMP / MPFR / CGAL
+        if: steps.dep-cache.outputs.cache-hit != 'true'
+        run: |
+          source /opt/emsdk/emsdk_env.sh
+          INSTALL="$(pwd)/orca-wasm/deps-install"
+          STAMP="${INSTALL}/.math_built"
+          [[ -f "${STAMP}" ]] && echo "[math] cached" && exit 0
+
+          GMP_VERSION=6.3.0
+          MPFR_VERSION=4.2.1
+          CGAL_VERSION=5.6.1
+          DL=/tmp/math-dl
+          mkdir -p "${DL}"
+
+          # ── GMP ──────────────────────────────────────────────────────
+          echo "[gmp] building…"
+          curl -fL "https://gmplib.org/download/gmp/gmp-${GMP_VERSION}.tar.xz" | tar xJ -C "${DL}"
+          cd "${DL}/gmp-${GMP_VERSION}"
+          emconfigure ./configure --prefix="${INSTALL}" --disable-shared --enable-static --disable-assembly ABI=32
+          emmake make -j"$(nproc)"
+          make install
+
+          # ── MPFR ─────────────────────────────────────────────────────
+          echo "[mpfr] building…"
+          curl -fL "https://www.mpfr.org/mpfr-current/mpfr-${MPFR_VERSION}.tar.xz" | tar xJ -C "${DL}"
+          cd "${DL}/mpfr-${MPFR_VERSION}"
+          emconfigure ./configure --prefix="${INSTALL}" --with-gmp="${INSTALL}" --disable-shared --enable-static
+          emmake make -j"$(nproc)"
+          make install
+
+          # ── CGAL (header-only core + cmake config) ────────────────────
+          echo "[cgal] installing cmake config…"
+          curl -fL "https://github.com/CGAL/cgal/releases/download/v${CGAL_VERSION}/CGAL-${CGAL_VERSION}.tar.xz" \
+            | tar xJ -C "${DL}"
+          cd "${DL}/CGAL-${CGAL_VERSION}"
+          emcmake cmake -S . -B /tmp/cgal-build -G Ninja \
+            -DCMAKE_INSTALL_PREFIX="${INSTALL}" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="${WORK}/orca-wasm/deps-install" \
-            -DDEP_WX_GTK3=OFF \
-            -DDEP_WXWIDGETS=OFF \
-            -DDEP_OPENCASCADE=OFF \
-            -DDEP_OPENVDB=OFF \
-            -DDEP_OPENCV=OFF
+            -DGMP_INCLUDE_DIR="${INSTALL}/include" \
+            -DGMP_LIBRARIES="${INSTALL}/lib/libgmp.a" \
+            -DMPFR_INCLUDE_DIR="${INSTALL}/include" \
+            -DMPFR_LIBRARIES="${INSTALL}/lib/libmpfr.a"
+          cmake --build /tmp/cgal-build --target install
 
-          emmake cmake --build orca-wasm/deps-build -j4
+          touch "${STAMP}"
+
+      - name: Build WASM deps — Eigen3 / nlohmann / EXPAT / NLopt
+        if: steps.dep-cache.outputs.cache-hit != 'true'
+        run: |
+          source /opt/emsdk/emsdk_env.sh
+          INSTALL="$(pwd)/orca-wasm/deps-install"
+          STAMP="${INSTALL}/.headers_built"
+          [[ -f "${STAMP}" ]] && echo "[headers+expat+nlopt] cached" && exit 0
+
+          # ── Eigen3 (header-only, install cmake config) ────────────────
+          echo "[eigen3] installing…"
+          curl -fL "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz" \
+            | tar xz -C /tmp/
+          cmake -S /tmp/eigen-3.4.0 -B /tmp/eigen-build -G Ninja \
+            -DCMAKE_INSTALL_PREFIX="${INSTALL}" \
+            -DBUILD_TESTING=OFF
+          cmake --build /tmp/eigen-build --target install
+
+          # ── nlohmann/json (header-only, install cmake config) ─────────
+          echo "[nlohmann] installing…"
+          git clone --depth 1 --branch v3.11.3 \
+            https://github.com/nlohmann/json.git /tmp/nlohmann
+          cmake -S /tmp/nlohmann -B /tmp/nlohmann-build -G Ninja \
+            -DCMAKE_INSTALL_PREFIX="${INSTALL}" \
+            -DJSON_BuildTests=OFF \
+            -DJSON_Install=ON
+          cmake --build /tmp/nlohmann-build --target install
+
+          # ── EXPAT (XML parser — needed by libslic3r) ──────────────────
+          echo "[expat] building…"
+          curl -fL "https://github.com/libexpat/libexpat/releases/download/R_2_5_0/expat-2.5.0.tar.xz" \
+            | tar xJ -C /tmp/
+          emcmake cmake -S /tmp/expat-2.5.0 -B /tmp/expat-build -G Ninja \
+            -DCMAKE_INSTALL_PREFIX="${INSTALL}" \
+            -DEXPAT_BUILD_TOOLS=OFF \
+            -DEXPAT_BUILD_EXAMPLES=OFF \
+            -DEXPAT_BUILD_TESTS=OFF \
+            -DEXPAT_SHARED_LIBS=OFF
+          emmake cmake --build /tmp/expat-build --target install
+
+          # ── NLopt (optimizer — needed by libslic3r) ───────────────────
+          echo "[nlopt] building…"
+          curl -fL "https://github.com/stevengj/nlopt/archive/v2.7.1.tar.gz" \
+            | tar xz -C /tmp/
+          emcmake cmake -S /tmp/nlopt-2.7.1 -B /tmp/nlopt-build -G Ninja \
+            -DCMAKE_INSTALL_PREFIX="${INSTALL}" \
+            -DNLOPT_CXX=ON \
+            -DNLOPT_PYTHON=OFF \
+            -DNLOPT_GUILE=OFF \
+            -DNLOPT_MATLAB=OFF \
+            -DNLOPT_OCTAVE=OFF \
+            -DNLOPT_SWIG=OFF \
+            -DBUILD_SHARED_LIBS=OFF
+          emmake cmake --build /tmp/nlopt-build --target install
+
+          touch "${STAMP}"
 
       # ── Configure WASM build ─────────────────────────────────────────
+      # Builds from OrcaSlicer's own root cmake (with our patches applied).
+      # All deps are in deps-install/ via CMAKE_PREFIX_PATH.
       - name: Configure WASM build
         run: |
           source /opt/emsdk/emsdk_env.sh
           WORK="$(pwd)"
+          DEP_INSTALL="${WORK}/orca-wasm/deps-install"
           mkdir -p orca-wasm/build-wasm
 
           emcmake cmake \
@@ -101,17 +219,22 @@ jobs:
             -B orca-wasm/build-wasm \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${DEP_INSTALL}" \
+            -DCMAKE_MODULE_PATH="${WORK}/orca-wasm/cmake" \
             -DSLIC3R_WASM=ON \
             -DSLIC3R_GUI=OFF \
             -DSLIC3R_STATIC=ON \
             -DSLIC3R_OPENCASCADE=OFF \
             -DSLIC3R_OPENGL_IMGUI=OFF \
-            -DCMAKE_PREFIX_PATH="${WORK}/orca-wasm/deps-install" \
-            -DCMAKE_MODULE_PATH="${WORK}/orca-wasm/cmake" \
             -DTBB_SHIM_DIR="${WORK}/orca-wasm/wasm/shims" \
             -DORCA_WEB_BRIDGE_DIR="${WORK}/orca-wasm/bridge" \
             -DORCA_WEB_WASM_DIR="${WORK}/orca-wasm/wasm" \
-            -DORCA_WEB_SHIM_DIR="${WORK}/orca-wasm/wasm/shims"
+            -DORCA_WEB_SHIM_DIR="${WORK}/orca-wasm/wasm/shims" \
+            -DBoost_NO_SYSTEM_PATHS=ON \
+            -DBOOST_ROOT="${DEP_INSTALL}" \
+            -DCGAL_DIR="${DEP_INSTALL}/lib/cmake/CGAL" \
+            -DNLOPT_LIBRARY="${DEP_INSTALL}/lib/libnlopt.a" \
+            -DNLOPT_INCLUDE_DIR="${DEP_INSTALL}/include"
 
       # ── Build WASM module ────────────────────────────────────────────
       - name: Build WASM module
@@ -120,17 +243,17 @@ jobs:
           emmake cmake --build orca-wasm/build-wasm --target slicer -j4
 
       # ── Verify & package artifacts ───────────────────────────────────
-      # wasm/CMakeLists.txt POST_BUILD already copies to public/wasm/.
+      # wasm/CMakeLists.txt POST_BUILD copies to public/wasm/ automatically.
       - name: Package WASM artifacts
         run: |
-          echo "--- Build output ---"
+          echo "--- build output ---"
           ls -lh orca-wasm/build-wasm/wasm/ 2>/dev/null || ls -lh orca-wasm/build-wasm/ || true
           echo "--- public/wasm/ ---"
           ls -lh public/wasm/ 2>/dev/null || true
 
-          # Copy from build output if POST_BUILD didn't run (e.g. no POST_BUILD copy)
+          # Fallback copy if POST_BUILD didn't run
           BUILDDIR="orca-wasm/build-wasm/wasm"
-          if [[ ! -f public/wasm/slicer.js ]]; then
+          if [[ ! -f public/wasm/slicer.js ]] && [[ -f "${BUILDDIR}/slicer.js" ]]; then
             mkdir -p public/wasm
             cp "${BUILDDIR}/slicer.js"   public/wasm/slicer.js
             cp "${BUILDDIR}/slicer.wasm" public/wasm/slicer.wasm
@@ -156,12 +279,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="wasm-$ORCA_VERSION"
-          # Create release if it doesn't exist
           gh release create "$TAG" \
             --title "WASM build for OrcaSlicer $ORCA_VERSION" \
             --notes "Pre-built WASM artifacts for OrcaSlicer $ORCA_VERSION.\n\nUsed internally by the deploy workflow." \
             --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
-          # Upload / overwrite assets
           for f in wasm-artifacts/*; do
             gh release upload "$TAG" "$f" --clobber --repo "$GITHUB_REPOSITORY"
           done

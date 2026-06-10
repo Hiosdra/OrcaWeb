@@ -2,7 +2,7 @@
 
 Ten dokument opisuje aktualny stan projektu: zaimplementowane funkcje, znane ograniczenia i planowane ulepszenia.
 
-Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (v2.3.2 w budowie)
+Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (własny build v2.3.2 w toku — CI iteracyjnie naprawiany)
 
 ---
 
@@ -74,8 +74,10 @@ Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (
     pochodzą z zewnętrznego projektu `allanwrench28/orcaslicer-wasm` v1.1
     (OrcaSlicer v2.3.1).
     
-    Własny build v2.3.2 jest gotowy w `orca-wasm/` ale **nie został jeszcze skompilowany**.
-    Aby uruchomić build: Actions → **Build WASM** → Run workflow (~30–60 min).
+    Własny build v2.3.2 jest w toku w `orca-wasm/`.
+    Infrastruktura buildowa jest naprawiana iteracyjnie; każdy run CI odsłania
+    kolejny błąd (na razie: naprawiony git-clone, cmake context, brakujące paczki).
+    Aby uruchomić build: Actions → **Build WASM** → Run workflow (~60–120 min).
 
 ### Ustawienia drukarki
 
@@ -106,7 +108,6 @@ Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (
 
 | Problem | Szczegóły |
 |---------|-----------|
-| Linki allanwrench w UI | App header (GitHub icon link) i footer nadal wskazują na `allanwrench28/orcaslicer-wasm` |
 | Brak wskaźnika postępu slicowania | Spinner bez informacji o etapie (perimeters / infill / gcode export) |
 | Rozmiar pliku STL | Duże pliki STL (>50 MB) mogą powodować zacinanie się podczas podglądu |
 

@@ -14,6 +14,9 @@ BOOST_STAMP="${BOOST_INSTALL_DIR}/.built_${BOOST_UNDERSCORE}"
 if [[ -f "${BOOST_STAMP}" ]]; then
   echo "  [boost] already built — skipping"
   export BOOST_WASM_ROOT="${BOOST_INSTALL_DIR}"
+  if [[ -n "${GITHUB_ENV:-}" ]]; then
+    echo "BOOST_WASM_ROOT=${BOOST_WASM_ROOT}" >> "$GITHUB_ENV"
+  fi
   return 0 2>/dev/null || exit 0
 fi
 
