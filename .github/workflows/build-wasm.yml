@@ -58,40 +58,37 @@ jobs:
 
       # ── Restore cached WASM deps ─────────────────────────────────────
       # Cache key: runner OS + OrcaSlicer version + deps script version.
-      # Bump the version suffix (v2, v3, …) to invalidate after script changes.
+      # Cached dir: orca-wasm/deps-install/  (all dep installs unified here).
+      # Each dep build uses an internal stamp file so partial caches are safe:
+      # a step is a no-op if its stamp already exists, regardless of cache hit.
       - name: Restore dep cache
-        id: dep-cache
         uses: actions/cache@v4
         with:
           path: orca-wasm/deps-install
-          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v2
+          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v3
 
-      # ── Build WASM deps (only on cache miss) ─────────────────────────
-      # We build only the deps that libslic3r actually needs (no GUI, no OCCT).
-      # All deps install into orca-wasm/deps-install/ so a single
-      # CMAKE_PREFIX_PATH suffices for the OrcaSlicer cmake configure step.
+      # ── Boost ────────────────────────────────────────────────────────
       - name: Build WASM deps — Boost
-        if: steps.dep-cache.outputs.cache-hit != 'true'
         run: |
           source /opt/emsdk/emsdk_env.sh
-          export ORCA_WASM_DIR="$(pwd)/orca-wasm"
           BOOST_VERSION="1.83.0"
           BOOST_UNDERSCORE="${BOOST_VERSION//./_}"
-          INSTALL="${ORCA_WASM_DIR}/deps-install"
+          INSTALL="$(pwd)/orca-wasm/deps-install"
           STAMP="${INSTALL}/.boost_built"
           mkdir -p "${INSTALL}"
-          [[ -f "${STAMP}" ]] && echo "[boost] cached" && exit 0
+          [[ -f "${STAMP}" ]] && echo "[boost] stamp exists — skip" && exit 0
 
-          echo "[boost] downloading…"
+          echo "[boost] downloading Boost ${BOOST_VERSION}…"
           mkdir -p /tmp/boost
-          # Use archives.boost.org (official mirror; jfrog.io redirects broken)
-          curl -fL "https://archives.boost.org/release/${BOOST_VERSION}/source/boost_${BOOST_UNDERSCORE}.tar.gz" \
+          # archives.boost.org is the official mirror (jfrog.io redirects are broken)
+          curl -fL --retry 3 \
+            "https://archives.boost.org/release/${BOOST_VERSION}/source/boost_${BOOST_UNDERSCORE}.tar.gz" \
             | tar xz -C /tmp/boost
           cd "/tmp/boost/boost_${BOOST_UNDERSCORE}"
           ./bootstrap.sh --without-libraries=python
           cat > user-config.jam <<'JAM'
-          using clang : emscripten : em++ : <compileflags>"-O2" <archiveflags>"" ;
-          JAM
+using clang : emscripten : em++ : <compileflags>"-O2" <archiveflags>"" ;
+JAM
           ./b2 install \
             --prefix="${INSTALL}" \
             toolset=clang-emscripten \
@@ -103,13 +100,13 @@ jobs:
             -j"$(nproc)" 2>&1 | tail -10
           touch "${STAMP}"
 
+      # ── GMP / MPFR / CGAL ────────────────────────────────────────────
       - name: Build WASM deps — GMP / MPFR / CGAL
-        if: steps.dep-cache.outputs.cache-hit != 'true'
         run: |
           source /opt/emsdk/emsdk_env.sh
           INSTALL="$(pwd)/orca-wasm/deps-install"
           STAMP="${INSTALL}/.math_built"
-          [[ -f "${STAMP}" ]] && echo "[math] cached" && exit 0
+          [[ -f "${STAMP}" ]] && echo "[math] stamp exists — skip" && exit 0
 
           GMP_VERSION=6.3.0
           MPFR_VERSION=4.2.1
@@ -118,29 +115,35 @@ jobs:
           mkdir -p "${DL}"
 
           # ── GMP ──────────────────────────────────────────────────────
-          echo "[gmp] building…"
+          echo "[gmp] building GMP ${GMP_VERSION}…"
           # Use GNU FTP mirror (gmplib.org blocks GitHub Actions runners)
-          curl -fL --retry 3 "https://ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz" | tar xJ -C "${DL}"
+          curl -fL --retry 3 \
+            "https://ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz" | tar xJ -C "${DL}"
           cd "${DL}/gmp-${GMP_VERSION}"
-          emconfigure ./configure --prefix="${INSTALL}" --disable-shared --enable-static --disable-assembly ABI=32
+          emconfigure ./configure \
+            --prefix="${INSTALL}" --disable-shared --enable-static --disable-assembly ABI=32
           emmake make -j"$(nproc)"
           make install
 
           # ── MPFR ─────────────────────────────────────────────────────
-          echo "[mpfr] building…"
-          # Use GNU FTP mirror for MPFR too
-          curl -fL --retry 3 "https://ftp.gnu.org/gnu/mpfr/mpfr-${MPFR_VERSION}.tar.xz" | tar xJ -C "${DL}"
+          echo "[mpfr] building MPFR ${MPFR_VERSION}…"
+          curl -fL --retry 3 \
+            "https://ftp.gnu.org/gnu/mpfr/mpfr-${MPFR_VERSION}.tar.xz" | tar xJ -C "${DL}"
           cd "${DL}/mpfr-${MPFR_VERSION}"
-          emconfigure ./configure --prefix="${INSTALL}" --with-gmp="${INSTALL}" --disable-shared --enable-static
+          emconfigure ./configure \
+            --prefix="${INSTALL}" --with-gmp="${INSTALL}" --disable-shared --enable-static
           emmake make -j"$(nproc)"
           make install
 
-          # ── CGAL (header-only core + cmake config) ────────────────────
-          echo "[cgal] installing cmake config…"
-          curl -fL "https://github.com/CGAL/cgal/releases/download/v${CGAL_VERSION}/CGAL-${CGAL_VERSION}.tar.xz" \
+          # ── CGAL (header-only + cmake config) ────────────────────────
+          echo "[cgal] installing CGAL ${CGAL_VERSION} cmake config…"
+          curl -fL --retry 3 \
+            "https://github.com/CGAL/cgal/releases/download/v${CGAL_VERSION}/CGAL-${CGAL_VERSION}.tar.xz" \
             | tar xJ -C "${DL}"
           cd "${DL}/CGAL-${CGAL_VERSION}"
-          emcmake cmake -S . -B /tmp/cgal-build -G Ninja \
+          # CGAL is header-only; cmake just installs headers + CMake config files.
+          # Use plain cmake (no emcmake) for the install step.
+          cmake -S . -B /tmp/cgal-build -G Ninja \
             -DCMAKE_INSTALL_PREFIX="${INSTALL}" \
             -DCMAKE_BUILD_TYPE=Release \
             -DGMP_INCLUDE_DIR="${INSTALL}/include" \
@@ -151,8 +154,8 @@ jobs:
 
           touch "${STAMP}"
 
+      # ── Eigen3 / nlohmann / EXPAT / NLopt ────────────────────────────
       - name: Build WASM deps — Eigen3 / nlohmann / EXPAT / NLopt
-        if: steps.dep-cache.outputs.cache-hit != 'true'
         run: |
           source /opt/emsdk/emsdk_env.sh
           INSTALL="$(pwd)/orca-wasm/deps-install"
