@@ -24,23 +24,37 @@ jobs:
       - run: npm ci
 
       # ── Download WASM artifacts ──────────────────────────────────────
-      # We serve WASM from the same origin as the app (GitHub Pages) so
-      # no CORS headers are needed.  slicer.data is 144 MB — above git's
-      # 100 MB per-file limit — so it is split into two ≈72 MB chunks.
-      # The worker transparently reassembles them via the fetch patch in
-      # src/workers/slicer.worker.ts.
+      # Artifacts are built by the build-wasm.yml workflow and uploaded to a
+      # release tagged wasm-v2.3.2 in this repo.
+      # slicer.data can exceed GitHub Pages' 100 MB per-file limit, so it is
+      # split into ≈72 MB chunks.  The worker transparently reassembles them
+      # (see src/workers/slicer.worker.ts — falls back to a single file for
+      # local dev where public/wasm/slicer.data exists in full).
       - name: Download & split WASM artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p public/wasm
-          BASE="https://github.com/allanwrench28/orcaslicer-wasm/releases/download/v1.1"
-          curl -fL "$BASE/slicer.js"   -o public/wasm/slicer.js
-          curl -fL "$BASE/slicer.wasm" -o public/wasm/slicer.wasm
-          curl -fL "$BASE/slicer.data" -o public/wasm/slicer.data.full
-          # Split into two chunks, each ≈72 MB (well under GitHub's 100 MB limit)
-          split -b 75497472 public/wasm/slicer.data.full public/wasm/slicer.data.part
-          mv public/wasm/slicer.data.partaa public/wasm/slicer.data.part0
-          mv public/wasm/slicer.data.partab public/wasm/slicer.data.part1
-          rm  public/wasm/slicer.data.full
+          WASM_TAG="wasm-v2.3.2"
+          gh release download "$WASM_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "slicer.*" \
+            --dir public/wasm
+          ls -lh public/wasm/
+          # Split slicer.data if it exists and is larger than 90 MB
+          if [[ -f public/wasm/slicer.data ]]; then
+            SIZE=$(stat -c%s public/wasm/slicer.data)
+            echo "slicer.data size: ${SIZE} bytes"
+            if (( SIZE > 94371840 )); then
+              echo "Splitting slicer.data into ≈72 MB chunks…"
+              split -b 75497472 public/wasm/slicer.data public/wasm/slicer.data.part
+              mv public/wasm/slicer.data.partaa public/wasm/slicer.data.part0
+              mv public/wasm/slicer.data.partab public/wasm/slicer.data.part1
+              # Handle case where there may be a third chunk (very large bundles)
+              [[ -f public/wasm/slicer.data.partac ]] && mv public/wasm/slicer.data.partac public/wasm/slicer.data.part2
+              rm public/wasm/slicer.data
+            fi
+          fi
           ls -lh public/wasm/
 
       # ── Build Vite app ───────────────────────────────────────────────

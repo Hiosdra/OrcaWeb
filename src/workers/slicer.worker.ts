@@ -70,16 +70,17 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         if (url.endsWith('/slicer.data')) {
           const r0 = await nativeFetch(url + '.part0', init)
           if (r0.ok) {
-            const [buf0, buf1] = await Promise.all([
-              r0.arrayBuffer(),
-              nativeFetch(url + '.part1', init).then((r) => {
-                if (!r.ok) throw new Error(`HTTP ${r.status} fetching slicer.data.part1`)
-                return r.arrayBuffer()
-              }),
-            ])
-            const out = new Uint8Array(buf0.byteLength + buf1.byteLength)
-            out.set(new Uint8Array(buf0), 0)
-            out.set(new Uint8Array(buf1), buf0.byteLength)
+            // Fetch remaining parts dynamically until one returns 404
+            const bufs: ArrayBuffer[] = [await r0.arrayBuffer()]
+            for (let i = 1; ; i++) {
+              const r = await nativeFetch(`${url}.part${i}`, init)
+              if (!r.ok) break
+              bufs.push(await r.arrayBuffer())
+            }
+            const total = bufs.reduce((s, b) => s + b.byteLength, 0)
+            const out = new Uint8Array(total)
+            let off = 0
+            for (const b of bufs) { out.set(new Uint8Array(b), off); off += b.byteLength }
             return new Response(out.buffer, {
               status: 200,
               headers: { 'Content-Type': 'application/octet-stream' },
