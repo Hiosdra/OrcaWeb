@@ -65,7 +65,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: orca-wasm/deps-install
-          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v4
+          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v5
 
       # ── Boost ────────────────────────────────────────────────────────
       - name: Build WASM deps — Boost
@@ -238,7 +238,9 @@ jobs:
             -DORCA_WEB_WASM_DIR="${WORK}/orca-wasm/wasm" \
             -DORCA_WEB_SHIM_DIR="${WORK}/orca-wasm/wasm/shims" \
             -DBoost_NO_SYSTEM_PATHS=ON \
+            -DBoost_NO_BOOST_CMAKE=ON \
             -DBOOST_ROOT="${DEP_INSTALL}" \
+            -DBoost_ROOT="${DEP_INSTALL}" \
             -DCGAL_DIR="${DEP_INSTALL}/lib/cmake/CGAL" \
             -DNLOPT_LIBRARY="${DEP_INSTALL}/lib/libnlopt.a" \
             -DNLOPT_INCLUDE_DIR="${DEP_INSTALL}/include"
