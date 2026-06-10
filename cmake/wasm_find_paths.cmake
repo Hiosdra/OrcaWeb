@@ -5,3 +5,12 @@
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE BOTH)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY BOTH)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
+
+# Emscripten uses single-threaded mode; pthreads are in libc so FindThreads
+# prints "Found Threads: TRUE" but may not create the Threads::Threads imported
+# target in all CMake versions.  Provide a no-op stub so any cmake target that
+# links Threads::Threads (e.g. the OrcaSlicer GUI exe we don't actually build)
+# passes the target-exists check at cmake generation time.
+if(NOT TARGET Threads::Threads)
+    add_library(Threads::Threads INTERFACE IMPORTED GLOBAL)
+endif()
