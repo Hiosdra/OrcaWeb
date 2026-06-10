@@ -1,0 +1,10 @@
+# FindOpenGL.cmake — WASM stub.
+foreach(_tgt OpenGL::GL OpenGL::GLU OpenGL::OpenGL OpenGL::GLX OpenGL::EGL)
+  if(NOT TARGET ${_tgt})
+    add_library(${_tgt} INTERFACE IMPORTED GLOBAL)
+  endif()
+endforeach()
+set(OPENGL_FOUND TRUE)
+set(OpenGL_FOUND TRUE)
+set(OPENGL_LIBRARIES OpenGL::GL)
+set(OPENGL_INCLUDE_DIR "")

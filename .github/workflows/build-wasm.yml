@@ -213,6 +213,34 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF
           emmake cmake --build /tmp/nlopt-build --target install
 
+          # ── cereal (header-only serialization — needed by libslic3r) ─────
+          echo "[cereal] installing…"
+          git clone --depth 1 --branch v1.3.2 \
+            https://github.com/USCiLab/cereal.git /tmp/cereal
+          cmake -S /tmp/cereal -B /tmp/cereal-build -G Ninja \
+            -DCMAKE_INSTALL_PREFIX="${INSTALL}" \
+            -DJUST_INSTALL_CEREAL=ON \
+            -DSKIP_PERFORMANCE_COMPARISON=ON \
+            -DBUILD_SANDBOX=OFF \
+            -DBUILD_DOC=OFF
+          cmake --build /tmp/cereal-build --target install
+
+          touch "${STAMP}"
+
+      # ── Emscripten ports — ZLIB / libpng / libjpeg ───────────────────────
+      # Build emscripten's bundled ports so FindZLIB/FindPNG/FindJPEG can
+      # reference their headers and .a files from the sysroot cache.
+      - name: Build WASM deps — emscripten ports (zlib/png/jpeg)
+        run: |
+          source /opt/emsdk/emsdk_env.sh
+          STAMP="$(pwd)/orca-wasm/deps-install/.emports_built"
+          [[ -f "${STAMP}" ]] && echo "[emports] cached" && exit 0
+          echo "[emports] building zlib, libpng, libjpeg via embuilder…"
+          embuilder build zlib libpng libjpeg
+          echo "[emports] sysroot libs:"
+          ls "$EMSDK/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/libz.a" && echo "  libz OK"
+          ls "$EMSDK/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/libpng.a" && echo "  libpng OK"
+          ls "$EMSDK/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/libjpeg.a" && echo "  libjpeg OK"
           touch "${STAMP}"
 
       # ── Configure WASM build ─────────────────────────────────────────

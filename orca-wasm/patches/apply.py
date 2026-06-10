@@ -119,7 +119,12 @@ patch("src/libslic3r/CMakeLists.txt", [
         r'$<$<NOT:$<BOOL:${SLIC3R_WASM}>>:opencv_world>',
         0,
     ),
-    # Wrap draco link
+    # Wrap draco find / link
+    (
+        r'(find_package\s*\(\s*draco\b[^)]*\))',
+        r'if(NOT SLIC3R_WASM)\n\1\nendif()',
+        0,
+    ),
     (
         r'(draco::draco)',
         r'$<$<NOT:$<BOOL:${SLIC3R_WASM}>>:draco::draco>',
@@ -129,6 +134,29 @@ patch("src/libslic3r/CMakeLists.txt", [
     (
         r'(OpenVDB::openvdb)',
         r'$<$<NOT:$<BOOL:${SLIC3R_WASM}>>:OpenVDB::openvdb>',
+        0,
+    ),
+    # Wrap JPEG find / link — JPEG thumbnails not needed for WASM slicing
+    (
+        r'(find_package\s*\(\s*JPEG\b[^)]*\))',
+        r'if(NOT SLIC3R_WASM)\n\1\nendif()',
+        0,
+    ),
+    (
+        r'(JPEG::JPEG)',
+        r'$<$<NOT:$<BOOL:${SLIC3R_WASM}>>:JPEG::JPEG>',
+        0,
+    ),
+    # Freetype is linked for non-WIN32 (emscripten is non-WIN32, so guard it)
+    (
+        r'(if\s*\(\s*NOT\s+WIN32\s*\)\s*\n\s*)(target_link_libraries\s*\(\s*libslic3r\s+PRIVATE\s+\$\{FREETYPE_LIBRARIES\}\s*\))',
+        r'if(NOT WIN32 AND NOT SLIC3R_WASM)\n    \2',
+        0,
+    ),
+    # fontconfig (Linux non-WASM only)
+    (
+        r'(target_link_libraries\s*\(\s*libslic3r\s+PRIVATE\s+fontconfig\s*\))',
+        r'if(NOT SLIC3R_WASM)\n    \1\nendif()',
         0,
     ),
 ])
