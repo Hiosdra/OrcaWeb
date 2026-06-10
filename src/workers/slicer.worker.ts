@@ -74,7 +74,10 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
             const bufs: ArrayBuffer[] = [await r0.arrayBuffer()]
             for (let i = 1; ; i++) {
               const r = await nativeFetch(`${url}.part${i}`, init)
-              if (!r.ok) break
+              if (!r.ok) {
+                if (r.status === 404) break
+                throw new Error(`HTTP ${r.status} fetching ${url}.part${i}`)
+              }
               bufs.push(await r.arrayBuffer())
             }
             const total = bufs.reduce((s, b) => s + b.byteLength, 0)
