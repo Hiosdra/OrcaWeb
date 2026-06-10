@@ -1,0 +1,61 @@
+version: 2
+
+updates:
+  # ── npm (web app + CLI) ────────────────────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Warsaw
+    # Group related packages into a single PR to reduce noise.
+    groups:
+      vite-ecosystem:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "esbuild"
+          - "rollup"
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+      three:
+        patterns:
+          - "three"
+          - "@types/three"
+      typescript-toolchain:
+        patterns:
+          - "typescript"
+          - "tsx"
+          - "@types/node"
+      tailwind:
+        patterns:
+          - "tailwindcss"
+          - "autoprefixer"
+          - "postcss"
+    # Keep PRs rebased on master automatically.
+    rebase-strategy: auto
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+
+  # ── GitHub Actions ─────────────────────────────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Warsaw
+    groups:
+      actions:
+        patterns:
+          - "*"
+    rebase-strategy: auto
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
