@@ -8,19 +8,27 @@ set -euo pipefail
 MATH_INSTALL="${ORCA_WASM_DIR}/deps/math-wasm-install"
 MATH_STAMP="${MATH_INSTALL}/.built"
 
-if [[ -f "${MATH_STAMP}" ]]; then
-  echo "  [math] already built — skipping"
-  _export_math_vars
-  return 0 2>/dev/null || exit 0
-fi
-
 _export_math_vars() {
   export GMP_WASM_INC="${MATH_INSTALL}/include"
   export GMP_WASM_LIB="${MATH_INSTALL}/lib/libgmp.a"
   export MPFR_WASM_INC="${MATH_INSTALL}/include"
   export MPFR_WASM_LIB="${MATH_INSTALL}/lib/libmpfr.a"
   export CGAL_WASM_DIR="${MATH_INSTALL}/lib/cmake/CGAL"
+  # Persist across GitHub Actions steps
+  if [[ -n "${GITHUB_ENV:-}" ]]; then
+    echo "GMP_WASM_INC=${GMP_WASM_INC}"   >> "$GITHUB_ENV"
+    echo "GMP_WASM_LIB=${GMP_WASM_LIB}"   >> "$GITHUB_ENV"
+    echo "MPFR_WASM_INC=${MPFR_WASM_INC}" >> "$GITHUB_ENV"
+    echo "MPFR_WASM_LIB=${MPFR_WASM_LIB}" >> "$GITHUB_ENV"
+    echo "CGAL_WASM_DIR=${CGAL_WASM_DIR}"  >> "$GITHUB_ENV"
+  fi
 }
+
+if [[ -f "${MATH_STAMP}" ]]; then
+  echo "  [math] already built — skipping"
+  _export_math_vars
+  return 0 2>/dev/null || exit 0
+fi
 
 GMP_VERSION="${GMP_VERSION:-6.3.0}"
 MPFR_VERSION="${MPFR_VERSION:-4.2.1}"

@@ -64,4 +64,7 @@ JAM
 
 touch "${BOOST_STAMP}"
 export BOOST_WASM_ROOT="${BOOST_INSTALL_DIR}"
+if [[ -n "${GITHUB_ENV:-}" ]]; then
+  echo "BOOST_WASM_ROOT=${BOOST_WASM_ROOT}" >> "$GITHUB_ENV"
+fi
 echo "  [boost] done → ${BOOST_INSTALL_DIR}"

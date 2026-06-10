@@ -19,7 +19,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180  # deps ~60 min + main build ~60 min
 
     env:
       ORCA_VERSION: ${{ github.event.inputs.orca_version || github.ref_name }}
@@ -27,8 +27,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: false  # initialise orca submodule below with correct tag
 
       # ── Emscripten ──────────────────────────────────────────────────
       - name: Install Emscripten
@@ -39,72 +37,109 @@ jobs:
 
       # ── System deps ─────────────────────────────────────────────────
       - name: Install build tools
-        run: sudo apt-get install -y ninja-build python3 cmake
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            ninja-build python3 cmake \
+            libssl-dev pkg-config \
+            gperf libglib2.0-dev libdbus-1-dev \
+            libgtk-3-dev libwebkit2gtk-4.0-dev \
+            libcurl4-openssl-dev libjpeg-dev \
+            m4 texinfo
 
-      # ── Restore cached WASM deps (Boost, GMP, MPFR, CGAL) ──────────
+      # ── Checkout OrcaSlicer at requested tag ────────────────────────
+      # Do a plain shallow clone instead of git submodule (submodule is not
+      # registered in the index, only .gitmodules exists).
+      - name: Checkout OrcaSlicer ${{ env.ORCA_VERSION }}
+        run: |
+          git clone --depth 1 --branch "$ORCA_VERSION" \
+            https://github.com/SoftFever/OrcaSlicer.git \
+            orca-wasm/orca
+
+      # ── Apply WASM patches before dep build ─────────────────────────
+      - name: Patch OrcaSlicer source
+        run: python3 orca-wasm/patches/apply.py
+
+      # ── Restore cached WASM deps ────────────────────────────────────
       - name: Restore dep cache
         id: dep-cache
         uses: actions/cache@v4
         with:
-          path: orca-wasm/deps
-          key: wasm-deps-${{ runner.os }}-v3
+          path: orca-wasm/deps-install
+          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v1
 
-      # ── OrcaSlicer submodule at requested tag ────────────────────────
-      - name: Checkout OrcaSlicer ${{ env.ORCA_VERSION }}
-        run: |
-          git submodule update --init --depth 1 -- orca-wasm/orca
-          git -C orca-wasm/orca fetch --tags --depth 1 origin "$ORCA_VERSION"
-          git -C orca-wasm/orca checkout "$ORCA_VERSION"
-
-      # ── Build dependencies (skipped if cache hit) ────────────────────
-      - name: Build Boost for WASM
+      # ── Build OrcaSlicer's bundled deps for WASM ────────────────────
+      # Uses OrcaSlicer's own cmake deps system; skips GUI-only & heavy deps.
+      # Only runs on a cache miss.
+      - name: Build OrcaSlicer deps for WASM
         if: steps.dep-cache.outputs.cache-hit != 'true'
         run: |
           source /opt/emsdk/emsdk_env.sh
-          export ORCA_WASM_DIR="$(pwd)/orca-wasm"
-          source orca-wasm/deps/build_boost.sh
+          WORK="$(pwd)"
+          mkdir -p orca-wasm/deps-build
 
-      - name: Build GMP / MPFR / CGAL for WASM
-        if: steps.dep-cache.outputs.cache-hit != 'true'
-        run: |
-          source /opt/emsdk/emsdk_env.sh
-          export ORCA_WASM_DIR="$(pwd)/orca-wasm"
-          source orca-wasm/deps/build_math.sh
-
-      # ── Apply WASM patches ───────────────────────────────────────────
-      - name: Patch OrcaSlicer source
-        run: python3 orca-wasm/patches/apply.py
-
-      # ── Configure + Build ────────────────────────────────────────────
-      - name: Build WASM module
-        run: |
-          source /opt/emsdk/emsdk_env.sh
-          export ORCA_WASM_DIR="$(pwd)/orca-wasm"
-          source orca-wasm/deps/build_boost.sh  # re-exports env vars from cache
-          source orca-wasm/deps/build_math.sh
-
-          mkdir -p orca-wasm/build-wasm
           emcmake cmake \
-            -S orca-wasm \
+            -S orca-wasm/orca/deps \
+            -B orca-wasm/deps-build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${WORK}/orca-wasm/deps-install" \
+            -DDEP_WX_GTK3=OFF \
+            -DDEP_WXWIDGETS=OFF \
+            -DDEP_OPENCASCADE=OFF \
+            -DDEP_OPENVDB=OFF \
+            -DDEP_OPENCV=OFF
+
+          emmake cmake --build orca-wasm/deps-build -j4
+
+      # ── Configure WASM build ─────────────────────────────────────────
+      - name: Configure WASM build
+        run: |
+          source /opt/emsdk/emsdk_env.sh
+          WORK="$(pwd)"
+          mkdir -p orca-wasm/build-wasm
+
+          emcmake cmake \
+            -S orca-wasm/orca \
             -B orca-wasm/build-wasm \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DSLIC3R_WASM=ON \
-            -DBOOST_ROOT="${BOOST_WASM_ROOT}" \
-            -DBOOST_INC="${BOOST_WASM_ROOT}/include" \
-            -DGMP_INCLUDE_DIR="${GMP_WASM_INC}" \
-            -DGMP_LIBRARIES="${GMP_WASM_LIB}" \
-            -DMPFR_INCLUDE_DIR="${MPFR_WASM_INC}" \
-            -DMPFR_LIBRARIES="${MPFR_WASM_LIB}" \
-            -DCGAL_DIR="${CGAL_WASM_DIR}" \
-            -DORCA_SRC="$(pwd)/orca-wasm/orca/src" \
-            -DORCA_DEPS="$(pwd)/orca-wasm/orca/deps_src"
+            -DSLIC3R_GUI=OFF \
+            -DSLIC3R_STATIC=ON \
+            -DSLIC3R_OPENCASCADE=OFF \
+            -DSLIC3R_OPENGL_IMGUI=OFF \
+            -DCMAKE_PREFIX_PATH="${WORK}/orca-wasm/deps-install" \
+            -DCMAKE_MODULE_PATH="${WORK}/orca-wasm/cmake" \
+            -DTBB_SHIM_DIR="${WORK}/orca-wasm/wasm/shims" \
+            -DORCA_WEB_BRIDGE_DIR="${WORK}/orca-wasm/bridge" \
+            -DORCA_WEB_WASM_DIR="${WORK}/orca-wasm/wasm" \
+            -DORCA_WEB_SHIM_DIR="${WORK}/orca-wasm/wasm/shims"
 
-          emmake cmake --build orca-wasm/build-wasm --target slicer -j 4
+      # ── Build WASM module ────────────────────────────────────────────
+      - name: Build WASM module
+        run: |
+          source /opt/emsdk/emsdk_env.sh
+          emmake cmake --build orca-wasm/build-wasm --target slicer -j4
 
-      # ── Package artifacts ────────────────────────────────────────────
+      # ── Verify & package artifacts ───────────────────────────────────
+      # wasm/CMakeLists.txt POST_BUILD already copies to public/wasm/.
       - name: Package WASM artifacts
         run: |
+          echo "--- Build output ---"
+          ls -lh orca-wasm/build-wasm/wasm/ 2>/dev/null || ls -lh orca-wasm/build-wasm/ || true
+          echo "--- public/wasm/ ---"
+          ls -lh public/wasm/ 2>/dev/null || true
+
+          # Copy from build output if POST_BUILD didn't run (e.g. no POST_BUILD copy)
+          BUILDDIR="orca-wasm/build-wasm/wasm"
+          if [[ ! -f public/wasm/slicer.js ]]; then
+            mkdir -p public/wasm
+            cp "${BUILDDIR}/slicer.js"   public/wasm/slicer.js
+            cp "${BUILDDIR}/slicer.wasm" public/wasm/slicer.wasm
+            cp "${BUILDDIR}/slicer.data" public/wasm/slicer.data
+          fi
+
           mkdir -p wasm-artifacts
           cp public/wasm/slicer.js   wasm-artifacts/
           cp public/wasm/slicer.wasm wasm-artifacts/

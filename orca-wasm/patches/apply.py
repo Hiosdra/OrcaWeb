@@ -72,13 +72,25 @@ patch("CMakeLists.txt", [
     # Guard the main slicer executable against WASM builds
     (
         r'(add_subdirectory\s*\(\s*src\s*\))',
-        r'if(NOT SLIC3R_WASM)\n\1\nendif()\nif(SLIC3R_WASM)\n  add_subdirectory(src/libslic3r)\nendif()',
+        r'if(NOT SLIC3R_WASM)\n\1\nendif()\nif(SLIC3R_WASM)\n  add_subdirectory(src)\nendif()',
         0,
     ),
 ])
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. src/libslic3r/CMakeLists.txt — make OCCT / OpenCV / draco conditional
+# 2. src/CMakeLists.txt — skip GUI subdirectory in WASM builds
+# ─────────────────────────────────────────────────────────────────────────────
+patch("src/CMakeLists.txt", [
+    # Guard the GUI/app subdirectory (name varies: GUI, slic3r, OrcaSlicer, bambu_studio)
+    (
+        r'(add_subdirectory\s*\(\s*(?:GUI|slic3r|OrcaSlicer|bambu_studio)\s*\))',
+        r'if(NOT SLIC3R_WASM)\n\1\nendif()',
+        0,
+    ),
+])
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. src/libslic3r/CMakeLists.txt — make OCCT / OpenCV / draco conditional
 # ─────────────────────────────────────────────────────────────────────────────
 patch("src/libslic3r/CMakeLists.txt", [
     # Add SLIC3R_WASM compile definitions
@@ -187,6 +199,33 @@ if ovdb_cpp.exists():
         print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/OpenVDBUtils.cpp")
     else:
         print("  OK (no change): src/libslic3r/OpenVDBUtils.cpp")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. Root CMakeLists.txt — append OrcaWeb bridge + WASM link target injection.
+#    The bridge and wasm subdirs live in orca-wasm/ (outside orca/).
+#    Their absolute paths are passed at cmake configure time via:
+#       -DORCA_WEB_BRIDGE_DIR=...  -DORCA_WEB_WASM_DIR=...
+# ─────────────────────────────────────────────────────────────────────────────
+BRIDGE_INJECTION = """\
+
+# ── OrcaWeb WASM bridge (injected by orca-wasm/patches/apply.py) ─────────────
+if(SLIC3R_WASM AND DEFINED ORCA_WEB_BRIDGE_DIR)
+  # Expose OrcaSlicer src/ as ORCA_SRC for the bridge CMakeLists.
+  set(ORCA_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  add_subdirectory("${ORCA_WEB_BRIDGE_DIR}" bridge)
+  add_subdirectory("${ORCA_WEB_WASM_DIR}"   wasm)
+endif()
+"""
+
+orca_root_cmake = ORCA / "CMakeLists.txt"
+if orca_root_cmake.exists():
+    content = orca_root_cmake.read_text(encoding="utf-8")
+    if "OrcaWeb WASM bridge" not in content:
+        if not DRY_RUN:
+            orca_root_cmake.write_text(content + BRIDGE_INJECTION, encoding="utf-8")
+        print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: CMakeLists.txt (bridge injection)")
+    else:
+        print("  OK (no change): CMakeLists.txt (bridge injection)")
 
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":

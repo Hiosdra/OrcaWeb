@@ -1,17 +1,33 @@
+# Support two build contexts:
+#  A) orca-wasm/CMakeLists.txt (standalone / local dev):
+#       ORCA_SRC and TBB_SHIM_DIR are set by the parent CMakeLists.
+#  B) OrcaSlicer's root CMakeLists.txt (CI / patches/apply.py injection):
+#       ORCA_SRC is set by the bridge injection block.
+#       ORCA_WEB_SHIM_DIR is set by -DORCA_WEB_SHIM_DIR=... on the cmake command line.
+
+# Resolve shim dir (TBB stubs must come before any real TBB headers).
+if(DEFINED ORCA_WEB_SHIM_DIR)
+  set(_SHIM_DIR "${ORCA_WEB_SHIM_DIR}")
+elseif(DEFINED TBB_SHIM_DIR)
+  set(_SHIM_DIR "${TBB_SHIM_DIR}")
+else()
+  set(_SHIM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../wasm/shims")
+endif()
+
+# Resolve OrcaSlicer src/ dir (for libslic3r/*.hpp).
+if(NOT DEFINED ORCA_SRC)
+  message(FATAL_ERROR "ORCA_SRC is not defined. "
+    "Set it via -DORCA_SRC=... or via the parent CMakeLists.")
+endif()
+
 add_library(orca_web_bridge STATIC slicer.cpp)
 
 target_include_directories(orca_web_bridge
   BEFORE PUBLIC
-    # TBB shims must come before any real TBB headers
-    "${CMAKE_CURRENT_SOURCE_DIR}/../wasm/shims"
-)
-
-target_include_directories(orca_web_bridge
-  PUBLIC
+    # TBB shims override any real TBB headers
+    "${_SHIM_DIR}"
+    # OrcaSlicer src/ for libslic3r/*.hpp
     "${ORCA_SRC}"
-    "${ORCA_DEPS}/eigen"
-    "${ORCA_DEPS}/nlohmann_json/include"
-    "${BOOST_INC}"
 )
 
 target_compile_definitions(orca_web_bridge PUBLIC
@@ -19,4 +35,5 @@ target_compile_definitions(orca_web_bridge PUBLIC
   __EMSCRIPTEN__
 )
 
+# libslic3r exposes Boost, Eigen3, nlohmann_json etc. via its PUBLIC interface.
 target_link_libraries(orca_web_bridge PUBLIC libslic3r)
