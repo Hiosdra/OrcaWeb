@@ -126,7 +126,7 @@ export default function App() {
           <div className="flex items-center gap-3">
             <WasmStatusBadge status={wasmStatus} />
             <a
-              href="https://github.com/allanwrench28/orcaslicer-wasm"
+              href="https://github.com/Hiosdra/OrcaWeb"
               target="_blank"
               rel="noopener noreferrer"
               className="text-slate-400 hover:text-slate-600 transition-colors"
@@ -243,12 +243,12 @@ export default function App() {
       <footer className="text-center text-xs text-slate-400 py-4 border-t border-slate-100">
         Powered by{' '}
         <a
-          href="https://github.com/allanwrench28/orcaslicer-wasm"
+          href="https://github.com/SoftFever/OrcaSlicer"
           target="_blank"
           rel="noopener noreferrer"
           className="underline hover:text-slate-600"
         >
-          orcaslicer-wasm
+          OrcaSlicer
         </a>{' '}
         · All slicing runs locally in your browser
       </footer>

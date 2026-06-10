@@ -41,6 +41,7 @@ extra_css:
 
 nav:
   - Home: index.md
+  - Status: status.md
   - Getting Started: getting-started.md
   - User Guide: user-guide.md
   - Architecture: architecture.md
