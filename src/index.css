@@ -1,6 +1,22 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  /* Custom colour palette — mirrors the v3 tailwind.config.js orca extension */
+  --color-orca-50:  #f0f7ff;
+  --color-orca-100: #e0efff;
+  --color-orca-200: #b9dcff;
+  --color-orca-300: #7cc0ff;
+  --color-orca-400: #36a1ff;
+  --color-orca-500: #0a84ff;
+  --color-orca-600: #0065df;
+  --color-orca-700: #0050b3;
+  --color-orca-800: #004494;
+  --color-orca-900: #003a7a;
+  --color-orca-950: #002453;
+
+  /* Font */
+  --font-sans: "Inter", system-ui, sans-serif;
+}
 
 @layer base {
   * {

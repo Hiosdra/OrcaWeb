@@ -26,7 +26,7 @@ jobs:
       EMSDK: /opt/emsdk
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # ── Emscripten ──────────────────────────────────────────────────
       - name: Install Emscripten
@@ -62,10 +62,10 @@ jobs:
       # Each dep build uses an internal stamp file so partial caches are safe:
       # a step is a no-op if its stamp already exists, regardless of cache hit.
       - name: Restore dep cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: orca-wasm/deps-install
-          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v3
+          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v4
 
       # ── Boost ────────────────────────────────────────────────────────
       - name: Build WASM deps — Boost
@@ -86,9 +86,8 @@ jobs:
             | tar xz -C /tmp/boost
           cd "/tmp/boost/boost_${BOOST_UNDERSCORE}"
           ./bootstrap.sh --without-libraries=python
-          cat > user-config.jam <<'JAM'
-using clang : emscripten : em++ : <compileflags>"-O2" <archiveflags>"" ;
-JAM
+          printf 'using clang : emscripten : em++ : <compileflags>"-O2" <archiveflags>"" ;\n' \
+            > user-config.jam
           ./b2 install \
             --prefix="${INSTALL}" \
             toolset=clang-emscripten \
@@ -273,7 +272,7 @@ JAM
           ls -lh wasm-artifacts/
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: orca-wasm-${{ env.ORCA_VERSION }}
           path: wasm-artifacts/

@@ -2,6 +2,10 @@ export interface OrcaConfig {
   // Printer
   printer_model?: string
   nozzle_diameter?: number
+  /** Print bed width in mm (used for model centering in the WASM bridge) */
+  bed_size_x?: number
+  /** Print bed depth in mm (used for model centering in the WASM bridge) */
+  bed_size_y?: number
 
   // Filament
   filament_type?: string
@@ -73,6 +77,25 @@ export type WorkerOutMessage =
   | { type: 'WASM_ERROR'; message: string }
   | { type: 'SLICE_COMPLETE'; gcode: string }
   | { type: 'SLICE_ERROR'; code: number; message: string }
+
+// --- G-code statistics ---
+
+export interface GcodeStats {
+  /** Total bytes in the G-code file */
+  bytes: number
+  /** Total number of lines */
+  lines: number
+  /** Total layer count (from slicer comment) */
+  layers?: number
+  /** Estimated print time string, e.g. "1h 2m 5s" */
+  printTime?: string
+  /** Total filament length in mm */
+  filamentMm?: number
+  /** Total filament volume in cm³ */
+  filamentCm3?: number
+  /** Total filament weight in grams */
+  filamentG?: number
+}
 
 // --- App state ---
 

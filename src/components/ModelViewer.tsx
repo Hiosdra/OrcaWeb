@@ -5,11 +5,13 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
 interface Props {
   file: File
-  /** Bed size in mm — default 250×250 */
-  bedSize?: number
+  /** Bed width (X axis) in mm — default 256 */
+  bedX?: number
+  /** Bed depth (Y axis) in mm — default 256 */
+  bedY?: number
 }
 
-export function ModelViewer({ file, bedSize = 250 }: Props) {
+export function ModelViewer({ file, bedX = 256, bedY = 256 }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -40,19 +42,21 @@ export function ModelViewer({ file, bedSize = 250 }: Props) {
     scene.add(fillLight)
 
     // Print bed: centred at origin, Y=0
-    const bedGeo = new THREE.PlaneGeometry(bedSize, bedSize)
+    const bedGeo = new THREE.PlaneGeometry(bedX, bedY)
     bedGeo.rotateX(-Math.PI / 2)
     const bedMat = new THREE.MeshPhongMaterial({ color: 0xe2e8f0, side: THREE.DoubleSide })
     const bed = new THREE.Mesh(bedGeo, bedMat)
     bed.receiveShadow = true
     scene.add(bed)
 
-    const grid = new THREE.GridHelper(bedSize, bedSize / 10, 0xcccccc, 0xdde3ed)
+    const gridDiv = Math.round(Math.max(bedX, bedY) / 10)
+    const grid = new THREE.GridHelper(Math.max(bedX, bedY), gridDiv, 0xcccccc, 0xdde3ed)
+    grid.scale.set(bedX / Math.max(bedX, bedY), 1, bedY / Math.max(bedX, bedY))
     grid.position.y = 0.1
     scene.add(grid)
 
     // Bed border
-    const edgeGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(bedSize, 0.5, bedSize))
+    const edgeGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(bedX, 0.5, bedY))
     scene.add(new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({ color: 0xb0bec5 })))
 
     const controls = new OrbitControls(camera, renderer.domElement)
@@ -126,7 +130,7 @@ export function ModelViewer({ file, bedSize = 250 }: Props) {
       bedMat.dispose()
       el.removeChild(renderer.domElement)
     }
-  }, [file, bedSize])
+  }, [file, bedX, bedY])
 
   return (
     <div

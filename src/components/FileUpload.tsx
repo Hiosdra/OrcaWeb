@@ -10,15 +10,19 @@ export function FileUpload({ onFile, file }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
 
+  const isAccepted = (f: File) =>
+    /\.(stl|3mf)$/i.test(f.name)
+
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault()
       setDragging(false)
       const dropped = e.dataTransfer.files[0]
-      if (dropped && dropped.name.toLowerCase().endsWith('.stl')) {
+      if (dropped && isAccepted(dropped)) {
         onFile(dropped)
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [onFile],
   )
 
@@ -46,7 +50,7 @@ export function FileUpload({ onFile, file }: Props) {
       <input
         ref={inputRef}
         type="file"
-        accept=".stl"
+        accept=".stl,.3mf"
         className="hidden"
         onChange={handleChange}
       />
@@ -64,10 +68,10 @@ export function FileUpload({ onFile, file }: Props) {
         <>
           <UploadIcon className="w-12 h-12 text-slate-400" />
           <div className="text-center">
-            <p className="font-semibold text-slate-700">Drop your STL file here</p>
+            <p className="font-semibold text-slate-700">Drop your model here</p>
             <p className="text-sm text-slate-500 mt-1">or click to browse</p>
           </div>
-          <p className="text-xs text-slate-400">.stl format only</p>
+          <p className="text-xs text-slate-400">.stl · .3mf</p>
         </>
       )}
     </div>

@@ -72,8 +72,22 @@ OrcaWeb maps OrcaSlicer profile fields to its internal `OrcaConfig`. Aliases fro
 | `fan_min_speed` | `fan_min_speed` | 0–100 |
 | `printer_model` | `printer_model` | machine profiles |
 | `nozzle_diameter` | `nozzle_diameter` | mm |
+| `printable_area` | `bed_size_x` + `bed_size_y` | array of `"XxY"` corner strings; max X/Y taken as bed dimensions |
+| `bed_size` | `bed_size_x` + `bed_size_y` | legacy format: `["W","H"]` or `"WxH"` |
 
 Fields not in this table are silently ignored.
+
+## 3MF profile extraction
+
+OrcaSlicer saves complete project files as `.3mf` archives. When you load a 3MF in OrcaWeb, the profile extraction pipeline:
+
+1. Unpacks the ZIP archive using [fflate](https://github.com/101arrowz/fflate)
+2. Finds all files under `Metadata/` matching `*.json` or `*.config` (case-insensitive)
+3. Sorts them by specificity: machine → filament → process → project (later wins on conflicts)
+4. Parses each through the same `parseOrcaProfileJson` pipeline as manual imports
+5. Merges into a single `Partial<OrcaConfig>` applied as overrides
+
+The mesh geometry (`3D/3dmodel.model`) is converted from the 3MF XML format to binary STL transparently — the WASM slicer receives a standard STL.
 
 ## Import behaviour
 
@@ -92,15 +106,17 @@ OrcaWeb ships with minimal built-in presets for common printers and materials.
 
 ### Printer presets
 
-| Preset | Model | Nozzle |
-|--------|-------|--------|
-| Generic 0.4 | Generic | 0.4 mm |
-| Generic 0.6 | Generic | 0.6 mm |
-| Bambu Lab P1S | BambuLab P1S | 0.4 mm |
-| Bambu Lab X1C | BambuLab X1C | 0.4 mm |
-| Creality Ender 3 | Creality Ender-3 | 0.4 mm |
-| Prusa MK4 | Prusa MK4 | 0.4 mm |
-| Voron 2.4 | Voron 2.4 | 0.4 mm |
+| Preset | Model | Nozzle | Bed (X × Y) |
+|--------|-------|--------|-------------|
+| Generic 0.4 | Generic | 0.4 mm | 256 × 256 mm |
+| Generic 0.6 | Generic | 0.6 mm | 256 × 256 mm |
+| Bambu Lab P1S | BambuLab P1S | 0.4 mm | 256 × 256 mm |
+| Bambu Lab X1C | BambuLab X1C | 0.4 mm | 256 × 256 mm |
+| Creality Ender 3 | Creality Ender-3 | 0.4 mm | 220 × 220 mm |
+| Prusa MK4 | Prusa MK4 | 0.4 mm | 250 × 210 mm |
+| Voron 2.4 | Voron 2.4 | 0.4 mm | 300 × 300 mm |
+
+Bed dimensions are also read from the `printable_area` field of an imported profile (or 3MF machine metadata), overriding the preset values.
 
 ### Quality presets
 

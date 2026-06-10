@@ -1,5 +1,6 @@
 node_modules/
 dist/
+*.tsbuildinfo
 cli/dist/
 public/wasm/slicer.js
 public/wasm/slicer.wasm

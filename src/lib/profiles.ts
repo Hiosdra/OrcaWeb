@@ -85,14 +85,20 @@ export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = {
   'Generic 0.4': {
     printer_model: 'Generic',
     nozzle_diameter: 0.4,
+    bed_size_x: 256,
+    bed_size_y: 256,
   },
   'Generic 0.6': {
     printer_model: 'Generic',
     nozzle_diameter: 0.6,
+    bed_size_x: 256,
+    bed_size_y: 256,
   },
   'Bambu Lab P1S': {
     printer_model: 'BambuLab P1S',
     nozzle_diameter: 0.4,
+    bed_size_x: 256,
+    bed_size_y: 256,
     default_speed: 300,
     outer_wall_speed: 150,
     travel_speed: 500,
@@ -100,6 +106,8 @@ export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = {
   'Bambu Lab X1C': {
     printer_model: 'BambuLab X1C',
     nozzle_diameter: 0.4,
+    bed_size_x: 256,
+    bed_size_y: 256,
     default_speed: 350,
     outer_wall_speed: 200,
     travel_speed: 600,
@@ -107,6 +115,8 @@ export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = {
   'Creality Ender 3': {
     printer_model: 'Creality Ender-3',
     nozzle_diameter: 0.4,
+    bed_size_x: 220,
+    bed_size_y: 220,
     default_speed: 60,
     outer_wall_speed: 40,
     travel_speed: 120,
@@ -114,6 +124,8 @@ export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = {
   'Prusa MK4': {
     printer_model: 'Prusa MK4',
     nozzle_diameter: 0.4,
+    bed_size_x: 250,
+    bed_size_y: 210,
     default_speed: 120,
     outer_wall_speed: 80,
     travel_speed: 200,
@@ -121,6 +133,8 @@ export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = {
   'Voron 2.4': {
     printer_model: 'Voron 2.4',
     nozzle_diameter: 0.4,
+    bed_size_x: 300,
+    bed_size_y: 300,
     default_speed: 200,
     outer_wall_speed: 100,
     travel_speed: 350,
@@ -178,6 +192,36 @@ const ORCA_FIELD_MAP: Record<string, { key: keyof OrcaConfig; type: 'num' | 'pct
   // machine fields
   printer_model:           { key: 'printer_model',          type: 'str' },
   nozzle_diameter:         { key: 'nozzle_diameter',        type: 'num' },
+  // bed size — handled separately via parsePrintableArea() below
+}
+
+/**
+ * Parse bed size from OrcaSlicer's `printable_area` field.
+ *
+ * OrcaSlicer stores bed corners as an array of "XxY" strings, e.g.:
+ *   ["0x0", "256x0", "256x256", "0x256"]
+ * or as a flat comma-joined string: "0x0,256x0,256x256,0x256"
+ *
+ * Returns [maxX, maxY] i.e. the bed dimensions, or null if unparseable.
+ */
+function parsePrintableArea(raw: unknown): [number, number] | null {
+  let pts: string[]
+  if (Array.isArray(raw)) {
+    pts = raw.map(String)
+  } else {
+    const s = String(raw).trim()
+    if (!s) return null
+    pts = s.split(',')
+  }
+  let maxX = 0, maxY = 0
+  for (const pt of pts) {
+    const parts = pt.trim().split('x')
+    if (parts.length < 2) continue
+    const x = parseFloat(parts[0]), y = parseFloat(parts[1])
+    if (!isNaN(x)) maxX = Math.max(maxX, x)
+    if (!isNaN(y)) maxY = Math.max(maxY, y)
+  }
+  return maxX > 0 && maxY > 0 ? [maxX, maxY] : null
 }
 
 export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
@@ -209,6 +253,24 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
         out[meta.key] = s === '1' || s === 'true' || s === 'yes'
       } else {
         out[meta.key] = String(raw_val)
+      }
+    }
+
+    // ── Bed size ─────────────────────────────────────────────────────────────
+    // OrcaSlicer machine profiles carry printable_area / bed_size for bed dims.
+    if ('printable_area' in raw) {
+      const dims = parsePrintableArea(raw['printable_area'])
+      if (dims) { config.bed_size_x = dims[0]; config.bed_size_y = dims[1] }
+    } else if ('bed_size' in raw) {
+      // Some older profiles use bed_size: ["256", "256"] or "256x256"
+      const bs = unwrap(raw['bed_size'])
+      if (Array.isArray(bs) && bs.length >= 2) {
+        const x = parseFloat(String(bs[0])), y = parseFloat(String(bs[1]))
+        if (!isNaN(x) && x > 0) config.bed_size_x = x
+        if (!isNaN(y) && y > 0) config.bed_size_y = y
+      } else {
+        const dims = parsePrintableArea(bs)
+        if (dims) { config.bed_size_x = dims[0]; config.bed_size_y = dims[1] }
       }
     }
 
