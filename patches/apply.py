@@ -112,16 +112,23 @@ step_hpp = ORCA / "src/libslic3r/Format/STEP.hpp"
 if step_hpp.exists():
     _content = step_hpp.read_text(encoding="utf-8", errors="replace")
     if "#ifndef SLIC3R_NO_OCCT" not in _content:
+        # STEP.hpp uses a traditional #ifndef/#define include guard, NOT #pragma once.
+        # Pattern: (#ifndef guard / #define guard / content / #endif)
+        # Insert #ifndef SLIC3R_NO_OCCT after the #define line and close it before
+        # the final #endif so the OCCT-dependent content is skipped in WASM mode.
         _patched = re.sub(
-            r'(#pragma once\n)([\s\S]+)',
-            r'\1#ifndef SLIC3R_NO_OCCT\n\2\n#endif // SLIC3R_NO_OCCT\n',
+            r'(#ifndef\s+\S+\s*\n#define\s+\S+\s*\n)([\s\S]+?)(\n#endif\s*(?://[^\n]*)?\s*)$',
+            r'\1#ifndef SLIC3R_NO_OCCT\n\2\n#endif // SLIC3R_NO_OCCT\n\3',
             _content,
             count=1,
             flags=re.MULTILINE | re.DOTALL,
         )
-        if not DRY_RUN:
-            step_hpp.write_text(_patched, encoding="utf-8")
-        print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/Format/STEP.hpp")
+        if _patched != _content:
+            if not DRY_RUN:
+                step_hpp.write_text(_patched, encoding="utf-8")
+            print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/Format/STEP.hpp")
+        else:
+            print(f"  WARN pattern not matched: src/libslic3r/Format/STEP.hpp")
     else:
         print("  OK (no change): src/libslic3r/Format/STEP.hpp")
 
