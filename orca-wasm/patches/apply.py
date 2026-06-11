@@ -374,6 +374,32 @@ else:
     print("  SKIP (not found): src/libslic3r/Format/DRC.cpp")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 6c. Format/svg.cpp — stub body when SLIC3R_NO_OCCT
+#     svg.cpp uses OCCT (BRepBuilderAPI_MakeWire etc.) for SVG-to-mesh import.
+# ─────────────────────────────────────────────────────────────────────────────
+svg_cpp = ORCA / "src/libslic3r/Format/svg.cpp"
+if svg_cpp.exists():
+    content = svg_cpp.read_text(encoding="utf-8")
+    if "#ifdef SLIC3R_NO_OCCT" not in content:
+        stub = (
+            "#ifdef SLIC3R_NO_OCCT\n"
+            "// OCCT not available in WASM — provide a no-op stub.\n"
+            "#include \"svg.hpp\"\n"
+            "namespace Slic3r {\n"
+            "bool load_svg(const char*, Model*, std::string&) { return false; }\n"
+            "} // namespace Slic3r\n"
+            "#else\n"
+        )
+        if not DRY_RUN:
+            svg_cpp.write_text(stub + content + "\n#endif // SLIC3R_NO_OCCT\n",
+                               encoding="utf-8")
+        print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/Format/svg.cpp")
+    else:
+        print("  OK (no change): src/libslic3r/Format/svg.cpp")
+else:
+    print("  SKIP (not found): src/libslic3r/Format/svg.cpp")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 7. Root CMakeLists.txt — append OrcaWeb bridge + WASM link target injection.
 #    The bridge and wasm subdirs live in orca-wasm/ (outside orca/).
 #    Their absolute paths are passed at cmake configure time via:
