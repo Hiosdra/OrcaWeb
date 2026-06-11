@@ -251,7 +251,7 @@ patch("src/libslic3r/CMakeLists.txt", [
 # a correct sequential version, so no source-level guarding is needed here.
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. src/libslic3r/FuzzySkin.cpp — thread_local RNG not allowed in WASM
+# 4a. src/libslic3r/AABBTreeLines.hpp — Eigen template deduction fix
 # ─────────────────────────────────────────────────────────────────────────────
 patch("src/libslic3r/AABBTreeLines.hpp", [
     # Template deduction for distance_to_squared fails because
@@ -269,13 +269,36 @@ patch("src/libslic3r/AABBTreeLines.hpp", [
     ),
 ])
 
-patch("src/libslic3r/FuzzySkin.cpp", [
-    (
-        r'\bthread_local\s+',
-        r'/* thread_local removed for WASM */ ',
-        0,
-    ),
-])
+# ─────────────────────────────────────────────────────────────────────────────
+# 4b. src/libslic3r/Feature/FuzzySkin/FuzzySkin.cpp — stub for WASM
+#     In v2.3.2 the file moved to Feature/FuzzySkin/.  It uses libnoise and
+#     thread_local which are unavailable in the WASM build.  Wrap the entire
+#     original content with #ifndef SLIC3R_WASM and provide no-op stubs.
+# ─────────────────────────────────────────────────────────────────────────────
+FUZZY_SKIN_STUB = """\
+#ifdef SLIC3R_WASM
+// libnoise and thread_local not available in WASM; provide no-op stubs.
+#include "FuzzySkin.hpp"
+namespace Slic3r::Feature::FuzzySkin {
+void fuzzy_polyline(Points&, bool, coordf_t, const FuzzySkinConfig&) {}
+void fuzzy_extrusion_line(Arachne::ExtrusionJunctions&, coordf_t, const FuzzySkinConfig&, bool) {}
+void group_region_by_fuzzify(PerimeterGenerator&) {}
+bool should_fuzzify(const FuzzySkinConfig&, int, size_t, bool) { return false; }
+Polygon apply_fuzzy_skin(const Polygon& p, const PerimeterGenerator&, size_t, bool) { return p; }
+void    apply_fuzzy_skin(Arachne::ExtrusionLine*, const PerimeterGenerator&, bool) {}
+} // namespace Slic3r::Feature::FuzzySkin
+#else
+"""
+
+fuzzy_cpp = ORCA / "src/libslic3r/Feature/FuzzySkin/FuzzySkin.cpp"
+if fuzzy_cpp.exists():
+    _fc = fuzzy_cpp.read_text(encoding="utf-8", errors="replace")
+    if "#ifdef SLIC3R_WASM" not in _fc:
+        if not DRY_RUN:
+            fuzzy_cpp.write_text(FUZZY_SKIN_STUB + _fc + "\n#endif // SLIC3R_WASM\n", encoding="utf-8")
+        print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/Feature/FuzzySkin/FuzzySkin.cpp")
+    else:
+        print("  OK (no change): src/libslic3r/Feature/FuzzySkin/FuzzySkin.cpp")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. Format/STEP.cpp — stub body when SLIC3R_NO_OCCT
