@@ -149,12 +149,24 @@ jobs:
           curl -fL --retry 3 \
             "https://ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz" | tar xJ -C "${DL}"
           cd "${DL}/gmp-${GMP_VERSION}"
+          # Pre-fill a config cache to bypass assembler probes that can't
+          # execute WASM binaries during cross-compilation.
+          cat > ./config.cache << 'GMPCACHE'
+gmp_cv_asm_label_suffix=""
+gmp_cv_asm_type_directive=""
+gmp_cv_asm_size_directive=""
+gmp_cv_asm_lsym_prefix=""
+gmp_cv_asm_align_log=no
+gmp_cv_asm_align_needs_abs=no
+gmp_cv_asm_globl_directive=.globl
+gmp_cv_asm_rodata=.section\ .rodata
+GMPCACHE
           emconfigure ./configure \
             --prefix="${INSTALL}" \
             --host=wasm32-unknown-emscripten \
             --disable-shared --enable-static --disable-assembly \
             --enable-cxx \
-            gmp_cv_asm_label_suffix=
+            --cache-file=./config.cache
           emmake make -j"$(nproc)"
           make install
 
