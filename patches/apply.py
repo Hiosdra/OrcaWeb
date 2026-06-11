@@ -194,14 +194,17 @@ patch("src/libslic3r/CMakeLists.txt", [
 # 4. src/libslic3r/FuzzySkin.cpp — thread_local RNG not allowed in WASM
 # ─────────────────────────────────────────────────────────────────────────────
 patch("src/libslic3r/AABBTreeLines.hpp", [
-    # Template deduction fails because the Eigen CwiseUnaryOp (lazy cast expression)
-    # preserves the Options template argument from the source matrix (e.g. Options=2),
-    # while Vec<N, Scalar> defaults to Options=0.  Deduction sees "2 vs 0" and fails.
-    # Explicitly constructing Vec<Dim<LineType>, Scalar> forces the correct Options.
-    # Matches both the un-patched form and the earlier .eval() attempt.
+    # Template deduction for distance_to_squared fails because
+    # origin.cast<Scalar>() returns a lazy CwiseUnaryOp that:
+    #   (a) does not match Eigen::Matrix in deduction, and
+    #   (b) even after .eval(), preserves Options from the source (e.g. 2=DontAlign)
+    #       while Vec<N,Scalar> defaults to Options=0, causing "match 2 against 0" error.
+    # Fix: explicitly construct using decltype(nearest_point) — that IS the concrete
+    # Vec<Dim<LineType>, Scalar> type, so deduction succeeds and Options are forced to 0.
+    # Eigen's Matrix(const MatrixBase<OtherDerived>&) ctor handles the conversion.
     (
-        r'(origin\.template cast<typename LineType::Scalar>\(\))(?:\.eval\(\))?',
-        r'Vec<Dim<LineType>, typename LineType::Scalar>(\1)',
+        r'(distance_to_squared\(line,\s*)(origin\.template cast<typename LineType::Scalar>\(\))(?:\.eval\(\))?',
+        r'\1decltype(nearest_point)(\2)',
         0,
     ),
 ])
