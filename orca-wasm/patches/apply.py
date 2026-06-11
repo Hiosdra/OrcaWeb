@@ -101,6 +101,21 @@ patch("src/CMakeLists.txt", [
 ])
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 3. src/libslic3r/Format/STEP.hpp — guard OCCT includes
+#    Model.hpp includes STEP.hpp unconditionally; STEP.hpp in turn includes
+#    OCCT .hxx headers which don't exist in the WASM build.  Wrap consecutive
+#    .hxx include blocks with #ifndef SLIC3R_NO_OCCT so the header is safe to
+#    include everywhere while OCCT is still absent in WASM mode.
+# ─────────────────────────────────────────────────────────────────────────────
+patch("src/libslic3r/Format/STEP.hpp", [
+    (
+        r'((?:#include\s+[<"][^">\n]+\.hxx[">]\n)+)',
+        r'#ifndef SLIC3R_NO_OCCT\n\1#endif // SLIC3R_NO_OCCT\n',
+        0,
+    ),
+])
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 4. src/libslic3r/CMakeLists.txt — make OCCT / OpenCV / draco conditional
 # ─────────────────────────────────────────────────────────────────────────────
 patch("src/libslic3r/CMakeLists.txt", [
