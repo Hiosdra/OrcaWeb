@@ -465,6 +465,20 @@ if _obj_color_hpp.exists():
 else:
     print("  SKIP (not found): src/libslic3r/ObjColorUtils.hpp")
 
+# 6e-2. src/libslic3r/ObjColorUtils.cpp — stub when SLIC3R_NO_OPENCV
+_obj_color_cpp = ORCA / "src/libslic3r/ObjColorUtils.cpp"
+if _obj_color_cpp.exists():
+    _occ = _obj_color_cpp.read_text(encoding="utf-8", errors="replace")
+    if "#ifdef SLIC3R_NO_OPENCV" not in _occ:
+        stub = "#ifdef SLIC3R_NO_OPENCV\n// OpenCV not available in WASM.\n#else\n"
+        if not DRY_RUN:
+            _obj_color_cpp.write_text(stub + _occ + "\n#endif // SLIC3R_NO_OPENCV\n", encoding="utf-8")
+        print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/ObjColorUtils.cpp")
+    else:
+        print("  OK (no change): src/libslic3r/ObjColorUtils.cpp")
+else:
+    print("  SKIP (not found): src/libslic3r/ObjColorUtils.cpp")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 6d. GCode/Thumbnails.cpp — define JCS_EXT_RGBA if missing
 #     Emscripten ships standard libjpeg (no turbo extensions).
