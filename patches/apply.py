@@ -98,15 +98,6 @@ patch("src/CMakeLists.txt", [
         r'if(NOT SLIC3R_WASM)\n\1\nendif()',
         0,
     ),
-    # dev-utils contains encoding-check, a native source-encoding validator.
-    # Emscripten compiles it to .js; the build system then tries to run that
-    # .js as a native binary, giving "Permission denied" (exit 126).
-    # We don't need encoding checks in a headless WASM build.
-    (
-        r'(add_subdirectory\s*\(\s*dev-utils\s*\))',
-        r'if(NOT SLIC3R_WASM)\n\1\nendif()',
-        0,
-    ),
 ])
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -183,17 +174,13 @@ patch("src/libslic3r/CMakeLists.txt", [
         r'$<$<NOT:$<BOOL:${SLIC3R_WASM}>>:noise::noise>',
         0,
     ),
-    # encoding-check is a native source-encoding validator in dev-utils/.
-    # We guard add_subdirectory(dev-utils) so the target is never created;
-    # also guard any add_custom_target / add_dependencies that reference it,
-    # otherwise CMake will error "target encoding-check not found".
+    # encoding_check() is a CMake function (defined in dev-utils/) that creates
+    # a custom target running the encoding-check binary against sources.
+    # Emscripten compiles that binary to .js; the build system then tries to
+    # execute it natively → "Permission denied" (exit 126).
+    # Guard the call so the utility target is never created in WASM mode.
     (
-        r'(add_custom_target\s*\(\s*encoding-check-libslic3r(?:[^()]|\([^()]*\))*\))',
-        r'if(NOT SLIC3R_WASM)\n\1\nendif()',
-        0,
-    ),
-    (
-        r'(add_dependencies\s*\(\s*libslic3r\b[^)]*\bencoding-check[^)]*\))',
+        r'(encoding_check\s*\([^)]*\))',
         r'if(NOT SLIC3R_WASM)\n\1\nendif()',
         0,
     ),
