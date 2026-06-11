@@ -153,7 +153,8 @@ jobs:
             --prefix="${INSTALL}" \
             --host=wasm32-unknown-emscripten \
             --disable-shared --enable-static --disable-assembly \
-            --enable-cxx
+            --enable-cxx \
+            gmp_cv_asm_label_suffix=
           emmake make -j"$(nproc)"
           make install
 
