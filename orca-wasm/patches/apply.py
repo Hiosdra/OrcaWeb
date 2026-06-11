@@ -101,19 +101,29 @@ patch("src/CMakeLists.txt", [
 ])
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. src/libslic3r/Format/STEP.hpp — guard OCCT includes
-#    Model.hpp includes STEP.hpp unconditionally; STEP.hpp in turn includes
-#    OCCT .hxx headers which don't exist in the WASM build.  Wrap consecutive
-#    .hxx include blocks with #ifndef SLIC3R_NO_OCCT so the header is safe to
-#    include everywhere while OCCT is still absent in WASM mode.
+# 3. src/libslic3r/Format/STEP.hpp — guard entire file body in WASM mode
+#    Model.hpp includes STEP.hpp unconditionally.  STEP.hpp uses OCCT types
+#    throughout (TopoDS_Shape, Handle, Message_ProgressIndicator, etc.) — not
+#    just in the includes.  Wrap everything after #pragma once with
+#    #ifndef SLIC3R_NO_OCCT.  The load_step() stub in STEP.cpp doesn't need
+#    the header in WASM mode.
 # ─────────────────────────────────────────────────────────────────────────────
-patch("src/libslic3r/Format/STEP.hpp", [
-    (
-        r'((?:#include\s+[<"][^">\n]+\.hxx[">]\n)+)',
-        r'#ifndef SLIC3R_NO_OCCT\n\1#endif // SLIC3R_NO_OCCT\n',
-        0,
-    ),
-])
+step_hpp = ORCA / "src/libslic3r/Format/STEP.hpp"
+if step_hpp.exists():
+    _content = step_hpp.read_text(encoding="utf-8", errors="replace")
+    if "#ifndef SLIC3R_NO_OCCT" not in _content:
+        _patched = re.sub(
+            r'(#pragma once\n)([\s\S]+)',
+            r'\1#ifndef SLIC3R_NO_OCCT\n\2\n#endif // SLIC3R_NO_OCCT\n',
+            _content,
+            count=1,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+        if not DRY_RUN:
+            step_hpp.write_text(_patched, encoding="utf-8")
+        print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/Format/STEP.hpp")
+    else:
+        print("  OK (no change): src/libslic3r/Format/STEP.hpp")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. src/libslic3r/CMakeLists.txt — make OCCT / OpenCV / draco conditional
