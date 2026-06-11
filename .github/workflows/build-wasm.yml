@@ -65,7 +65,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: orca-wasm/deps-install
-          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v11
+          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v12
 
       # ── Boost ────────────────────────────────────────────────────────
       # Build Boost using b2 with the clang-emscripten toolset.  The standard
@@ -139,7 +139,7 @@ jobs:
 
           GMP_VERSION=6.3.0
           MPFR_VERSION=4.2.1
-          CGAL_VERSION=5.6.1
+          CGAL_VERSION=5.6.2
           DL=/tmp/math-dl
           mkdir -p "${DL}"
 
