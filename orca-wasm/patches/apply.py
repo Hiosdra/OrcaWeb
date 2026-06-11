@@ -147,6 +147,46 @@ patch("src/libslic3r/Model.hpp", [
 ])
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 3d. src/libslic3r/Model.cpp — guard read_from_step() definition
+#     The declaration in Model.hpp is already guarded (section 3b).
+#     The definition also uses ImportStepProgressFn / StepIsUtf8Fn / Slic3r::Step
+#     which are hidden when SLIC3R_NO_OCCT is set.  Use brace-counting to wrap
+#     the whole function body without touching any other Model functions.
+# ─────────────────────────────────────────────────────────────────────────────
+_model_cpp = ORCA / "src/libslic3r/Model.cpp"
+if _model_cpp.exists():
+    _mc = _model_cpp.read_text(encoding="utf-8", errors="replace")
+    if "#ifndef SLIC3R_NO_OCCT" not in _mc:
+        _m = re.search(r'\nModel Model::read_from_step\s*\(', _mc)
+        if _m:
+            _func_start = _m.start() + 1          # skip leading \n
+            _brace_start = _mc.index('{', _func_start)
+            _depth = 0
+            _func_end = _brace_start
+            for _i in range(_brace_start, len(_mc)):
+                _ch = _mc[_i]
+                if _ch == '{':
+                    _depth += 1
+                elif _ch == '}':
+                    _depth -= 1
+                    if _depth == 0:
+                        _func_end = _i + 1
+                        break
+            _guarded = (
+                "#ifndef SLIC3R_NO_OCCT\n"
+                + _mc[_func_start:_func_end]
+                + "\n#endif // SLIC3R_NO_OCCT\n"
+            )
+            _mc_new = _mc[:_func_start] + _guarded + _mc[_func_end:]
+            if not DRY_RUN:
+                _model_cpp.write_text(_mc_new, encoding="utf-8")
+            print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/Model.cpp (read_from_step guard)")
+        else:
+            print("  WARN: Model::read_from_step not found in Model.cpp")
+    else:
+        print("  OK (no change): src/libslic3r/Model.cpp")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 3c. src/libslic3r/GCode.hpp — fix narrowing in LayerResult::make_nop_layer_result
 #     On 32-bit WASM, size_t is uint32_t.  std::numeric_limits<coord_t>::max()
 #     = INT64_MAX which cannot be narrowed to size_t → [-Wc++11-narrowing] error.
