@@ -149,17 +149,15 @@ jobs:
           curl -fL --retry 3 \
             "https://ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz" | tar xJ -C "${DL}"
           cd "${DL}/gmp-${GMP_VERSION}"
-          # ── DIAGNOSTIC: show what configure says about label suffix ──
-          echo "=== configure lines matching 'label.suffix' ==="
-          grep -n "label.suffix\|gmp_cv_asm_label" configure | head -30
-          echo "==="
+          # CONFIG_SITE seeds cache vars before any check runs; export provides
+          # the same value via direct env inheritance for all sub-configures.
           printf 'gmp_cv_asm_label_suffix=":"\n' > /tmp/gmp_site.sh
           export gmp_cv_asm_label_suffix=":"
-          echo "env gmp_cv_asm_label_suffix='${gmp_cv_asm_label_suffix}'"
           CONFIG_SITE=/tmp/gmp_site.sh emconfigure ./configure \
             --prefix="${INSTALL}" \
             --host=wasm32-unknown-emscripten \
-            --disable-shared --enable-static --disable-assembly
+            --disable-shared --enable-static --disable-assembly \
+            --enable-cxx
           emmake make -j"$(nproc)"
           make install
 
