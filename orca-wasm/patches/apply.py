@@ -194,12 +194,14 @@ patch("src/libslic3r/CMakeLists.txt", [
 # 4. src/libslic3r/FuzzySkin.cpp — thread_local RNG not allowed in WASM
 # ─────────────────────────────────────────────────────────────────────────────
 patch("src/libslic3r/AABBTreeLines.hpp", [
-    # Template deduction fails when passing a lazy Eigen CwiseUnaryOp expression
-    # to a function that expects Eigen::Matrix.  Calling .eval() forces evaluation
-    # to a concrete Matrix<Scalar, N, 1> before the call, satisfying deduction.
+    # Template deduction fails because the Eigen CwiseUnaryOp (lazy cast expression)
+    # preserves the Options template argument from the source matrix (e.g. Options=2),
+    # while Vec<N, Scalar> defaults to Options=0.  Deduction sees "2 vs 0" and fails.
+    # Explicitly constructing Vec<Dim<LineType>, Scalar> forces the correct Options.
+    # Matches both the un-patched form and the earlier .eval() attempt.
     (
-        r'(origin\.template cast<typename LineType::Scalar>\(\))',
-        r'\1.eval()',
+        r'(origin\.template cast<typename LineType::Scalar>\(\))(?:\.eval\(\))?',
+        r'Vec<Dim<LineType>, typename LineType::Scalar>(\1)',
         0,
     ),
 ])
