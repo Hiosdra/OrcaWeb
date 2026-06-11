@@ -480,6 +480,19 @@ else:
     print("  SKIP (not found): src/libslic3r/ObjColorUtils.cpp")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 6f. src/libslic3r/Platform.cpp — suppress unknown-platform static_assert
+#     Platform.cpp asserts on unknown platforms; Emscripten is not in the list.
+#     Guard the assertion so WASM builds skip it.
+# ─────────────────────────────────────────────────────────────────────────────
+patch("src/libslic3r/Platform.cpp", [
+    (
+        r'(static_assert\s*\(\s*false\s*,\s*"Unknown platform detected"\s*\);)',
+        r'#ifndef SLIC3R_WASM\n    \1\n#endif',
+        0,
+    ),
+])
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 6d. GCode/Thumbnails.cpp — define JCS_EXT_RGBA if missing
 #     Emscripten ships standard libjpeg (no turbo extensions).
 # ─────────────────────────────────────────────────────────────────────────────
