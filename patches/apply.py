@@ -147,6 +147,20 @@ patch("src/libslic3r/Model.hpp", [
 ])
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 3c. src/libslic3r/GCode.hpp — fix narrowing in LayerResult::make_nop_layer_result
+#     On 32-bit WASM, size_t is uint32_t.  std::numeric_limits<coord_t>::max()
+#     = INT64_MAX which cannot be narrowed to size_t → [-Wc++11-narrowing] error.
+#     Replace with static_cast<size_t>(-1) (= SIZE_MAX on any platform).
+# ─────────────────────────────────────────────────────────────────────────────
+patch("src/libslic3r/GCode.hpp", [
+    (
+        r'(\{"",\s*)std::numeric_limits<coord_t>::max\(\)',
+        r'\1static_cast<size_t>(-1)',
+        0,
+    ),
+])
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 4. src/libslic3r/CMakeLists.txt — make OCCT / OpenCV / draco conditional
 # ─────────────────────────────────────────────────────────────────────────────
 patch("src/libslic3r/CMakeLists.txt", [
