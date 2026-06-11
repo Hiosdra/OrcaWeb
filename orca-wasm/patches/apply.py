@@ -193,6 +193,17 @@ patch("src/libslic3r/CMakeLists.txt", [
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. src/libslic3r/FuzzySkin.cpp — thread_local RNG not allowed in WASM
 # ─────────────────────────────────────────────────────────────────────────────
+patch("src/libslic3r/AABBTreeLines.hpp", [
+    # Template deduction fails when passing a lazy Eigen CwiseUnaryOp expression
+    # to a function that expects Eigen::Matrix.  Calling .eval() forces evaluation
+    # to a concrete Matrix<Scalar, N, 1> before the call, satisfying deduction.
+    (
+        r'(origin\.template cast<typename LineType::Scalar>\(\))',
+        r'\1.eval()',
+        0,
+    ),
+])
+
 patch("src/libslic3r/FuzzySkin.cpp", [
     (
         r'\bthread_local\s+',
