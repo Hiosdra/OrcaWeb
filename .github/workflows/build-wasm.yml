@@ -149,13 +149,13 @@ jobs:
           curl -fL --retry 3 \
             "https://ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz" | tar xJ -C "${DL}"
           cd "${DL}/gmp-${GMP_VERSION}"
-          # CONFIG_SITE is the autoconf-standard way to pre-seed cache variables
-          # for cross-compilation — it is sourced at the start of every configure.
-          # Additionally export the var directly and keep a sed fallback.
+          # ── DIAGNOSTIC: show what configure says about label suffix ──
+          echo "=== configure lines matching 'label.suffix' ==="
+          grep -n "label.suffix\|gmp_cv_asm_label" configure | head -30
+          echo "==="
           printf 'gmp_cv_asm_label_suffix=":"\n' > /tmp/gmp_site.sh
           export gmp_cv_asm_label_suffix=":"
-          find . -name configure -exec sed -i \
-            '/Cannot determine label suffix/{n;d;}' {} \;
+          echo "env gmp_cv_asm_label_suffix='${gmp_cv_asm_label_suffix}'"
           CONFIG_SITE=/tmp/gmp_site.sh emconfigure ./configure \
             --prefix="${INSTALL}" \
             --host=wasm32-unknown-emscripten \
