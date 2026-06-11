@@ -149,14 +149,14 @@ jobs:
           curl -fL --retry 3 \
             "https://ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz" | tar xJ -C "${DL}"
           cd "${DL}/gmp-${GMP_VERSION}"
-          # Replace the fatal "Cannot determine label suffix" error with a
-          # fallback assignment. Pattern matches regardless of autoconf version.
-          sed -i '/Cannot determine label suffix/c\  gmp_cv_asm_label_suffix=":"' configure
+          # Patch every configure script (main + cxx/ sub-configure) to fall
+          # back to ':' when the cross-compile label suffix probe cannot run.
+          find . -name configure | xargs sed -i \
+            '/Cannot determine label suffix/c\  gmp_cv_asm_label_suffix=":"'
           emconfigure ./configure \
             --prefix="${INSTALL}" \
             --host=wasm32-unknown-emscripten \
-            --disable-shared --enable-static --disable-assembly \
-            --enable-cxx
+            --disable-shared --enable-static --disable-assembly
           emmake make -j"$(nproc)"
           make install
 
