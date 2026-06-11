@@ -400,6 +400,18 @@ else:
     print("  SKIP (not found): src/libslic3r/Format/svg.cpp")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 6d. GCode/Thumbnails.cpp — define JCS_EXT_RGBA if missing
+#     Emscripten ships standard libjpeg (no turbo extensions).
+# ─────────────────────────────────────────────────────────────────────────────
+patch("src/libslic3r/GCode/Thumbnails.cpp", [
+    (
+        r'(#include\s*<jpeglib\.h>)',
+        r'\1\n#ifndef JCS_EXT_RGBA\n#  define JCS_EXT_RGBA 13\n#endif',
+        0,
+    ),
+])
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 7. Root CMakeLists.txt — append OrcaWeb bridge + WASM link target injection.
 #    The bridge and wasm subdirs live in orca-wasm/ (outside orca/).
 #    Their absolute paths are passed at cmake configure time via:
