@@ -133,6 +133,20 @@ if step_hpp.exists():
         print("  OK (no change): src/libslic3r/Format/STEP.hpp")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 3b. src/libslic3r/Model.hpp — guard read_from_step() declaration
+#     Model.hpp declares read_from_step() which uses ImportStepProgressFn,
+#     StepIsUtf8Fn, and Slic3r::Step — all defined in STEP.hpp inside the
+#     SLIC3R_NO_OCCT guard.  Guard the method declaration to match.
+# ─────────────────────────────────────────────────────────────────────────────
+patch("src/libslic3r/Model.hpp", [
+    (
+        r'(static\s+Model\s+read_from_step\s*\([^;]+;)',
+        r'#ifndef SLIC3R_NO_OCCT\n\1\n#endif // SLIC3R_NO_OCCT',
+        0,
+    ),
+])
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 4. src/libslic3r/CMakeLists.txt — make OCCT / OpenCV / draco conditional
 # ─────────────────────────────────────────────────────────────────────────────
 patch("src/libslic3r/CMakeLists.txt", [
