@@ -343,6 +343,37 @@ if ovdb_cpp.exists():
         print("  OK (no change): src/libslic3r/OpenVDBUtils.cpp")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 6b. Format/DRC.cpp — stub body when SLIC3R_WASM
+#     DRC (Google Draco) compression is not available in WASM builds.
+# ─────────────────────────────────────────────────────────────────────────────
+DRC_STUB = """\
+#ifdef SLIC3R_WASM
+// Google Draco not available in WASM — provide no-op stubs.
+#include "DRC.hpp"
+namespace Slic3r {
+bool load_drc(const char*, TriangleMesh*) { return false; }
+bool load_drc(const char*, Model*, const char*) { return false; }
+bool store_drc(const TriangleMesh&, const char*, int, int) { return false; }
+bool store_drc(const ModelObject&, const char*, int, int) { return false; }
+bool store_drc(const Model&, const char*, int, int) { return false; }
+} // namespace Slic3r
+#else
+"""
+
+drc_cpp = ORCA / "src/libslic3r/Format/DRC.cpp"
+if drc_cpp.exists():
+    content = drc_cpp.read_text(encoding="utf-8")
+    if "#ifdef SLIC3R_WASM" not in content:
+        if not DRY_RUN:
+            drc_cpp.write_text(DRC_STUB + content + "\n#endif // SLIC3R_WASM\n",
+                               encoding="utf-8")
+        print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/Format/DRC.cpp")
+    else:
+        print("  OK (no change): src/libslic3r/Format/DRC.cpp")
+else:
+    print("  SKIP (not found): src/libslic3r/Format/DRC.cpp")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 7. Root CMakeLists.txt — append OrcaWeb bridge + WASM link target injection.
 #    The bridge and wasm subdirs live in orca-wasm/ (outside orca/).
 #    Their absolute paths are passed at cmake configure time via:
