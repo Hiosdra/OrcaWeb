@@ -112,18 +112,18 @@ step_hpp = ORCA / "src/libslic3r/Format/STEP.hpp"
 if step_hpp.exists():
     _content = step_hpp.read_text(encoding="utf-8", errors="replace")
     if "#ifndef SLIC3R_NO_OCCT" not in _content:
-        # STEP.hpp uses a traditional #ifndef/#define include guard, NOT #pragma once.
-        # Pattern: (#ifndef guard / #define guard / content / #endif)
-        # Insert #ifndef SLIC3R_NO_OCCT after the #define line and close it before
-        # the final #endif so the OCCT-dependent content is skipped in WASM mode.
+        # STEP.hpp uses a traditional include guard ending with #endif /* ... */ (not //).
+        # Step 1: insert #ifndef SLIC3R_NO_OCCT right after the #define guard line.
         _patched = re.sub(
-            r'(#ifndef\s+\S+\s*\n#define\s+\S+\s*\n)([\s\S]+?)(\n#endif\s*(?://[^\n]*)?\s*)$',
-            r'\1#ifndef SLIC3R_NO_OCCT\n\2\n#endif // SLIC3R_NO_OCCT\n\3',
+            r'(#define\s+\S+\s*\n)',
+            r'\1#ifndef SLIC3R_NO_OCCT\n',
             _content,
             count=1,
-            flags=re.MULTILINE | re.DOTALL,
         )
-        if _patched != _content:
+        # Step 2: close the guard before the final #endif (handles // and /* */ comments).
+        last = _patched.rfind('#endif')
+        if last >= 0 and _patched != _content:
+            _patched = _patched[:last] + '#endif // SLIC3R_NO_OCCT\n' + _patched[last:]
             if not DRY_RUN:
                 step_hpp.write_text(_patched, encoding="utf-8")
             print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/Format/STEP.hpp")
