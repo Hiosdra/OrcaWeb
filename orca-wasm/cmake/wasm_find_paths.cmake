@@ -14,3 +14,15 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
 if(NOT TARGET Threads::Threads)
     add_library(Threads::Threads INTERFACE IMPORTED GLOBAL)
 endif()
+
+# Directory-scope compile definitions for the entire WASM build tree.
+# Using add_compile_definitions here (rather than CMAKE_CXX_FLAGS or
+# target_compile_definitions) is the most reliable way to ensure these
+# symbols are visible to every translation unit, including PCH and any
+# file that includes OCCT-gated headers via the Model.hpp include chain.
+add_compile_definitions(
+    SLIC3R_WASM=1
+    SLIC3R_NO_OCCT=1
+    SLIC3R_NO_OPENVDB=1
+    SLIC3R_NO_OPENCV=1
+)
