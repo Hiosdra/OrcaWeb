@@ -65,7 +65,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: orca-wasm/deps-install
-          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v10
+          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v11
 
       # ── Boost ────────────────────────────────────────────────────────
       # Build Boost using b2 with the clang-emscripten toolset.  The standard
@@ -152,7 +152,8 @@ jobs:
           emconfigure ./configure \
             --prefix="${INSTALL}" \
             --host=wasm32-unknown-emscripten \
-            --disable-shared --enable-static --disable-assembly
+            --disable-shared --enable-static --disable-assembly \
+            --enable-cxx
           emmake make -j"$(nproc)"
           make install
 
