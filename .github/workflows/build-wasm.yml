@@ -149,23 +149,17 @@ jobs:
           curl -fL --retry 3 \
             "https://ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz" | tar xJ -C "${DL}"
           cd "${DL}/gmp-${GMP_VERSION}"
-          # Pre-fill a config cache to bypass assembler probes that can't
-          # execute WASM binaries during cross-compilation.
-          printf '%s\n' \
-            'gmp_cv_asm_label_suffix=""' \
-            'gmp_cv_asm_type_directive=""' \
-            'gmp_cv_asm_size_directive=""' \
-            'gmp_cv_asm_lsym_prefix=""' \
-            'gmp_cv_asm_align_log=no' \
-            'gmp_cv_asm_align_needs_abs=no' \
-            'gmp_cv_asm_globl_directive=.globl' \
-            > ./config.cache
+          # Patch the generated configure script to fall back to ':' when
+          # cross-compiling prevents running the assembler label suffix probe.
+          # emconfigure doesn't forward --cache-file so the cache approach fails.
+          sed -i \
+            's/as_fn_error \$? "Cannot determine label suffix" "\$LINENO" 5/gmp_cv_asm_label_suffix=":"/' \
+            configure
           emconfigure ./configure \
             --prefix="${INSTALL}" \
             --host=wasm32-unknown-emscripten \
             --disable-shared --enable-static --disable-assembly \
-            --enable-cxx \
-            --cache-file=./config.cache
+            --enable-cxx
           emmake make -j"$(nproc)"
           make install
 
