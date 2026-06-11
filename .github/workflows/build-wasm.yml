@@ -149,12 +149,9 @@ jobs:
           curl -fL --retry 3 \
             "https://ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz" | tar xJ -C "${DL}"
           cd "${DL}/gmp-${GMP_VERSION}"
-          # Patch the generated configure script to fall back to ':' when
-          # cross-compiling prevents running the assembler label suffix probe.
-          # emconfigure doesn't forward --cache-file so the cache approach fails.
-          sed -i \
-            's/as_fn_error \$? "Cannot determine label suffix" "\$LINENO" 5/gmp_cv_asm_label_suffix=":"/' \
-            configure
+          # Replace the fatal "Cannot determine label suffix" error with a
+          # fallback assignment. Pattern matches regardless of autoconf version.
+          sed -i '/Cannot determine label suffix/c\  gmp_cv_asm_label_suffix=":"' configure
           emconfigure ./configure \
             --prefix="${INSTALL}" \
             --host=wasm32-unknown-emscripten \
