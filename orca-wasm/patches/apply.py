@@ -440,6 +440,32 @@ else:
     print("  SKIP (not found): src/libslic3r/Format/svg.cpp")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 6e. src/libslic3r/ObjColorUtils.hpp — guard OpenCV include
+#     ObjColorUtils.hpp includes <opencv2/opencv.hpp> unconditionally.
+#     OpenCV is unavailable in WASM; wrap everything after #pragma once with
+#     #ifndef SLIC3R_NO_OPENCV so the header becomes a no-op in WASM mode.
+# ─────────────────────────────────────────────────────────────────────────────
+_obj_color_hpp = ORCA / "src/libslic3r/ObjColorUtils.hpp"
+if _obj_color_hpp.exists():
+    _oc = _obj_color_hpp.read_text(encoding="utf-8", errors="replace")
+    if "#ifndef SLIC3R_NO_OPENCV" not in _oc:
+        # Find end of #pragma once line and insert guard after it
+        _pragma_end = _oc.find('\n', _oc.index('#pragma once')) + 1
+        _patched = (
+            _oc[:_pragma_end]
+            + "#ifndef SLIC3R_NO_OPENCV\n"
+            + _oc[_pragma_end:]
+            + "\n#endif // SLIC3R_NO_OPENCV\n"
+        )
+        if not DRY_RUN:
+            _obj_color_hpp.write_text(_patched, encoding="utf-8")
+        print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/ObjColorUtils.hpp")
+    else:
+        print("  OK (no change): src/libslic3r/ObjColorUtils.hpp")
+else:
+    print("  SKIP (not found): src/libslic3r/ObjColorUtils.hpp")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 6d. GCode/Thumbnails.cpp — define JCS_EXT_RGBA if missing
 #     Emscripten ships standard libjpeg (no turbo extensions).
 # ─────────────────────────────────────────────────────────────────────────────
