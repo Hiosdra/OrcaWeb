@@ -77,3 +77,12 @@ uruchamia build jako check. Publikacja release'u jest pomijana na runach PR.
 - Zweryfikować w przeglądarce, że slicowanie faktycznie działa na silniku
   v2.3.2 (usunięcie `EMULATE_FUNCTION_POINTER_CASTS` jest bezpieczne tylko jeśli
   nie ma realnych niezgodnych wywołań przez wskaźnik — sprawdzić runtime).
+- **Okroić `slicer.data` (~200 MB).** Link pakuje cały `orca/resources/` przez
+  `--preload-file=.../orca/resources@/resources` (w `orca-wasm/wasm/CMakeLists.txt`),
+  łącznie z rzeczami nieużywanymi w headless WASM (grafiki GUI, lokalizacje,
+  ikony, fonty, shadery). Ograniczyć preload do `resources/profiles` (presety
+  JSON drukarek/filamentów/procesów) + ewentualne realnie wczytywane siatki
+  kalibracyjne, potem zweryfikować, że slicowanie nadal działa. Zysk: szybsze
+  ładowanie modułu i mniej ~72 MB kawałków, które `deploy.yml` musi dzielić
+  wokół limitu 100 MB/plik w git (worker je skleja). Cel: rząd kilkudziesięciu
+  MB zamiast 200 MB.
