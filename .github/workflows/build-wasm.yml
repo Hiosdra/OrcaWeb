@@ -12,6 +12,12 @@ on:
         required: true
   push:
     tags: ['v*.*.*']
+  # Run on PRs that touch the WASM build pipeline so compilation breakage is
+  # caught before merge.  Path-filtered to avoid a ~3 h build on UI-only PRs.
+  pull_request:
+    paths:
+      - 'orca-wasm/**'
+      - '.github/workflows/build-wasm.yml'
 
 permissions:
   contents: write  # needed to create/update releases
@@ -22,7 +28,7 @@ jobs:
     timeout-minutes: 180  # deps ~60 min + main build ~60 min
 
     env:
-      ORCA_VERSION: ${{ github.event.inputs.orca_version || github.ref_name }}
+      ORCA_VERSION: ${{ github.event.inputs.orca_version || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v2.3.2' }}
       EMSDK: /opt/emsdk
 
     steps:
@@ -349,7 +355,9 @@ jobs:
           retention-days: 90
 
       # ── Create / update GitHub release with WASM assets ─────────────
+      # Skip on PRs — those runs only validate compilation, not publish.
       - name: Upload to GitHub Release
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
