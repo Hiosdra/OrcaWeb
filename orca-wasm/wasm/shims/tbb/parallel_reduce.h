@@ -1,5 +1,6 @@
 #pragma once
 #include "blocked_range.h"
+#include "partitioner.h"
 
 namespace tbb {
 
