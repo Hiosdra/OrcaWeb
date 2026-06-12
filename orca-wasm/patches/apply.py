@@ -383,6 +383,90 @@ if ovdb_cpp.exists():
         print("  OK (no change): src/libslic3r/OpenVDBUtils.cpp")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 6a. OpenVDBUtils.hpp — guard whole body when SLIC3R_NO_OPENVDB
+#     The header declares functions returning openvdb types (FloatGrid, Vec3s).
+#     OpenVDBUtils.cpp is only compiled when the OpenVDB::openvdb target exists
+#     (absent in WASM), but Hollowing.cpp includes this header unconditionally.
+#     Guard everything after the include-guard #define so it is a no-op in WASM.
+# ─────────────────────────────────────────────────────────────────────────────
+_ovdb_hpp = ORCA / "src/libslic3r/OpenVDBUtils.hpp"
+if _ovdb_hpp.exists():
+    _oh = _ovdb_hpp.read_text(encoding="utf-8", errors="replace")
+    if "#ifndef SLIC3R_NO_OPENVDB" not in _oh:
+        _patched = re.sub(
+            r'(#define\s+OPENVDBUTILS_HPP\s*\n)',
+            r'\1#ifndef SLIC3R_NO_OPENVDB\n',
+            _oh,
+            count=1,
+        )
+        _last = _patched.rfind('#endif')
+        if _last >= 0 and _patched != _oh:
+            _patched = _patched[:_last] + '#endif // SLIC3R_NO_OPENVDB\n' + _patched[_last:]
+            if not DRY_RUN:
+                _ovdb_hpp.write_text(_patched, encoding="utf-8")
+            print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/OpenVDBUtils.hpp")
+        else:
+            print("  WARN pattern not matched: src/libslic3r/OpenVDBUtils.hpp")
+    else:
+        print("  OK (no change): src/libslic3r/OpenVDBUtils.hpp")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6a-2. SLA/Hollowing.cpp — stub when SLIC3R_NO_OPENVDB
+#     Hollowing is OpenVDB-based (Interior holds openvdb::FloatGrid::Ptr).
+#     SLA hollowing is irrelevant to the FDM WASM slicer; provide no-op stubs
+#     for every non-inline function declared in Hollowing.hpp.
+# ─────────────────────────────────────────────────────────────────────────────
+HOLLOWING_STUB = """\
+#ifdef SLIC3R_NO_OPENVDB
+// OpenVDB not available in WASM — SLA mesh hollowing is disabled.
+#include "Hollowing.hpp"
+#include <libslic3r/ExPolygon.hpp>
+#include <array>
+#include <functional>
+#include <utility>
+#include <vector>
+namespace Slic3r { namespace sla {
+
+struct Interior { indexed_triangle_set mesh; };
+void InteriorDeleter::operator()(Interior *p) { delete p; }
+indexed_triangle_set &      get_mesh(Interior &i)       { return i.mesh; }
+const indexed_triangle_set &get_mesh(const Interior &i) { return i.mesh; }
+
+bool DrainHole::operator==(const DrainHole &sp) const {
+    return pos.isApprox(sp.pos) && normal.isApprox(sp.normal) &&
+           radius == sp.radius && height == sp.height && failed == sp.failed;
+}
+bool DrainHole::is_inside(const Vec3f &) const { return false; }
+bool DrainHole::get_intersections(const Vec3f &, const Vec3f &,
+                                  std::array<std::pair<float, Vec3d>, 2> &) const { return false; }
+indexed_triangle_set DrainHole::to_mesh() const { return {}; }
+
+InteriorPtr generate_interior(const TriangleMesh &, const HollowingConfig &, const JobController &) { return {}; }
+void hollow_mesh(TriangleMesh &, const HollowingConfig &, int) {}
+void hollow_mesh(TriangleMesh &, const Interior &, int) {}
+void remove_inside_triangles(TriangleMesh &, const Interior &, const std::vector<bool> &) {}
+double get_distance(const Vec3f &, const Interior &) { return 0.; }
+void cut_drainholes(std::vector<ExPolygons> &, const std::vector<float> &, float,
+                    const sla::DrainHoles &, std::function<void(void)>) {}
+
+}} // namespace Slic3r::sla
+#else
+"""
+
+hollowing_cpp = ORCA / "src/libslic3r/SLA/Hollowing.cpp"
+if hollowing_cpp.exists():
+    content = hollowing_cpp.read_text(encoding="utf-8", errors="replace")
+    if "#ifdef SLIC3R_NO_OPENVDB" not in content:
+        if not DRY_RUN:
+            hollowing_cpp.write_text(HOLLOWING_STUB + content + "\n#endif // SLIC3R_NO_OPENVDB\n",
+                                     encoding="utf-8")
+        print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/SLA/Hollowing.cpp")
+    else:
+        print("  OK (no change): src/libslic3r/SLA/Hollowing.cpp")
+else:
+    print("  SKIP (not found): src/libslic3r/SLA/Hollowing.cpp")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 6b. Format/DRC.cpp — stub body when SLIC3R_WASM
 #     DRC (Google Draco) compression is not available in WASM builds.
 # ─────────────────────────────────────────────────────────────────────────────
