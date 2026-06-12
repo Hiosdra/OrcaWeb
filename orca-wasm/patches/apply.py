@@ -440,6 +440,38 @@ else:
     print("  SKIP (not found): src/libslic3r/Format/svg.cpp")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 6c-2. Shape/TextShape.cpp — stub body when SLIC3R_NO_OCCT
+#     TextShape.cpp uses OCCT (Standard_TypeDef.hxx etc.) for text-to-mesh.
+#     Provide no-op stubs for its three public functions in WASM mode.
+# ─────────────────────────────────────────────────────────────────────────────
+textshape_cpp = ORCA / "src/libslic3r/Shape/TextShape.cpp"
+if textshape_cpp.exists():
+    content = textshape_cpp.read_text(encoding="utf-8", errors="replace")
+    if "#ifdef SLIC3R_NO_OCCT" not in content:
+        stub = (
+            "#ifdef SLIC3R_NO_OCCT\n"
+            "// OCCT not available in WASM — provide no-op stubs.\n"
+            "#include \"TextShape.hpp\"\n"
+            "#include <map>\n"
+            "#include <string>\n"
+            "#include <vector>\n"
+            "namespace Slic3r {\n"
+            "std::vector<std::string> init_occt_fonts() { return {}; }\n"
+            "void load_text_shape(const char*, const char*, const float, const float, bool, bool, TextResult&) {}\n"
+            "std::map<std::string, std::string> get_occt_fonts_maps() { return {}; }\n"
+            "} // namespace Slic3r\n"
+            "#else\n"
+        )
+        if not DRY_RUN:
+            textshape_cpp.write_text(stub + content + "\n#endif // SLIC3R_NO_OCCT\n",
+                                     encoding="utf-8")
+        print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/Shape/TextShape.cpp")
+    else:
+        print("  OK (no change): src/libslic3r/Shape/TextShape.cpp")
+else:
+    print("  SKIP (not found): src/libslic3r/Shape/TextShape.cpp")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 6e. src/libslic3r/ObjColorUtils.hpp — guard OpenCV include
 #     ObjColorUtils.hpp includes <opencv2/opencv.hpp> unconditionally.
 #     OpenCV is unavailable in WASM; wrap everything after #pragma once with
