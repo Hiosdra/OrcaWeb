@@ -19,7 +19,10 @@ target_link_options(slicer PRIVATE
   -sMODULARIZE=1
   -sEXPORT_NAME=OrcaModule
   -sDISABLE_EXCEPTION_CATCHING=0
-  -sEMULATE_FUNCTION_POINTER_CASTS=1
+  # NOTE: -sEMULATE_FUNCTION_POINTER_CASTS=1 was removed — its --fpcast-emu
+  # wasm-opt pass crashes Binaryen at -O3 (mixed_arena.h assertion).  The link
+  # itself succeeds without it; if a genuine mismatched-signature indirect call
+  # exists it will trap at runtime with a clear message, to be fixed surgically.
   -fexceptions
   # Preload OrcaSlicer resource bundle (profiles, materials, etc.)
   "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/../orca/resources@/resources"
