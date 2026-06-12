@@ -620,6 +620,42 @@ patch("src/libslic3r/GCode/Thumbnails.cpp", [
     ),
 ])
 
+# 6d-2. GCode/Thumbnails.cpp — replace compress_thumbnail_jpg body with a PNG
+#       fallback.  libjpeg is intentionally not linked in WASM (find_package(JPEG)
+#       is guarded in CMakeLists), so the jpeg_* calls would be undefined symbols
+#       at link time.  Delegate JPG thumbnails to the PNG encoder instead.
+_thumb_cpp = ORCA / "src/libslic3r/GCode/Thumbnails.cpp"
+if _thumb_cpp.exists():
+    _tc = _thumb_cpp.read_text(encoding="utf-8", errors="replace")
+    if "// WASM: JPG thumbnails fall back to PNG" not in _tc:
+        _m = re.search(r'std::unique_ptr<CompressedImageBuffer>\s+compress_thumbnail_jpg\s*\([^)]*\)\s*', _tc)
+        if _m:
+            _brace_start = _tc.index('{', _m.end())
+            _depth = 0
+            _body_end = _brace_start
+            for _i in range(_brace_start, len(_tc)):
+                if _tc[_i] == '{':
+                    _depth += 1
+                elif _tc[_i] == '}':
+                    _depth -= 1
+                    if _depth == 0:
+                        _body_end = _i + 1
+                        break
+            _new_body = (
+                "{\n"
+                "    // WASM: JPG thumbnails fall back to PNG (libjpeg not linked).\n"
+                "    return compress_thumbnail_png(data);\n"
+                "}"
+            )
+            _tc_new = _tc[:_brace_start] + _new_body + _tc[_body_end:]
+            if not DRY_RUN:
+                _thumb_cpp.write_text(_tc_new, encoding="utf-8")
+            print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/GCode/Thumbnails.cpp (jpg->png fallback)")
+        else:
+            print("  WARN: compress_thumbnail_jpg not found in Thumbnails.cpp")
+    else:
+        print("  OK (no change): src/libslic3r/GCode/Thumbnails.cpp (jpg fallback)")
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 6g. utils.cpp — single-threaded Boost.Log compatibility
 #     Our Boost.Log (deps-install) is built with BOOST_LOG_NO_THREADS, so the
