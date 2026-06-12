@@ -37,6 +37,12 @@ OrcaWeb to przeglądarkowy slicer oparty na WebAssembly. Cały pipeline slicowan
 Źródło: [`allanwrench28/orcaslicer-wasm`](https://github.com/allanwrench28/orcaslicer-wasm) release v1.1.  
 Pobieranie: `node scripts/download-wasm.mjs`
 
+> **Uwaga (kierunek):** powyższe opisuje obecny, wdrożony silnik. Nasz własny
+> build OrcaSlicer v2.3.2 ([`07-wasm-self-build.md`](07-wasm-self-build.md))
+> **nie ma `slicer.data`** — preload `orca/resources` został usunięty (headless
+> slicing go nie czyta), więc po cutoverze zostają tylko `slicer.js` +
+> `slicer.wasm`, bez dzielenia na kawałki i sklejania w workerze.
+
 ### API WASM
 ```typescript
 // Inicjalizacja z konfiguracją JSON

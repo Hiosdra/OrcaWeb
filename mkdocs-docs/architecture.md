@@ -151,6 +151,12 @@ handleSlice()
 
 In production, `VITE_WASM_BASE_URL` points to GitHub Releases. The browser fetches the 144 MB `slicer.data` from `objects.githubusercontent.com` (CORS: `Access-Control-Allow-Origin: *`) and caches it.
 
+!!! note "Direction"
+    The above describes the currently deployed engine. Our self-built OrcaSlicer
+    v2.3.2 engine has **no `slicer.data`** — the `orca/resources` preload was
+    dropped (headless slicing never reads it), so after cutover only
+    `slicer.js` + `slicer.wasm` are served, with no chunk splitting/reassembly.
+
 ## Stack
 
 | Layer | Technology | Notes |

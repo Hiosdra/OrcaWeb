@@ -10,4 +10,4 @@ Dokumentacja postępu projektu. Każdy plik odpowiada jednemu etapowi pracy.
 | [04-wasm-integration-fix.md](04-wasm-integration-fix.md) | Naprawa WASM — race condition + pobieranie artefaktów | ✅ Ukończony |
 | [05-mvp-verification.md](05-mvp-verification.md) | Weryfikacja MVP — pełny przepływ end-to-end | ✅ Ukończony |
 | [06-architecture.md](06-architecture.md) | Architektura — UI, worker, WASM API, pipeline buildu | ✅ Ukończony |
-| [07-wasm-self-build.md](07-wasm-self-build.md) | Własny build WASM OrcaSlicer v2.3.2 — build zielony na CI | ✅ Build zielony |
+| [07-wasm-self-build.md](07-wasm-self-build.md) | Własny build WASM v2.3.2 — build zielony, slice zweryfikowany, `slicer.data` usunięte | ✅ Zweryfikowany |
