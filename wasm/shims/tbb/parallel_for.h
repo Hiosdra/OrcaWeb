@@ -1,5 +1,6 @@
 #pragma once
 #include "blocked_range.h"
+#include "partitioner.h"
 // Real TBB pulls in this_task_arena transitively via parallel_for.h; mirror that
 // so code using tbb::this_task_arena::max_concurrency() compiles with this shim.
 #include "task_arena.h"
