@@ -46,7 +46,8 @@ target_link_options(slicer PRIVATE
 'HEAP8',\
 'HEAPU8',\
 'HEAP32',\
-'HEAPU32'\
+'HEAPU32',\
+'FS'\
 ]"
 )
 
