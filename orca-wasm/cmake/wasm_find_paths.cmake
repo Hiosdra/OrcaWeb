@@ -25,4 +25,9 @@ add_compile_definitions(
     SLIC3R_NO_OCCT=1
     SLIC3R_NO_OPENVDB=1
     SLIC3R_NO_OPENCV=1
+    # Our Boost.Log (deps-install) was built with BOOST_LOG_NO_THREADS=1, which
+    # places its symbols in the single-threaded (v2s_st) namespace.  The consumer
+    # must use the same define or it references the multi-threaded (v2s_mt_posix)
+    # namespace and wasm-ld fails with undefined boost::log symbols at link time.
+    BOOST_LOG_NO_THREADS=1
 )
