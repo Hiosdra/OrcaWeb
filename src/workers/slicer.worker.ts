@@ -55,48 +55,12 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         URL.revokeObjectURL(blobUrl)
       }
 
-      // Patch fetch so Emscripten's preload of slicer.data transparently
-      // reassembles from two *.part0 / *.part1 chunks (each < 100 MB so
-      // they fit in git on GitHub Pages).  Falls back to a single file for
-      // local dev where the full slicer.data lives in public/wasm/.
-      const nativeFetch = self.fetch.bind(self)
-      ;(self as unknown as { fetch: typeof self.fetch }).fetch = async function (
-        input: RequestInfo | URL,
-        init?: RequestInit,
-      ) {
-        const url = typeof input === 'string' ? input
-          : input instanceof URL ? input.href
-          : (input as Request).url
-        if (url.endsWith('/slicer.data')) {
-          const r0 = await nativeFetch(url + '.part0', init)
-          if (r0.ok) {
-            // Fetch remaining parts dynamically until one returns 404
-            const bufs: ArrayBuffer[] = [await r0.arrayBuffer()]
-            for (let i = 1; ; i++) {
-              const r = await nativeFetch(`${url}.part${i}`, init)
-              if (!r.ok) {
-                if (r.status === 404) break
-                throw new Error(`HTTP ${r.status} fetching ${url}.part${i}`)
-              }
-              bufs.push(await r.arrayBuffer())
-            }
-            const total = bufs.reduce((s, b) => s + b.byteLength, 0)
-            const out = new Uint8Array(total)
-            let off = 0
-            for (const b of bufs) { out.set(new Uint8Array(b), off); off += b.byteLength }
-            return new Response(out.buffer, {
-              status: 200,
-              headers: { 'Content-Type': 'application/octet-stream' },
-            })
-          }
-          // part0 not found → fall through to fetch the whole file (local dev)
-        }
-        return nativeFetch(input, init)
-      }
+      // The v2.3.2 engine has no slicer.data (the orca/resources preload was
+      // dropped — verified that headless slicing never reads /resources), so
+      // there is nothing to fetch or reassemble here.
 
       orcaModule = await factory({
         wasmBinary,
-        // slicer.data is resolved relative to wasmBase (e.g. /wasm/slicer.data)
         locateFile: (path: string) => `${wasmBase}/${path}`,
         printErr: (m: string) => console.warn('[OrcaWASM]', m),
         onAbort: (m: string) => console.error('[OrcaWASM abort]', m),

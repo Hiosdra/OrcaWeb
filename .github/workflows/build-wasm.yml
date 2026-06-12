@@ -336,19 +336,21 @@ jobs:
           echo "--- public/wasm/ ---"
           ls -lh public/wasm/ 2>/dev/null || true
 
-          # Fallback copy if POST_BUILD didn't run
+          # Fallback copy if POST_BUILD didn't run.  slicer.data only exists when
+          # a --preload-file bundle is used; the v2.3.2 engine has none, so it is
+          # copied only if present.
           BUILDDIR="orca-wasm/build-wasm/wasm"
           if [[ ! -f public/wasm/slicer.js ]] && [[ -f "${BUILDDIR}/slicer.js" ]]; then
             mkdir -p public/wasm
             cp "${BUILDDIR}/slicer.js"   public/wasm/slicer.js
             cp "${BUILDDIR}/slicer.wasm" public/wasm/slicer.wasm
-            cp "${BUILDDIR}/slicer.data" public/wasm/slicer.data
+            [[ -f "${BUILDDIR}/slicer.data" ]] && cp "${BUILDDIR}/slicer.data" public/wasm/slicer.data
           fi
 
           mkdir -p wasm-artifacts
           cp public/wasm/slicer.js   wasm-artifacts/
           cp public/wasm/slicer.wasm wasm-artifacts/
-          cp public/wasm/slicer.data wasm-artifacts/
+          [[ -f public/wasm/slicer.data ]] && cp public/wasm/slicer.data wasm-artifacts/
           ls -lh wasm-artifacts/
 
       - name: Upload artifacts

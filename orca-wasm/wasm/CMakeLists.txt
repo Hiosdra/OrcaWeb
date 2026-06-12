@@ -24,8 +24,12 @@ target_link_options(slicer PRIVATE
   # itself succeeds without it; if a genuine mismatched-signature indirect call
   # exists it will trap at runtime with a clear message, to be fixed surgically.
   -fexceptions
-  # Preload OrcaSlicer resource bundle (profiles, materials, etc.)
-  "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/../orca/resources@/resources"
+  # No --preload-file: the headless flat-config slicer never reads orca/resources
+  # at runtime (verified in-browser — a full slice opens only /tmp/*.stl/.gcode,
+  # zero /resources access, and slicing is byte-identical with /resources removed).
+  # Dropping the ~200 MB preload removes slicer.data entirely.  FORCE_FILESYSTEM
+  # keeps MEMFS available for the bridge's /tmp STL-in / G-code-out files.
+  -sFORCE_FILESYSTEM=1
   # Exported C functions consumed by the JS runtime
   "-sEXPORTED_FUNCTIONS=[\
 '_orc_init',\
@@ -46,8 +50,7 @@ target_link_options(slicer PRIVATE
 'HEAP8',\
 'HEAPU8',\
 'HEAP32',\
-'HEAPU32',\
-'FS'\
+'HEAPU32'\
 ]"
 )
 
@@ -67,8 +70,6 @@ add_custom_command(TARGET slicer POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_CURRENT_BINARY_DIR}/slicer.wasm"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../public/wasm/slicer.wasm"
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    "${CMAKE_CURRENT_BINARY_DIR}/slicer.data"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../public/wasm/slicer.data"
+  # No slicer.data: the engine is built without --preload-file.
   COMMENT "Copying WASM artifacts to public/wasm/"
 )

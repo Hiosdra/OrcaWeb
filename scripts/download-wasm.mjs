@@ -15,12 +15,14 @@ import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const WASM_DIR = join(__dirname, '../public/wasm')
-const RELEASE_BASE = 'https://github.com/allanwrench28/orcaslicer-wasm/releases/download/v1.1'
+// Our self-built OrcaSlicer v2.3.2 engine (built by build-wasm.yml, published
+// to the wasm-v2.3.2 release).  It has no slicer.data — the orca/resources
+// preload was dropped because headless slicing never reads it.
+const RELEASE_BASE = 'https://github.com/Hiosdra/OrcaWeb/releases/download/wasm-v2.3.2'
 
 const ARTIFACTS = [
-  { name: 'slicer.js',   approxSize: 1_200_000   },
-  { name: 'slicer.wasm', approxSize: 6_400_000   },
-  { name: 'slicer.data', approxSize: 144_000_000 },
+  { name: 'slicer.js',   approxSize: 1_500_000 },
+  { name: 'slicer.wasm', approxSize: 9_000_000 },
 ]
 
 function formatBytes(bytes) {
