@@ -621,6 +621,28 @@ patch("src/libslic3r/GCode/Thumbnails.cpp", [
 ])
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 6g. utils.cpp — single-threaded Boost.Log compatibility
+#     Our Boost.Log (deps-install) is built with BOOST_LOG_NO_THREADS, so the
+#     consumer also defines it (see wasm_find_paths.cmake).  Under NO_THREADS:
+#       * sinks::synchronous_sink does not exist — add_file_log() returns an
+#         unlocked_sink, so g_log_sink must be declared as unlocked_sink.
+#       * attributes::current_thread_id is unavailable — drop the [Thread …]
+#         field from the log format.
+# ─────────────────────────────────────────────────────────────────────────────
+patch("src/libslic3r/utils.cpp", [
+    (
+        r'boost::log::sinks::synchronous_sink<boost::log::sinks::text_file_backend>',
+        r'boost::log::sinks::unlocked_sink<boost::log::sinks::text_file_backend>',
+        0,
+    ),
+    (
+        r'<<\s*"\[Thread\s*"\s*<<\s*expr::attr<attrs::current_thread_id::value_type>\("ThreadID"\)\s*<<\s*"\]"',
+        r'',
+        0,
+    ),
+])
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 7. Root CMakeLists.txt — append OrcaWeb bridge + WASM link target injection.
 #    The bridge and wasm subdirs live in orca-wasm/ (outside orca/).
 #    Their absolute paths are passed at cmake configure time via:
