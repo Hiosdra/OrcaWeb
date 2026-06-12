@@ -266,19 +266,23 @@ jobs:
 
       # ── Emscripten ports — ZLIB / libpng / libjpeg ───────────────────────
       # Build emscripten's bundled ports so FindZLIB/FindPNG/FindJPEG can
-      # reference their headers and .a files from the sysroot cache.
+      # reference their headers and .a files from the sysroot.
+      #
+      # NO stamp short-circuit here: these ports live in the emsdk sysroot
+      # ($EMSDK/.../cache/sysroot), which is installed fresh every run and is
+      # NOT part of the cached deps-install/.  A stamp in deps-install would
+      # wrongly skip embuilder on a cache hit, leaving libpng.a absent and
+      # failing the link.  embuilder is idempotent and self-caching, so just
+      # always run it (a few seconds when already built).
       - name: Build WASM deps — emscripten ports (zlib/png/jpeg)
         run: |
           source /opt/emsdk/emsdk_env.sh
-          STAMP="$(pwd)/orca-wasm/deps-install/.emports_built"
-          [[ -f "${STAMP}" ]] && echo "[emports] cached" && exit 0
           echo "[emports] building zlib, libpng, libjpeg via embuilder…"
           embuilder build zlib libpng libjpeg
           echo "[emports] sysroot libs:"
           ls "$EMSDK/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/libz.a" && echo "  libz OK"
           ls "$EMSDK/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/libpng.a" && echo "  libpng OK"
           ls "$EMSDK/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/libjpeg.a" && echo "  libjpeg OK"
-          touch "${STAMP}"
 
       # ── Configure WASM build ─────────────────────────────────────────
       # Builds from OrcaSlicer's own root cmake (with our patches applied).
