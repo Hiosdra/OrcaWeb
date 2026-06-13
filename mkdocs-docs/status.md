@@ -2,7 +2,7 @@
 
 Ten dokument opisuje aktualny stan projektu: zaimplementowane funkcje, znane ograniczenia i planowane ulepszenia.
 
-Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (własny build, wdrożony na produkcji) · wersja aplikacji: **PR #16 merged**
+Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (własny build, wdrożony na produkcji) · wersja aplikacji: **v0.3**
 
 ---
 
@@ -19,7 +19,7 @@ Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (
 | Siatka stołu — dynamiczny rozmiar | Rozmiar stołu pobierany z presetu drukarki lub profilu maszyny |
 | Zakładki Model / Settings / Slice | Płynna nawigacja, zakładki zablokowane do momentu wczytania pliku |
 | Panel ustawień | Wybór drukarki, filamentu, jakości |
-| Podgląd G-code (warstwa po warstwie) | Slider warstw, kolorowanie wg warstwy, ciemne tło |
+| Podgląd G-code (warstwa po warstwie) | Slider warstw, kolorowanie wg typu ruchu (perimeter/infill/support/travel), grube linie 3D, kursor warstwy — od PR #16 |
 | Statystyki G-code | Czas druku, warstwy, filament (mm/g), rozmiar pliku — parsowane z nagłówka G-code |
 | Widok model + G-code obok siebie | Po slicowaniu — synchronizowany układ obok siebie |
 | Pobieranie G-code | Przycisk „Download .gcode" z poprawną nazwą pliku |
@@ -38,6 +38,7 @@ Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (
 | Wczytanie WASM gdy slicowanie w trakcie | Kolejkowanie żądania `SLICE` gdy WASM jeszcze się ładuje |
 | JPEG miniatury G-code | Prawdziwy JPEG (RGBA→RGB, standard libjpeg) — od PR #13 |
 | Licznik czasu slicowania | Przycisk pokazuje `Slicing… (12s)` — rzetelna informacja bez fikcyjnych etapów — od PR #15 |
+| PWA / tryb offline | Service Worker (Workbox) pre-cache'uje wszystkie assety + WASM przy pierwszej wizycie; instalacja jako aplikacja natywna |
 
 ### Override approach (engine clean layer)
 
@@ -91,13 +92,6 @@ Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (
 | Brak konfiguracji `bed_shape` | Bambu Lab P1S ma okrągły stół — kształt stołu nie jest wizualizowany w podglądzie 3D |
 | Zakres temperatur niezweryfikowany | Presety printer+filament mogą być niespójne dla egzotycznych kombinacji |
 
-### Podgląd G-code
-
-| Problem | Szczegóły |
-|---------|-----------|
-| Tylko ruchy z ekstrudowaniem | Ruchy przejazdu (travel moves) nie są wizualizowane |
-| Brak separacji typów ruchów | Nie rozróżniane: perimeter / infill / support / travel |
-
 ### Importowanie profili
 
 | Problem | Szczegóły |
@@ -133,20 +127,12 @@ Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (
 | Multi-object na jednym stole | 🟡 średni |
 | Auto-arrange | 🟡 średni |
 
-### Podgląd G-code
-
-| Funkcja | Priorytet |
-|---------|-----------|
-| Kolorowanie wg typu ruchu | 🔴 wysoki |
-| Travel moves | 🟡 średni |
-
 ### Integracje
 
 | Funkcja | Priorytet |
 |---------|-----------|
 | OctoPrint REST API | 🟡 średni |
 | Bambu Lab wysyłanie | 🟠 niski (protokół proprietarny) |
-| PWA / tryb offline | 🟡 średni |
 
 ---
 
@@ -167,9 +153,9 @@ v0.3  ── ✅ Własny build WASM v2.3.2 (bez slicer.data)
       ── ✅ Prawdziwy JPEG (PR #13)
       ── ✅ Import pełnych profili maszyny z OrcaSlicera (PR #14)
       ── ✅ Licznik czasu slicowania (PR #15)
-      ── ✅ Import STEP / IGES (occt-import-js, PR #18)
-      ── Kolorowanie G-code wg typu ruchu
-      ── PWA / Service Worker
+      ── ✅ Kolorowanie G-code wg typu ruchu, travel moves, grube linie 3D (PR #16)
+      ── ✅ PWA / Service Worker — pre-cache WASM przy pierwszej wizycie
+      ── ✅ Import STEP / IGES (occt-import-js, PR #19)
 
 v0.4  ── OctoPrint integration
       ── Multi-object plate
@@ -186,7 +172,7 @@ src/
 ├── components/
 │   ├── FileUpload.tsx     ✅ drag & drop, STL + 3MF + STEP/IGES
 │   ├── ModelViewer.tsx    ✅ Three.js, STLLoader, dynamiczny rozmiar stołu
-│   ├── GcodeViewer.tsx    ✅ toolpaths, layer slider — ⚠️ brak travel
+│   ├── GcodeViewer.tsx    ✅ toolpaths, layer slider, feature-type colors, travel moves, grube linie 3D
 │   ├── SettingsPanel.tsx  ✅ presety, import profili — passthrough wszystkich pól OrcaSlicera
 │   └── SlicePanel.tsx     ✅ progress states, statystyki G-code, download
 ├── lib/
