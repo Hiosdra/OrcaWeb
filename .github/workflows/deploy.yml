@@ -24,22 +24,33 @@ jobs:
       - run: npm ci
 
       # ── Download WASM artifacts ──────────────────────────────────────
-      # Artifacts are built by the build-wasm.yml workflow and uploaded to a
-      # release tagged wasm-v2.3.2 in this repo.  The v2.3.2 engine has no
-      # slicer.data (the orca/resources preload was dropped — see
-      # orca-wasm/wasm/CMakeLists.txt), so only slicer.js + slicer.wasm are
-      # downloaded and no chunk-splitting is needed.
+      # Primary: download slicer.js + slicer.wasm from the wasm-v2.3.2 release.
+      # Fallback: restore from the previously-deployed gh-pages tree so a push
+      # that only touches UI/docs never fails just because the WASM release has
+      # not been created yet (e.g. immediately after a PR merge before the
+      # build-wasm workflow has run).
       - name: Download WASM artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p public/wasm
           WASM_TAG="wasm-v2.3.2"
-          gh release download "$WASM_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern "slicer.*" \
-            --dir public/wasm
-          ls -lh public/wasm/
+          if gh release view "$WASM_TAG" --repo "$GITHUB_REPOSITORY" &>/dev/null; then
+            gh release download "$WASM_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern "slicer.*" \
+              --dir public/wasm
+            echo "Downloaded WASM from release $WASM_TAG"
+          else
+            echo "::warning::Release $WASM_TAG not found — restoring WASM from previous gh-pages deploy"
+            git fetch origin gh-pages 2>/dev/null || true
+            for f in slicer.js slicer.wasm; do
+              git show "origin/gh-pages:app/wasm/$f" > "public/wasm/$f" 2>/dev/null \
+                && echo "  restored $f from gh-pages" \
+                || echo "::warning::  $f not found in gh-pages either"
+            done
+          fi
+          ls -lh public/wasm/ || true
 
       # ── Build Vite app ───────────────────────────────────────────────
       - name: Build Vite app

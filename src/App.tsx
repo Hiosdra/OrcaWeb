@@ -279,7 +279,15 @@ export default function App() {
         >
           OrcaSlicer
         </a>{' '}
-        · All slicing runs locally in your browser
+        · All slicing runs locally in your browser ·{' '}
+        <a
+          href="https://github.com/Hiosdra/OrcaWeb"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:text-slate-600"
+        >
+          Source (AGPL-3.0)
+        </a>
       </footer>
     </div>
   )
