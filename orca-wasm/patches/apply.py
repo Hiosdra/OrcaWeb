@@ -6,10 +6,15 @@ Strategy
 --------
 * CMakeLists.txt files are patched in-place (unavoidable — OrcaSlicer has no
   upstream WASM build support).
-* C++ *stub* files (OCCT, OpenVDB, OpenCV, Draco, libnoise) are NOT modified.
-  Instead, the CMake injection in section 4c marks the originals as
-  HEADER_FILE_ONLY and adds our standalone override files from
-  ``orca-wasm/overrides/``.  This keeps ``orca/`` free of C++ changes.
+* C++ *stub .cpp* files (OCCT, OpenVDB, OpenCV, Draco, libnoise) are NOT
+  modified.  The CMake injection in section 4c marks originals as
+  HEADER_FILE_ONLY and adds our override implementations from
+  ``orca-wasm/overrides/``.
+* C++ *stub .hpp* files whose originals include unavailable headers (OCCT,
+  OpenVDB, OpenCV) ARE copied from ``orca-wasm/overrides/`` directly into
+  the orca/ source tree (section 4b).  GCC/Clang always search the including
+  file's directory before any -I path, so the only reliable override is to
+  replace the file in-place.  The canonical stub source remains in overrides/.
 * C++ *bugfixes* (narrowing, Eigen deduction, Boost.Log, Platform assert,
   thumbnail jpg→png) are still patched in-place; these are genuine
   compatibility issues that should be upstreamed to OrcaSlicer.
@@ -23,11 +28,31 @@ Run from orca-wasm/ with:
 
 import re
 import sys
+import shutil
 import argparse
 from pathlib import Path
 
-ORCA = Path(__file__).resolve().parent.parent / "orca"
+ORCA      = Path(__file__).resolve().parent.parent / "orca"
+OVERRIDES = Path(__file__).resolve().parent.parent / "overrides"
 DRY_RUN = False
+
+
+def copy_override(rel_path: str) -> None:
+    """Copy an override file from orca-wasm/overrides/ into the orca/ source tree."""
+    src = OVERRIDES / rel_path
+    dst = ORCA / rel_path
+    if not src.exists():
+        print(f"  SKIP (override not found): {rel_path}")
+        return
+    if dst.exists() and dst.read_text(encoding="utf-8") == src.read_text(encoding="utf-8"):
+        print(f"  OK (no change): {rel_path}")
+        return
+    if DRY_RUN:
+        print(f"  WOULD COPY: {rel_path}")
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    print(f"  COPY: {rel_path}")
 
 
 def patch(rel_path: str, replacements: list[tuple[str, str, int]]) -> bool:
@@ -251,6 +276,17 @@ patch("src/libslic3r/AABBTreeLines.hpp", [
 ])
 
 # =============================================================================
+# 4b. Override headers — copy into orca/ source tree
+#     GCC/Clang search the *including file's* directory before any -I path
+#     for #include "..." directives, so the only reliable way to override a
+#     header that lives next to its includer is to physically replace it.
+#     The canonical stub content stays in orca-wasm/overrides/.
+# =============================================================================
+copy_override("src/libslic3r/Format/STEP.hpp")
+copy_override("src/libslic3r/OpenVDBUtils.hpp")
+copy_override("src/libslic3r/ObjColorUtils.hpp")
+
+# =============================================================================
 # 4c. src/libslic3r/CMakeLists.txt — inject WASM override sources
 #     Appended (not inline-patched) so it survives minor upstream reshuffles.
 #     Marks original stub-only files as HEADER_FILE_ONLY (not compiled) and
@@ -297,11 +333,6 @@ if(SLIC3R_WASM AND DEFINED ORCA_WEB_OVERRIDES_DIR)
     "${ORCA_WEB_OVERRIDES_DIR}/src/libslic3r/Feature/FuzzySkin/FuzzySkin.cpp"
   )
 
-  # Override headers take priority: #include "Format/STEP.hpp" etc. find our
-  # stubs before the OCCT/OpenVDB/OpenCV-dependent originals.
-  target_include_directories(libslic3r BEFORE PUBLIC
-    "${ORCA_WEB_OVERRIDES_DIR}/src/libslic3r"
-  )
 endif()
 """
 

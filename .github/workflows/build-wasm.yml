@@ -319,7 +319,7 @@ jobs:
             -DCGAL_DIR="${DEP_INSTALL}/lib/cmake/CGAL" \
             -DNLOPT_LIBRARY="${DEP_INSTALL}/lib/libnlopt.a" \
             -DNLOPT_INCLUDE_DIR="${DEP_INSTALL}/include" \
-            "-DCMAKE_CXX_FLAGS=-I${WORK}/orca-wasm/overrides/src/libslic3r -I${WORK}/orca-wasm/wasm/shims -fexceptions -DBOOST_HAS_PTHREADS=1 -DBOOST_LOG_NO_THREADS=1 -DSLIC3R_WASM=1 -DSLIC3R_NO_OCCT=1 -DSLIC3R_NO_OPENVDB=1 -DSLIC3R_NO_OPENCV=1" \
+            "-DCMAKE_CXX_FLAGS=-I${WORK}/orca-wasm/wasm/shims -fexceptions -DBOOST_HAS_PTHREADS=1 -DBOOST_LOG_NO_THREADS=1 -DSLIC3R_WASM=1 -DSLIC3R_NO_OCCT=1 -DSLIC3R_NO_OPENVDB=1 -DSLIC3R_NO_OPENCV=1" \
             "-DCMAKE_C_FLAGS=-I${WORK}/orca-wasm/wasm/shims"
 
       # ── Build WASM module ────────────────────────────────────────────
