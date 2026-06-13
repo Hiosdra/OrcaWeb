@@ -279,17 +279,24 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
     // ── Passthrough for unmapped OrcaSlicer fields ───────────────────────────
     // Collect every field not already processed so it can be forwarded verbatim
     // to the WASM slicer (which accepts any DynamicPrintConfig key).
-    const SKIP_META = new Set(['type', 'name', 'inherits', 'from', 'version', 'description'])
+    const SKIP_META = new Set(['type', 'name', 'inherits', 'from', 'version', 'description', '__proto__', 'constructor', 'prototype'])
     const SKIP_BED  = new Set(['printable_area', 'bed_size'])
     const alreadyMapped = new Set(Object.keys(ORCA_FIELD_MAP))
-    const passthrough: Record<string, string> = {}
+    const passthrough: Record<string, string> = Object.create(null) as Record<string, string>
     for (const [field, val] of Object.entries(raw)) {
       if (SKIP_META.has(field) || SKIP_BED.has(field) || alreadyMapped.has(field)) continue
-      // OrcaSlicer wraps many machine fields in single-element arrays: ["0.8"]
-      // The WASM bridge cannot deserialize bare arrays, so unwrap them.
-      const v = Array.isArray(val) ? val[0] : val
-      if (v === null || v === undefined) continue
-      const sv = typeof v === 'boolean' ? (v ? '1' : '0') : String(v)
+      if (val === null || val === undefined) continue
+      let sv: string
+      if (Array.isArray(val)) {
+        // OrcaSlicer wraps values in arrays (single-extruder: ["0.8"], multi: ["0.8","1.0"]).
+        // OrcaSlicer's config deserializer expects multi-value options as comma-separated strings.
+        sv = val
+          .filter((x) => x !== null && x !== undefined)
+          .map((x) => (typeof x === 'boolean' ? (x ? '1' : '0') : String(x)))
+          .join(',')
+      } else {
+        sv = typeof val === 'boolean' ? (val ? '1' : '0') : String(val)
+      }
       if (sv !== '') passthrough[field] = sv
     }
     if (Object.keys(passthrough).length > 0) config._passthrough = passthrough

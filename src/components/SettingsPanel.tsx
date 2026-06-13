@@ -36,7 +36,7 @@ export function SettingsPanel({
     reader.onload = (ev) => {
       try {
         const json = ev.target?.result as string
-        const parsed = JSON.parse(json) as Record<string, unknown>
+        const parsed = JSON.parse(json) as Record<string, unknown> | null
         const patch = parseOrcaProfileJson(json)
         const { _passthrough, ...knownFields } = patch
         const knownCount = Object.keys(knownFields).length
@@ -46,8 +46,8 @@ export function SettingsPanel({
           setImportMsg({ ok: false, text: 'No recognised settings found in this JSON.' })
         } else {
           onChange(patch)
-          const profileName = typeof parsed.name === 'string' ? parsed.name : null
-          const profileType = typeof parsed.type === 'string' ? parsed.type : null
+          const profileName = typeof parsed?.name === 'string' ? parsed.name : null
+          const profileType = typeof parsed?.type === 'string' ? parsed.type : null
           const label = profileName ? `"${profileName}"` : `"${file.name}"`
           const typeSuffix = profileType === 'machine'
             ? ` · machine profile · ${total} settings`
