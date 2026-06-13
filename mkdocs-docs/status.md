@@ -2,7 +2,7 @@
 
 Ten dokument opisuje aktualny stan projektu: zaimplementowane funkcje, znane ograniczenia i planowane ulepszenia.
 
-Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (własny build, wdrożony na produkcji) · wersja aplikacji: **PR #12 merged**
+Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (własny build, wdrożony na produkcji) · wersja aplikacji: **PR #14 merged**
 
 ---
 
@@ -53,7 +53,8 @@ Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (
 | Wbudowane presety jakości | Draft (0.3 mm) / Standard (0.2 mm) / Fine (0.1 mm) |
 | Wbudowane filamenty | PLA, PETG, ABS, TPU |
 | Wbudowane drukarki | Generic 0.4/0.6, Bambu Lab P1S/X1C, Prusa MK4, Ender 3, Voron 2.4 |
-| Import profilu JSON z OrcaSlicera | Plik `.json` z instalacji desktop; mapowanie `ORCA_FIELD_MAP` — 30+ pól |
+| Import profilu JSON z OrcaSlicera | Plik `.json` z instalacji desktop; mapowanie `ORCA_FIELD_MAP` + passthrough wszystkich pozostałych pól |
+| Import profilu maszyny | Pola `gcode_flavor`, `retract_length/speed`, `lift_z`, `machine_start/end_gcode`, `machine_max_speed_*`, `printable_height` — wszystkie trafiają do silnika |
 | Ekstrakcja profili z 3MF | `Metadata/*.json/.config` z archiwum |
 
 ### CLI (Node.js)
@@ -85,7 +86,7 @@ Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (
 
 | Problem | Szczegóły |
 |---------|-----------|
-| Brak konfiguracji `bed_shape` | Bambu Lab P1S ma okrągły stół — nie jest to przekazywane do WASM |
+| Brak konfiguracji `bed_shape` | Bambu Lab P1S ma okrągły stół — kształt stołu nie jest wizualizowany w podglądzie 3D |
 | Zakres temperatur niezweryfikowany | Presety printer+filament mogą być niespójne dla egzotycznych kombinacji |
 
 ### Podgląd G-code
@@ -99,8 +100,8 @@ Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (
 
 | Problem | Szczegóły |
 |---------|-----------|
-| Mapowanie niekompletne | Tylko ~30 pól z OrcaSlicera |
-| Profile maszyny ignorowane | Pola z sekcji `machine_settings` nie są przekazywane do WASM |
+| Mapowanie niekompletne | ~~Tylko ~30 pól z OrcaSlicera~~ Wszystkie pola trafiają do WASM (passthrough) — **naprawione w PR #14** |
+| Profile maszyny ignorowane | ~~Pola z sekcji `machine_settings` nie są przekazywane do WASM~~ — **naprawione w PR #14** |
 
 ### Inne UI
 
@@ -164,6 +165,7 @@ v0.3  ── ✅ Własny build WASM v2.3.2 (bez slicer.data)
       ── ✅ AGPL-3.0 compliance
       ── ✅ Override approach (engine clean layer)
       ── ✅ Prawdziwy JPEG (PR #13)
+      ── ✅ Import pełnych profili maszyny z OrcaSlicera (PR #14)
       ── Kolorowanie G-code wg typu ruchu
       ── PWA / Service Worker
 
@@ -183,10 +185,10 @@ src/
 │   ├── FileUpload.tsx     ✅ drag & drop, STL + 3MF
 │   ├── ModelViewer.tsx    ✅ Three.js, STLLoader, dynamiczny rozmiar stołu
 │   ├── GcodeViewer.tsx    ✅ toolpaths, layer slider — ⚠️ brak travel
-│   ├── SettingsPanel.tsx  ✅ presety, import profili — ⚠️ niekompletne mapowanie
+│   ├── SettingsPanel.tsx  ✅ presety, import profili — passthrough wszystkich pól OrcaSlicera
 │   └── SlicePanel.tsx     ✅ progress states, statystyki G-code, download
 ├── lib/
-│   ├── profiles.ts        ✅ presety z rozmiarami stołu, 30+ pól
+│   ├── profiles.ts        ✅ presety z rozmiarami stołu, 30+ pól + passthrough wszystkich pozostałych
 │   ├── parse3mf.ts        ✅ 3MF → binary STL + OrcaConfig
 │   ├── wasm-loader.ts     ✅ orc_init / orc_slice / error codes
 │   └── worker-singleton.ts ✅ singleton, preload WASM
