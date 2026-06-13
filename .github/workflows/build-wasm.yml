@@ -311,6 +311,7 @@ jobs:
             -DORCA_WEB_BRIDGE_DIR="${WORK}/orca-wasm/bridge" \
             -DORCA_WEB_WASM_DIR="${WORK}/orca-wasm/wasm" \
             -DORCA_WEB_SHIM_DIR="${WORK}/orca-wasm/wasm/shims" \
+            -DORCA_WEB_OVERRIDES_DIR="${WORK}/orca-wasm/overrides" \
             -DBoost_NO_SYSTEM_PATHS=ON \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DBOOST_ROOT="${DEP_INSTALL}" \
