@@ -1,5 +1,6 @@
 // Umbrella TBB shim header — pulls in all stubs used by OrcaSlicer.
 #pragma once
+#include "version.h"
 #include "blocked_range.h"
 #include "parallel_for.h"
 #include "parallel_reduce.h"
