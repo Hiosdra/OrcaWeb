@@ -12,6 +12,12 @@ on:
         required: true
   push:
     tags: ['v*.*.*']
+  # Run on PRs that touch the WASM build pipeline so compilation breakage is
+  # caught before merge.  Path-filtered to avoid a ~3 h build on UI-only PRs.
+  pull_request:
+    paths:
+      - 'orca-wasm/**'
+      - '.github/workflows/build-wasm.yml'
 
 permissions:
   contents: write  # needed to create/update releases
@@ -22,7 +28,7 @@ jobs:
     timeout-minutes: 180  # deps ~60 min + main build ~60 min
 
     env:
-      ORCA_VERSION: ${{ github.event.inputs.orca_version || github.ref_name }}
+      ORCA_VERSION: ${{ github.event.inputs.orca_version || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v2.3.2' }}
       EMSDK: /opt/emsdk
 
     steps:
@@ -65,9 +71,15 @@ jobs:
         uses: actions/cache@v5
         with:
           path: orca-wasm/deps-install
-          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v4
+          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v12
 
       # ── Boost ────────────────────────────────────────────────────────
+      # Build Boost using b2 with the clang-emscripten toolset.  The standard
+      # archives.boost.org tarball does not ship CMakeLists.txt, so the CMake
+      # build approach never works without the GitHub super-project checkout.
+      # We instead use b2 and patch OrcaSlicer's CMP0167 to OLD so that the
+      # legacy FindBoost.cmake (module mode) is used — it works perfectly with
+      # b2-installed Boost given BOOST_ROOT + Boost_NO_BOOST_CMAKE=ON.
       - name: Build WASM deps — Boost
         run: |
           source /opt/emsdk/emsdk_env.sh
@@ -80,23 +92,47 @@ jobs:
 
           echo "[boost] downloading Boost ${BOOST_VERSION}…"
           mkdir -p /tmp/boost
-          # archives.boost.org is the official mirror (jfrog.io redirects are broken)
           curl -fL --retry 3 \
             "https://archives.boost.org/release/${BOOST_VERSION}/source/boost_${BOOST_UNDERSCORE}.tar.gz" \
             | tar xz -C /tmp/boost
           cd "/tmp/boost/boost_${BOOST_UNDERSCORE}"
-          ./bootstrap.sh --without-libraries=python
-          printf 'using clang : emscripten : em++ : <compileflags>"-O2" <archiveflags>"" ;\n' \
-            > user-config.jam
-          ./b2 install \
-            --prefix="${INSTALL}" \
+
+          echo "[boost] bootstrapping b2…"
+          ./bootstrap.sh --with-toolset=clang
+
+          echo "[boost] writing user-config.jam for emscripten toolset…"
+          printf "using clang : emscripten : em++ :\n<archiver>emar\n<ranlib>emranlib ;\n" > ~/user-config.jam
+
+          echo "[boost] building with b2 (emscripten, static, single-threaded)…"
+          ./b2 \
             toolset=clang-emscripten \
-            link=static threading=single variant=release \
-            --with-filesystem --with-system --with-regex \
-            --with-thread --with-atomic --with-chrono \
-            --with-date_time --with-iostreams \
-            --with-locale --with-nowide --with-program_options \
-            -j"$(nproc)" 2>&1 | tail -10
+            variant=release \
+            link=static \
+            threading=single \
+            --layout=system \
+            --prefix="${INSTALL}" \
+            --with-atomic \
+            --with-chrono \
+            --with-date_time \
+            --with-filesystem \
+            --with-iostreams \
+            --with-locale \
+            --with-log \
+            --with-nowide \
+            --with-program_options \
+            --with-regex \
+            --with-system \
+            --with-thread \
+            "define=BOOST_LOG_NO_THREADS=1" \
+            "define=BOOST_LOG_WITHOUT_SYSLOG=1" \
+            "define=BOOST_THREAD_DONT_USE_PTHREAD=1" \
+            -j"$(nproc)" \
+            install
+
+          echo "[boost] installed headers:"
+          ls "${INSTALL}/include/boost/version.hpp" && echo "  boost/version.hpp OK"
+          echo "[boost] installed libs (sample):"
+          ls "${INSTALL}/lib/libboost_system"* 2>/dev/null | head -3 || echo "  no libboost_system found!"
           touch "${STAMP}"
 
       # ── GMP / MPFR / CGAL ────────────────────────────────────────────
@@ -109,7 +145,7 @@ jobs:
 
           GMP_VERSION=6.3.0
           MPFR_VERSION=4.2.1
-          CGAL_VERSION=5.6.1
+          CGAL_VERSION=5.6.2
           DL=/tmp/math-dl
           mkdir -p "${DL}"
 
@@ -119,8 +155,15 @@ jobs:
           curl -fL --retry 3 \
             "https://ftp.gnu.org/gnu/gmp/gmp-${GMP_VERSION}.tar.xz" | tar xJ -C "${DL}"
           cd "${DL}/gmp-${GMP_VERSION}"
-          emconfigure ./configure \
-            --prefix="${INSTALL}" --disable-shared --enable-static --disable-assembly ABI=32
+          # CONFIG_SITE seeds cache vars before any check runs; export provides
+          # the same value via direct env inheritance for all sub-configures.
+          printf 'gmp_cv_asm_label_suffix=":"\n' > /tmp/gmp_site.sh
+          export gmp_cv_asm_label_suffix=":"
+          CONFIG_SITE=/tmp/gmp_site.sh emconfigure ./configure \
+            --prefix="${INSTALL}" \
+            --host=wasm32-unknown-emscripten \
+            --disable-shared --enable-static --disable-assembly \
+            --enable-cxx
           emmake make -j"$(nproc)"
           make install
 
@@ -207,7 +250,39 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF
           emmake cmake --build /tmp/nlopt-build --target install
 
+          # ── cereal (header-only serialization — needed by libslic3r) ─────
+          echo "[cereal] installing…"
+          git clone --depth 1 --branch v1.3.2 \
+            https://github.com/USCiLab/cereal.git /tmp/cereal
+          cmake -S /tmp/cereal -B /tmp/cereal-build -G Ninja \
+            -DCMAKE_INSTALL_PREFIX="${INSTALL}" \
+            -DJUST_INSTALL_CEREAL=ON \
+            -DSKIP_PERFORMANCE_COMPARISON=ON \
+            -DBUILD_SANDBOX=OFF \
+            -DBUILD_DOC=OFF
+          cmake --build /tmp/cereal-build --target install
+
           touch "${STAMP}"
+
+      # ── Emscripten ports — ZLIB / libpng / libjpeg ───────────────────────
+      # Build emscripten's bundled ports so FindZLIB/FindPNG/FindJPEG can
+      # reference their headers and .a files from the sysroot.
+      #
+      # NO stamp short-circuit here: these ports live in the emsdk sysroot
+      # ($EMSDK/.../cache/sysroot), which is installed fresh every run and is
+      # NOT part of the cached deps-install/.  A stamp in deps-install would
+      # wrongly skip embuilder on a cache hit, leaving libpng.a absent and
+      # failing the link.  embuilder is idempotent and self-caching, so just
+      # always run it (a few seconds when already built).
+      - name: Build WASM deps — emscripten ports (zlib/png/jpeg)
+        run: |
+          source /opt/emsdk/emsdk_env.sh
+          echo "[emports] building zlib, libpng, libjpeg via embuilder…"
+          embuilder build zlib libpng libjpeg
+          echo "[emports] sysroot libs:"
+          ls "$EMSDK/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/libz.a" && echo "  libz OK"
+          ls "$EMSDK/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/libpng.a" && echo "  libpng OK"
+          ls "$EMSDK/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/libjpeg.a" && echo "  libjpeg OK"
 
       # ── Configure WASM build ─────────────────────────────────────────
       # Builds from OrcaSlicer's own root cmake (with our patches applied).
@@ -226,6 +301,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${DEP_INSTALL}" \
             -DCMAKE_MODULE_PATH="${WORK}/orca-wasm/cmake" \
+            -DCMAKE_PROJECT_INCLUDE_BEFORE="${WORK}/orca-wasm/cmake/wasm_find_paths.cmake" \
             -DSLIC3R_WASM=ON \
             -DSLIC3R_GUI=OFF \
             -DSLIC3R_STATIC=ON \
@@ -236,10 +312,14 @@ jobs:
             -DORCA_WEB_WASM_DIR="${WORK}/orca-wasm/wasm" \
             -DORCA_WEB_SHIM_DIR="${WORK}/orca-wasm/wasm/shims" \
             -DBoost_NO_SYSTEM_PATHS=ON \
+            -DBoost_NO_BOOST_CMAKE=ON \
             -DBOOST_ROOT="${DEP_INSTALL}" \
+            -DBoost_ROOT="${DEP_INSTALL}" \
             -DCGAL_DIR="${DEP_INSTALL}/lib/cmake/CGAL" \
             -DNLOPT_LIBRARY="${DEP_INSTALL}/lib/libnlopt.a" \
-            -DNLOPT_INCLUDE_DIR="${DEP_INSTALL}/include"
+            -DNLOPT_INCLUDE_DIR="${DEP_INSTALL}/include" \
+            "-DCMAKE_CXX_FLAGS=-I${WORK}/orca-wasm/wasm/shims -fexceptions -DBOOST_HAS_PTHREADS=1 -DBOOST_LOG_NO_THREADS=1 -DSLIC3R_WASM=1 -DSLIC3R_NO_OCCT=1 -DSLIC3R_NO_OPENVDB=1 -DSLIC3R_NO_OPENCV=1" \
+            "-DCMAKE_C_FLAGS=-I${WORK}/orca-wasm/wasm/shims"
 
       # ── Build WASM module ────────────────────────────────────────────
       - name: Build WASM module
@@ -256,19 +336,21 @@ jobs:
           echo "--- public/wasm/ ---"
           ls -lh public/wasm/ 2>/dev/null || true
 
-          # Fallback copy if POST_BUILD didn't run
+          # Fallback copy if POST_BUILD didn't run.  slicer.data only exists when
+          # a --preload-file bundle is used; the v2.3.2 engine has none, so it is
+          # copied only if present.
           BUILDDIR="orca-wasm/build-wasm/wasm"
           if [[ ! -f public/wasm/slicer.js ]] && [[ -f "${BUILDDIR}/slicer.js" ]]; then
             mkdir -p public/wasm
             cp "${BUILDDIR}/slicer.js"   public/wasm/slicer.js
             cp "${BUILDDIR}/slicer.wasm" public/wasm/slicer.wasm
-            cp "${BUILDDIR}/slicer.data" public/wasm/slicer.data
+            [[ -f "${BUILDDIR}/slicer.data" ]] && cp "${BUILDDIR}/slicer.data" public/wasm/slicer.data
           fi
 
           mkdir -p wasm-artifacts
           cp public/wasm/slicer.js   wasm-artifacts/
           cp public/wasm/slicer.wasm wasm-artifacts/
-          cp public/wasm/slicer.data wasm-artifacts/
+          [[ -f public/wasm/slicer.data ]] && cp public/wasm/slicer.data wasm-artifacts/
           ls -lh wasm-artifacts/
 
       - name: Upload artifacts
@@ -279,7 +361,9 @@ jobs:
           retention-days: 90
 
       # ── Create / update GitHub release with WASM assets ─────────────
+      # Skip on PRs — those runs only validate compilation, not publish.
       - name: Upload to GitHub Release
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

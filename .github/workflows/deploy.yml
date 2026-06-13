@@ -24,23 +24,21 @@ jobs:
       - run: npm ci
 
       # ── Download WASM artifacts ──────────────────────────────────────
-      # We serve WASM from the same origin as the app (GitHub Pages) so
-      # no CORS headers are needed.  slicer.data is 144 MB — above git's
-      # 100 MB per-file limit — so it is split into two ≈72 MB chunks.
-      # The worker transparently reassembles them via the fetch patch in
-      # src/workers/slicer.worker.ts.
-      - name: Download & split WASM artifacts
+      # Artifacts are built by the build-wasm.yml workflow and uploaded to a
+      # release tagged wasm-v2.3.2 in this repo.  The v2.3.2 engine has no
+      # slicer.data (the orca/resources preload was dropped — see
+      # orca-wasm/wasm/CMakeLists.txt), so only slicer.js + slicer.wasm are
+      # downloaded and no chunk-splitting is needed.
+      - name: Download WASM artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p public/wasm
-          BASE="https://github.com/allanwrench28/orcaslicer-wasm/releases/download/v1.1"
-          curl -fL "$BASE/slicer.js"   -o public/wasm/slicer.js
-          curl -fL "$BASE/slicer.wasm" -o public/wasm/slicer.wasm
-          curl -fL "$BASE/slicer.data" -o public/wasm/slicer.data.full
-          # Split into two chunks, each ≈72 MB (well under GitHub's 100 MB limit)
-          split -b 75497472 public/wasm/slicer.data.full public/wasm/slicer.data.part
-          mv public/wasm/slicer.data.partaa public/wasm/slicer.data.part0
-          mv public/wasm/slicer.data.partab public/wasm/slicer.data.part1
-          rm  public/wasm/slicer.data.full
+          WASM_TAG="wasm-v2.3.2"
+          gh release download "$WASM_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "slicer.*" \
+            --dir public/wasm
           ls -lh public/wasm/
 
       # ── Build Vite app ───────────────────────────────────────────────
