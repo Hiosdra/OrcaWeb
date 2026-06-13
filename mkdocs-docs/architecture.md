@@ -121,7 +121,7 @@ Upgrading to a new OrcaSlicer version: change `ORCA_VERSION` in `build-wasm.yml`
 
 **ModelViewer** positions the STL with its bottom face at Y=0, centered on X/Z.
 
-**GcodeViewer** parses G1 moves, computes centroid of all X/Y, subtracts it, maps: `gcodeX → x`, `gcodeY → z`, `gcodeZ → y`.
+**GcodeViewer** parses G1 extrusion moves and G0/G1 travel moves, computes centroid of all X/Y toolpath points, subtracts it, maps: `gcodeX → x`, `gcodeY → z`, `gcodeZ → y`. Reads OrcaSlicer `;TYPE:` comments to colour extrusion segments by feature type; falls back to a blue→orange height gradient. Rendered with `LineSegments2` + `LineMaterial` for real screen-space line width.
 
 ## Data flow
 
@@ -181,7 +181,7 @@ handleSlice()
 |-------|-----------|-------|
 | UI | React 18, TypeScript 5 | No React Router — single-page tab state |
 | Styling | Tailwind CSS v3 | Custom `orca-*` colour scale |
-| 3D | Three.js 0.170 | STLLoader, OrbitControls, LineSegments |
+| 3D | Three.js 0.170 | STLLoader, OrbitControls, LineSegments2 (fat lines) |
 | Bundler | Vite 5 | Worker ES format, configurable base |
 | WASM | OrcaSlicer **v2.3.2** | Emscripten, single-threaded, self-built |
 | Worker | Web Worker (ES module) | Blob URL for dynamic import |

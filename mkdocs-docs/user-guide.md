@@ -101,9 +101,13 @@ After clicking **Slice model**:
 
 #### G-code viewer
 
-- Layers are coloured in rotation for easy visual separation
-- Use the **Layer** slider to scroll through from bottom to top
-- The layer counter shows current layer / total layers and the Z height
+- **Feature-type colours** — when the G-code contains OrcaSlicer `;TYPE:` comments each feature type (outer wall, inner wall, infill, support, bridge, etc.) is rendered in a distinct colour. A legend overlay in the top-right corner shows the colour key.
+- **Height gradient** — plain G-code without `;TYPE:` comments is coloured blue (bottom) → orange (top).
+- **Thick extrusion lines** — rendered with `LineSegments2` + `LineMaterial` (1.6 px screen-space width) for a solid, 3D-looking result. WebGL's `linewidth` is ignored above 1 px on most drivers.
+- **Travel moves** — non-extruding rapid moves are shown as dim grey lines when the **Travels** toggle in the control bar is on (off by default).
+- **Layer cursor** — a semi-transparent plane marks the height of the currently selected layer.
+- Use the **Layer** slider to scroll through from bottom to top.
+- The layer counter shows current layer / total layers and the Z height.
 
 #### G-code statistics
 
