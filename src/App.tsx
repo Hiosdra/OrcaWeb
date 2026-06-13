@@ -8,6 +8,7 @@ import { GcodeViewer } from './components/GcodeViewer'
 import type { OrcaConfig, SliceStatus, WorkerOutMessage } from './types'
 import { buildConfig } from './lib/profiles'
 import { parse3mf } from './lib/parse3mf'
+import { cadToStl } from './lib/step-converter'
 import {
   getWorker,
   addWorkerListener,
@@ -103,6 +104,26 @@ export default function App() {
         setSliceStatus({
           phase: 'error',
           message: `Failed to parse 3MF: ${err instanceof Error ? err.message : String(err)}`,
+        })
+        return
+      }
+    } else if (/\.(step|stp|iges|igs)$/i.test(f.name)) {
+      try {
+        setSliceStatus({ phase: 'loading-wasm' })
+        const buf = await f.arrayBuffer()
+        const stlBytes = await cadToStl(f.name, buf)
+        const stlFile = new File(
+          [stlBytes.buffer as ArrayBuffer],
+          f.name.replace(/\.(step|stp|iges|igs)$/i, '.stl'),
+          { type: 'model/stl' },
+        )
+        setFile(stlFile)
+        setConfigOverrides({})
+        setSliceStatus({ phase: 'idle' })
+      } catch (err) {
+        setSliceStatus({
+          phase: 'error',
+          message: `Failed to convert STEP/IGES: ${err instanceof Error ? err.message : String(err)}`,
         })
         return
       }
