@@ -111,15 +111,17 @@ After clicking **Slice model**:
 
 #### G-code statistics
 
-After slicing, a stats panel shows key metrics parsed from the G-code header comments:
+After slicing, a stats panel shows key metrics parsed from the G-code output:
 
-| Stat | Source comment |
-|------|---------------|
-| Print time | `; estimated printing time` |
-| Layers | `; total layers count` |
-| Filament | `; total filament used [mm]` |
-| Weight | `; total filament weight [g]` |
-| G-code size | byte count of the output file |
+| Stat | Source |
+|------|--------|
+| Print time | `; estimated printing time` comment |
+| Layers | `; total layers count` comment, or `;LAYER_CHANGE` marker count as fallback |
+| Filament | `; total filament used [mm]` comment |
+| Weight | `; total filament weight [g]` comment |
+| G-code size | byte count of the output file (always shown) |
+
+Stats are searched in both the beginning and end of the G-code file, as OrcaSlicer may write them in either location.
 
 #### Downloading G-code
 

@@ -110,12 +110,14 @@ export function SlicePanel({ status, wasmStatus, onSlice, disabled }: Props) {
 
 /** Parse key statistics from G-code header comments. */
 function parseGcodeStats(gcode: string): GcodeStats {
-  // Slice a small chunk before splitting — avoids splitting a 50MB+ string
-  const chunk = gcode.slice(0, 100_000)
-  const header = chunk.split('\n').slice(0, 300).join('\n')
+  // OrcaSlicer may write stats at the start (after post-processing) or at the
+  // end of the file. Search both zones to handle either layout.
+  const head = gcode.slice(0, 100_000).split('\n').slice(0, 300).join('\n')
+  const tail = gcode.slice(-30_000).split('\n').slice(-200).join('\n')
+  const searchZone = head + '\n' + tail
 
   const match = (pattern: RegExp): string | undefined =>
-    header.match(pattern)?.[1]?.trim()
+    searchZone.match(pattern)?.[1]?.trim()
 
   const numMatch = (pattern: RegExp): number | undefined => {
     const s = match(pattern)
@@ -129,11 +131,21 @@ function parseGcodeStats(gcode: string): GcodeStats {
   let pos = -1
   while ((pos = gcode.indexOf('\n', pos + 1)) !== -1) lines++
 
+  // Fallback: count ;LAYER_CHANGE markers when the slicer omits the summary comment.
+  // Defined as a function so the full-file scan is skipped when the primary match succeeds.
+  const getCountedLayers = () => {
+    let n = 0
+    let p = -1
+    const marker = ';LAYER_CHANGE'
+    while ((p = gcode.indexOf(marker, p + 1)) !== -1) n++
+    return n > 0 ? n : undefined
+  }
+
   return {
-    bytes: new Blob([gcode]).size, // Blob.size gives UTF-8 byte length without allocating a TypedArray
+    bytes: new Blob([gcode]).size,
     lines: lines + 1,
     printTime:    match(/;\s*estimated printing time[^=]*=\s*(.+)/i),
-    layers:       numMatch(/;\s*total layers count\s*=\s*(\d+)/i),
+    layers:       numMatch(/;\s*total layers count\s*=\s*(\d+)/i) ?? getCountedLayers(),
     filamentMm:   numMatch(/;\s*total filament used \[mm\]\s*=\s*([\d.]+)/i),
     filamentCm3:  numMatch(/;\s*total filament used \[cm3\]\s*=\s*([\d.]+)/i),
     filamentG:    numMatch(/;\s*total filament weight \[g\]\s*=\s*([\d.]+)/i),
