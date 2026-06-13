@@ -11,7 +11,7 @@
 │   │  React 18 + TypeScript + Tailwind CSS          │    │
 │   │                                                │    │
 │   │  App.tsx                                       │    │
-│   │  ├── FileUpload     drag & drop STL            │    │
+│   │  ├── FileUpload     drag & drop STL / 3MF      │    │
 │   │  ├── ModelViewer    Three.js, real mm scale    │    │
 │   │  ├── SettingsPanel  presets + profile import   │    │
 │   │  ├── SlicePanel     slice button + download    │    │
@@ -28,13 +28,14 @@
 │   └──────────────────┬─────────────────────────────┘    │
 │                      │ fetch                             │
 │   ┌──────────────────▼─────────────────────────────┐    │
-│   │  public/wasm/  (or GitHub Releases in prod)    │    │
-│   │  ├── slicer.js    1.2 MB  Emscripten glue      │    │
-│   │  ├── slicer.wasm  6.4 MB  OrcaSlicer core      │    │
-│   │  └── slicer.data  144 MB  profiles & data      │    │
+│   │  GitHub Releases: wasm-v2.3.2                  │    │
+│   │  ├── slicer.js    ~1.5 MB  Emscripten glue     │    │
+│   │  └── slicer.wasm  ~7.5 MB  OrcaSlicer v2.3.2   │    │
 │   └────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────┘
 ```
+
+No `slicer.data` — the headless flat-config slicer never reads `orca/resources` at runtime, so the 200 MB preload file was eliminated entirely.
 
 ## WASM loading sequence
 
@@ -43,23 +44,24 @@ sequenceDiagram
     participant M as main.tsx
     participant S as worker-singleton.ts
     participant W as slicer.worker.ts
-    participant CDN as WASM CDN
+    participant R as GitHub Releases
 
     M->>S: preloadWasm()
     S->>W: new Worker(slicer.worker.ts)
     S->>W: postMessage(LOAD_WASM, url)
-    W->>CDN: fetch slicer.js  (1.2 MB)
-    W->>CDN: fetch slicer.wasm (6.4 MB) [parallel]
+    W->>R: fetch slicer.js  (~1.5 MB)
+    W->>R: fetch slicer.wasm (~7.5 MB) [parallel]
     W->>W: blob URL trick (add ES default export)
-    W->>W: import(blobUrl) → factory()
-    W->>CDN: factory triggers fetch slicer.data (144 MB)
+    W->>W: import(blobUrl) → factory({ wasmBinary })
     W->>S: postMessage(WASM_LOADED)
-    S-->>M: listener callback → wasmStatus = 'ready'
+    S-->>M: listener → wasmStatus = 'ready'
 ```
+
+Total cold load: ~9 MB (down from ~152 MB with the old v2.3.1 + slicer.data engine).
 
 ## Blob URL trick
 
-Emscripten compiles OrcaSlicer to a CommonJS IIFE (`var OrcaModule = ...`), not an ES module. The worker needs to `import()` it dynamically. The trick:
+Emscripten compiles OrcaSlicer to a CommonJS IIFE (`var OrcaModule = ...`), not an ES module. The worker needs to `import()` it dynamically:
 
 ```typescript
 const jsText = await fetch(url).then(r => r.text())
@@ -70,29 +72,46 @@ const blob = new Blob(
 const { default: factory } = await import(URL.createObjectURL(blob))
 ```
 
-This wraps the IIFE output in a blob URL that browsers treat as a native ES module.
-
 ## Singleton worker pattern
 
-React 18 StrictMode mounts components twice in development, which would create two workers and trigger two 144 MB downloads. The solution: a module-level singleton in `worker-singleton.ts`.
+React 18 StrictMode mounts components twice in development, which would create two workers and trigger two downloads. The solution: a module-level singleton in `worker-singleton.ts`.
 
 ```typescript
-// Module scope — lives for the entire browser session
 let worker: Worker | null = null
 
 export function getWorker(): Worker {
-  if (worker) return worker           // already created
+  if (worker) return worker
   worker = new Worker(...)
   worker.postMessage({ type: 'LOAD_WASM', url: wasmUrl })
   return worker
 }
 ```
 
-`preloadWasm()` is called in `main.tsx` before React renders, so WASM loading starts immediately on page load.
+`preloadWasm()` is called in `main.tsx` before React renders, so WASM loading starts immediately.
+
+## Engine clean layer (override approach)
+
+OrcaSlicer C++ source is never modified. Dependencies unavailable in WASM (OCCT, OpenVDB, OpenCV, Draco, libnoise) are replaced by stub files in `orca-wasm/overrides/`:
+
+```
+orca-wasm/
+├── overrides/src/libslic3r/
+│   ├── Format/STEP.{hpp,cpp}       — no-op (OCCT)
+│   ├── Format/DRC.cpp              — no-op (Draco)
+│   ├── Format/svg.cpp              — no-op (OCCT)
+│   ├── OpenVDBUtils.{hpp,cpp}      — empty header + no-op
+│   ├── ObjColorUtils.{hpp,cpp}     — empty header + no-op
+│   ├── SLA/Hollowing.cpp           — no-op (OpenVDB)
+│   ├── Shape/TextShape.cpp         — no-op (OCCT fonts)
+│   └── Feature/FuzzySkin/FuzzySkin.cpp  — no-op (libnoise)
+└── patches/apply.py  — injects stubs into CMake, patches CMakeLists + bugfixes
+```
+
+Headers that include unavailable system headers (`STEP.hpp`, `OpenVDBUtils.hpp`, `ObjColorUtils.hpp`) are physically copied into the OrcaSlicer source tree by `apply.py` at CI time. The originals are replaced; `overrides/` is the canonical source.
+
+Upgrading to a new OrcaSlicer version: change `ORCA_VERSION` in `build-wasm.yml`, re-run CI. Only signature changes in the overridden functions require stub updates.
 
 ## Coordinate systems
-
-The STL model and G-code toolpaths use the same coordinate system so they visually align in the side-by-side view.
 
 | | G-code | Three.js | In app |
 |---|---|---|---|
@@ -102,7 +121,7 @@ The STL model and G-code toolpaths use the same coordinate system so they visual
 
 **ModelViewer** positions the STL with its bottom face at Y=0, centered on X/Z.
 
-**GcodeViewer** parses G1 moves, computes the centroid of all X/Y coordinates, subtracts it, then maps: `gcodeX → x`, `gcodeY → z`, `gcodeZ → y`. This centres the toolpaths at the same origin as the model.
+**GcodeViewer** parses G1 moves, computes centroid of all X/Y, subtracts it, maps: `gcodeX → x`, `gcodeY → z`, `gcodeZ → y`.
 
 ## Data flow
 
@@ -143,19 +162,18 @@ handleSlice()
 
 === "Production (GitHub Pages)"
     ```bash
-    VITE_BASE=/OrcaWeb/app/ \
-    VITE_WASM_BASE_URL=https://github.com/allanwrench28/orcaslicer-wasm/releases/download/v1.1 \
-    npm run build
-    # output → dist/
+    # Triggered automatically on push to master
+    # deploy.yml downloads slicer.js + slicer.wasm from release wasm-v2.3.2
+    # and embeds them in the gh-pages branch under app/wasm/
     ```
 
-In production, `VITE_WASM_BASE_URL` points to GitHub Releases. The browser fetches the 144 MB `slicer.data` from `objects.githubusercontent.com` (CORS: `Access-Control-Allow-Origin: *`) and caches it.
-
-!!! note "Direction"
-    The above describes the currently deployed engine. Our self-built OrcaSlicer
-    v2.3.2 engine has **no `slicer.data`** — the `orca/resources` preload was
-    dropped (headless slicing never reads it), so after cutover only
-    `slicer.js` + `slicer.wasm` are served, with no chunk splitting/reassembly.
+=== "Build WASM engine"
+    ```bash
+    # GitHub Actions → Build WASM → Run workflow
+    # Or: git tag v2.3.2-ow1 && git push --tags
+    # Produces: slicer.js (~1.5 MB) + slicer.wasm (~7.5 MB)
+    # Published as GitHub Release wasm-v2.3.2
+    ```
 
 ## Stack
 
@@ -165,6 +183,7 @@ In production, `VITE_WASM_BASE_URL` points to GitHub Releases. The browser fetch
 | Styling | Tailwind CSS v3 | Custom `orca-*` colour scale |
 | 3D | Three.js 0.170 | STLLoader, OrbitControls, LineSegments |
 | Bundler | Vite 5 | Worker ES format, configurable base |
-| WASM | OrcaSlicer v2.3.1 | Emscripten, single-threaded |
+| WASM | OrcaSlicer **v2.3.2** | Emscripten, single-threaded, self-built |
 | Worker | Web Worker (ES module) | Blob URL for dynamic import |
 | CLI | Commander + tsx | Node.js, same WASM API |
+| License | AGPL-3.0-or-later | Source link in UI footer per §13 |
