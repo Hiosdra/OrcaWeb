@@ -27,6 +27,7 @@ interface ParseResult {
   centerX: number
   centerY: number
   hasFeatureTypes: boolean
+  maxR: number
 }
 
 const FEATURE_COLORS: Record<string, number> = {
@@ -111,6 +112,9 @@ function parseGcode(gcode: string): ParseResult {
 
   const centerX = isFinite(minX) ? (minX + maxX) / 2 : 0
   const centerY = isFinite(minY) ? (minY + maxY) / 2 : 0
+  const maxR = isFinite(minX)
+    ? Math.sqrt(((maxX - minX) / 2) ** 2 + ((maxY - minY) / 2) ** 2)
+    : 10
 
   const layers: Layer[] = Array.from(layerMap.entries())
     .sort((a, b) => a[0] - b[0])
@@ -135,7 +139,7 @@ function parseGcode(gcode: string): ParseResult {
       return { z, features, travels: ta }
     })
 
-  return { layers, centerX, centerY, hasFeatureTypes }
+  return { layers, centerX, centerY, hasFeatureTypes, maxR }
 }
 
 interface LayerObj {
@@ -145,7 +149,7 @@ interface LayerObj {
 
 interface SceneObjects {
   layerObjs: LayerObj[]
-  lineMaterials: LineMaterial[]
+  lineMat: LineMaterial
   layerPlane: THREE.Mesh
 }
 
@@ -156,7 +160,7 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256 }: Props) {
   const [visibleLayers, setVisibleLayers] = useState(0)
   const [showTravels, setShowTravels] = useState(false)
 
-  const { layers, hasFeatureTypes } = useMemo(() => parseGcode(gcode), [gcode])
+  const { layers, hasFeatureTypes, maxR } = useMemo(() => parseGcode(gcode), [gcode])
 
   useEffect(() => {
     setTotalLayers(layers.length)
@@ -205,8 +209,15 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256 }: Props) {
     controls.enableDamping = true
     controls.dampingFactor = 0.08
 
+    // Single shared material — all layers use vertex colors, same linewidth
+    const lineMat = new LineMaterial({
+      linewidth: 1.6,
+      worldUnits: false,
+      vertexColors: true,
+      resolution: new THREE.Vector2(w, h),
+    })
+
     const layerObjs: LayerObj[] = []
-    const lineMaterials: LineMaterial[] = []
 
     for (let li = 0; li < layers.length; li++) {
       const layer = layers[li]
@@ -235,15 +246,7 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256 }: Props) {
         const geo = new LineSegmentsGeometry()
         geo.setPositions(new Float32Array(positions))
         geo.setColors(new Float32Array(colors))
-
-        const mat = new LineMaterial({
-          linewidth: 1.6,
-          worldUnits: false,
-          vertexColors: true,
-          resolution: new THREE.Vector2(w, h),
-        })
-        lineMaterials.push(mat)
-        extrusion = new LineSegments2(geo, mat)
+        extrusion = new LineSegments2(geo, lineMat)
         scene.add(extrusion)
       }
 
@@ -260,23 +263,14 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256 }: Props) {
       layerObjs.push({ extrusion, travel })
     }
 
-    // Fit camera to toolpath bounds
-    let maxR = 10
-    for (const layer of layers) {
-      for (const feat of layer.features) {
-        for (let i = 0; i < feat.segments.length; i += 3) {
-          const r = Math.sqrt(feat.segments[i] ** 2 + feat.segments[i + 2] ** 2)
-          if (r > maxR) maxR = r
-        }
-      }
-    }
+    // Camera fit — maxR pre-computed from bounding box during parsing
     const maxZ = layers[layers.length - 1]?.z ?? 20
     const dist = Math.max(maxR * 2, maxZ) * 2.5
     camera.position.set(dist * 0.6, dist * 0.7, dist * 0.9)
     controls.target.set(0, maxZ / 2, 0)
     controls.update()
 
-    sceneRef.current = { layerObjs, lineMaterials, layerPlane }
+    sceneRef.current = { layerObjs, lineMat, layerPlane }
 
     let animId: number
     const animate = () => {
@@ -291,7 +285,7 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256 }: Props) {
       camera.aspect = rw / rh
       camera.updateProjectionMatrix()
       renderer.setSize(rw, rh)
-      lineMaterials.forEach(m => m.resolution.set(rw, rh))
+      lineMat.resolution.set(rw, rh)
     })
     resizeObs.observe(el)
 
@@ -301,9 +295,9 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256 }: Props) {
       controls.dispose()
       renderer.dispose()
       sceneRef.current = null
+      lineMat.dispose()
       layerObjs.forEach(({ extrusion, travel }) => {
         extrusion?.geometry.dispose()
-        ;(extrusion?.material as LineMaterial | undefined)?.dispose()
         travel?.geometry.dispose()
         ;(travel?.material as THREE.Material | undefined)?.dispose()
       })
@@ -313,7 +307,7 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256 }: Props) {
     }
   }, [layers, bedX, bedY, hasFeatureTypes])
 
-  // Sync layer visibility + travel toggle + layer cursor position
+  // Sync layer visibility, travel toggle, and layer cursor position
   useEffect(() => {
     const sc = sceneRef.current
     if (!sc) return
