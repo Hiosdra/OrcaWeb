@@ -277,10 +277,8 @@ jobs:
 
           echo "[libnoise] downloading Orca-deps-libnoise 1.0…"
           curl -fL --retry 3 \
-            "https://github.com/SoftFever/Orca-deps-libnoise/archive/refs/tags/1.0.zip" \
-            -o /tmp/libnoise.zip
-          echo "96ffd6cc47898dd8147aab53d7d1b1911b507d9dbaecd5613ca2649468afd8b6  /tmp/libnoise.zip" | sha256sum -c
-          unzip -q /tmp/libnoise.zip -d /tmp/
+            "https://github.com/SoftFever/Orca-deps-libnoise/archive/refs/tags/1.0.tar.gz" \
+            | tar xz -C /tmp/
           mv /tmp/Orca-deps-libnoise-1.0 /tmp/libnoise-src
 
           echo "[libnoise] configuring with Emscripten…"

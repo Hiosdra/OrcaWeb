@@ -252,15 +252,22 @@ patch("src/libslic3r/CMakeLists.txt", [
 #     std::this_thread without -sUSE_PTHREADS; replace with static equivalents.
 # =============================================================================
 patch("src/libslic3r/Feature/FuzzySkin/FuzzySkin.cpp", [
+    # Handle "static thread_local" first to avoid producing "static static".
+    # (Current v2.3.2 uses bare thread_local, but guard against future changes.)
     (
-        r'\bthread_local\b',
+        r'\bstatic\s+thread_local\b',
         r'static',
         0,
     ),
     (
+        r'\bthread_local\b',
+        r'static',
+        1,
+    ),
+    (
         r'rd\.entropy\(\)\s*>\s*0\s*\?\s*rd\(\)\s*:\s*std::hash<std::thread::id>\(\)\(std::this_thread::get_id\(\)\)',
         r'rd()',
-        0,
+        1,
     ),
 ])
 
