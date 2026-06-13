@@ -216,7 +216,7 @@ interface GcodeStats {
 }
 ```
 
-Only the first 100 kB of the G-code string is scanned for header comments (stats are always at the top). File size uses `Blob.size` to avoid allocating a large `Uint8Array`.
+Both the first 100 kB (up to 300 lines) **and** the last 30 kB (up to 200 lines) of the G-code string are scanned — OrcaSlicer may write stats at either the beginning or the end of the file depending on the post-processing path. `layers` falls back to counting `;LAYER_CHANGE` markers in the full file when the `; total layers count` comment is absent. File size uses `Blob.size` to avoid allocating a large `Uint8Array`.
 
 ---
 
