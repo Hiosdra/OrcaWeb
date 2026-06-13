@@ -118,22 +118,21 @@ function parseGcodeStats(gcode: string): GcodeStats {
   let pos = -1
   while ((pos = gcode.indexOf('\n', pos + 1)) !== -1) lines++
 
-  // Count layers by counting layer-change markers as a fallback when the slicer
-  // doesn't emit a "total layers count" comment.
-  const countedLayers = (() => {
+  // Fallback: count ;LAYER_CHANGE markers when the slicer omits the summary comment.
+  // Defined as a function so the full-file scan is skipped when the primary match succeeds.
+  const getCountedLayers = () => {
     let n = 0
     let p = -1
-    // OrcaSlicer emits ";LAYER_CHANGE" or "; layer" markers per layer
     const marker = ';LAYER_CHANGE'
     while ((p = gcode.indexOf(marker, p + 1)) !== -1) n++
     return n > 0 ? n : undefined
-  })()
+  }
 
   return {
     bytes: new Blob([gcode]).size,
     lines: lines + 1,
     printTime:    match(/;\s*estimated printing time[^=]*=\s*(.+)/i),
-    layers:       numMatch(/;\s*total layers count\s*=\s*(\d+)/i) ?? countedLayers,
+    layers:       numMatch(/;\s*total layers count\s*=\s*(\d+)/i) ?? getCountedLayers(),
     filamentMm:   numMatch(/;\s*total filament used \[mm\]\s*=\s*([\d.]+)/i),
     filamentCm3:  numMatch(/;\s*total filament used \[cm3\]\s*=\s*([\d.]+)/i),
     filamentG:    numMatch(/;\s*total filament weight \[g\]\s*=\s*([\d.]+)/i),
