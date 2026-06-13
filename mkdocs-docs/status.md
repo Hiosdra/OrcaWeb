@@ -2,7 +2,7 @@
 
 Ten dokument opisuje aktualny stan projektu: zaimplementowane funkcje, znane ograniczenia i planowane ulepszenia.
 
-Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (własny build v2.3.2 w toku — CI iteracyjnie naprawiany) · wersja aplikacji: **PR #8 merged**
+Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (własny build, wdrożony na produkcji) · wersja aplikacji: **PR #12 merged**
 
 ---
 
@@ -15,36 +15,46 @@ Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (
 | Drag & drop pliku STL | ASCII i binary STL |
 | Import pliku 3MF | Ekstrakcja siatki + profili OrcaSlicera z metadanych archiwum |
 | Podgląd 3D modelu (Three.js) | Model na wirtualnym stole drukarskim w skali mm, OrbitControls |
-| Siatka stołu — dynamiczny rozmiar | Rozmiar stołu pobierany z presetu drukarki lub profilu maszyny (np. 250×210 mm dla Prusa MK4) |
+| Siatka stołu — dynamiczny rozmiar | Rozmiar stołu pobierany z presetu drukarki lub profilu maszyny |
 | Zakładki Model / Settings / Slice | Płynna nawigacja, zakładki zablokowane do momentu wczytania pliku |
-| Panel ustawień | Wybór drukarki (z rozmiarami stołu), filamentu, jakości |
+| Panel ustawień | Wybór drukarki, filamentu, jakości |
 | Podgląd G-code (warstwa po warstwie) | Slider warstw, kolorowanie wg warstwy, ciemne tło |
 | Statystyki G-code | Czas druku, warstwy, filament (mm/g), rozmiar pliku — parsowane z nagłówka G-code |
 | Widok model + G-code obok siebie | Po slicowaniu — synchronizowany układ obok siebie |
 | Pobieranie G-code | Przycisk „Download .gcode" z poprawną nazwą pliku |
 | Status silnika (badge) | „Loading engine…" / „Engine error" w nagłówku |
+| Stopka — link do źródeł (AGPL) | Widoczny link „Source (AGPL-3.0)" → repo GitHub |
 
 ### Silnik WASM
 
 | Funkcja | Uwagi |
 |---------|-------|
 | Slicowanie STL → G-code | W Web Workerze, nie blokuje UI |
-| Singleton Worker | Jeden Worker przez cały czas sesji — `slicer.data` ładowany tylko raz |
-| Obsługa błędów | Kody błędów `-1`…`-9`, czytelne komunikaty dla użytkownika |
+| Własny build OrcaSlicer **v2.3.2** | Zbudowany przez `orca-wasm/` + Emscripten; artefakty w release `wasm-v2.3.2` |
+| Brak `slicer.data` | Headless flat-config slicer nie czyta `orca/resources` → plik danych zredukowany **200 MB → 0** |
+| Singleton Worker | Jeden Worker przez cały czas sesji |
+| Obsługa błędów | Kody błędów `-1`…`-9`, czytelne komunikaty |
 | Wczytanie WASM gdy slicowanie w trakcie | Kolejkowanie żądania `SLICE` gdy WASM jeszcze się ładuje |
+| JPEG miniatury G-code | Prawdziwy JPEG (RGBA→RGB, standard libjpeg) — od PR #13 |
+
+### Override approach (engine clean layer)
+
+| Aspekt | Szczegóły |
+|--------|-----------|
+| Brak modyfikacji kodu OrcaSlicer | Źródła C++ pozostają nienaruszone; stubs w `orca-wasm/overrides/` |
+| Wyłączone zależności WASM | OCCT, OpenVDB, OpenCV, Draco, libnoise — zastąpione stubami |
+| Aktualizacja do nowej wersji | Tylko `ORCA_VERSION` w workflow + ewentualna korekta stubów |
+| Zgodność AGPL-3.0 | `LICENSE`, `NOTICE.md`, link do źródeł w UI — `§13` network copyleft spełniony |
 
 ### Profile OrcaSlicera
 
 | Funkcja | Uwagi |
 |---------|-------|
 | Wbudowane presety jakości | Draft (0.3 mm) / Standard (0.2 mm) / Fine (0.1 mm) |
-| Wbudowane filamenenty | PLA, PETG, ABS, TPU — temperatury i prędkości wentylatorów |
-| Wbudowane drukarki | Generic 0.4/0.6, Bambu Lab P1S/X1C, Prusa MK4, Creality Ender 3, Voron 2.4 — z wymiarami stołu |
+| Wbudowane filamenty | PLA, PETG, ABS, TPU |
+| Wbudowane drukarki | Generic 0.4/0.6, Bambu Lab P1S/X1C, Prusa MK4, Ender 3, Voron 2.4 |
 | Import profilu JSON z OrcaSlicera | Plik `.json` z instalacji desktop; mapowanie `ORCA_FIELD_MAP` — 30+ pól |
-| Parsowanie `printable_area` | Wymiary stołu z pola `printable_area`/`bed_size` profilu maszyny |
-| Ekstrakcja profili z 3MF | `Metadata/*.json/.config` z archiwum — sortowanie wg priorytetu (machine < filament < process < project) |
-| Obsługa array-wrapped values | `["0.2"]` → `0.2` (format OrcaSlicera) |
-| Obsługa wartości procentowych | `"15%"` → `15`, `"0.15"` → `15` |
+| Ekstrakcja profili z 3MF | `Metadata/*.json/.config` z archiwum |
 
 ### CLI (Node.js)
 
@@ -53,7 +63,6 @@ Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (
 | `npm run cli -- slice <plik.stl>` | ✅ działa |
 | `npm run cli -- profiles` | ✅ działa |
 | Opcje `--preset`, `--printer`, `--filament` | ✅ działa |
-| `node scripts/download-wasm.mjs` | ✅ działa |
 
 ### Deployment
 
@@ -61,27 +70,16 @@ Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (
 |--------|--------|
 | GitHub Actions CI (deploy.yml) | ✅ buduje i deployuje na każdy push do `master` |
 | Serwowanie WASM z tej samej origin | ✅ brak CORS — pliki w `gh-pages/app/wasm/` |
-| Dzielenie `slicer.data` na chunki | ✅ 2× ≈72 MB, transparentne scalanie w workerze |
+| Release WASM `wasm-v2.3.2` | ✅ `slicer.js` + `slicer.wasm` (~9 MB łącznie) |
+| Deploy resilience | ✅ fallback na poprzedni `gh-pages` gdy release nie istnieje |
+| CI build na PRach (ścieżki orca-wasm/) | ✅ każdy PR dotykający silnika uruchamia ~12 min build |
 | Strona promująca (landing) | ✅ `hiosdra.github.io/OrcaWeb/` |
 | Dokumentacja MkDocs | ✅ `hiosdra.github.io/OrcaWeb/docs/` |
-| Favicon `orca.svg` | ✅ |
-| Dependabot + grupowanie zależności | ✅ tygodniowy harmonogram, 5 grup |
+| Dependabot + grupowanie zależności | ✅ tygodniowy harmonogram |
 
 ---
 
 ## ⚠️ Częściowo działa / znane ograniczenia
-
-### Silnik WASM — wersja
-
-!!! warning "Używana wersja: v2.3.1"
-    Aktualnie deployowane artefakty WASM (`slicer.js`, `slicer.wasm`, `slicer.data`)
-    pochodzą z zewnętrznego projektu `allanwrench28/orcaslicer-wasm` v1.1
-    (OrcaSlicer v2.3.1).
-    
-    Własny build v2.3.2 jest w toku w `orca-wasm/`.
-    Infrastruktura buildowa jest naprawiana iteracyjnie; każdy run CI odsłania
-    kolejny błąd (na razie: naprawiony git-clone, cmake context, brakujące paczki).
-    Aby uruchomić build: Actions → **Build WASM** → Run workflow (~60–120 min).
 
 ### Ustawienia drukarki
 
@@ -96,22 +94,20 @@ Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (
 |---------|-----------|
 | Tylko ruchy z ekstrudowaniem | Ruchy przejazdu (travel moves) nie są wizualizowane |
 | Brak separacji typów ruchów | Nie rozróżniane: perimeter / infill / support / travel |
-| Centrowanie toolpathów | Centroid G-code może nie pokrywać się idealne z modelem dla bardzo niecentrycznych kształtów |
 
 ### Importowanie profili
 
 | Problem | Szczegóły |
 |---------|-----------|
-| Mapowanie niekompletne | Tylko ~30 pól z OrcaSlicera. Brakuje m.in.: `support_interface_*`, `ironing_*`, `seam_*` szczegóły, `overhang_*` progi |
-| Profile maszyny ignorowane | Pola z sekcji `machine_settings` (takie jak `bed_shape`, `max_print_height`, `printable_area`) nie są przekazywane do WASM |
-| Brak walidacji | Nieprawidłowy plik JSON zgłasza ogólny błąd, bez wskazania konkretnego pola |
+| Mapowanie niekompletne | Tylko ~30 pól z OrcaSlicera |
+| Profile maszyny ignorowane | Pola z sekcji `machine_settings` nie są przekazywane do WASM |
 
 ### Inne UI
 
 | Problem | Szczegóły |
 |---------|-----------|
-| Brak wskaźnika postępu slicowania | Spinner bez informacji o etapie (perimeters / infill / gcode export) |
-| Rozmiar pliku STL | Duże pliki STL (>50 MB) mogą powodować zacinanie się podczas podglądu |
+| Brak wskaźnika postępu slicowania | Spinner bez informacji o etapie |
+| Duże pliki STL (>50 MB) | Mogą powodować zacinanie się podczas podglądu |
 
 ---
 
@@ -122,45 +118,34 @@ Ostatnia aktualizacja: **2026-06-10** · wersja silnika: **OrcaSlicer v2.3.1** (
 | Funkcja | Priorytet |
 |---------|-----------|
 | OBJ import | 🟡 średni |
-| STEP / IGES import | 🔴 nie możliwy w WASM — OCCT wyłączone |
+| STEP / IGES import | 🔴 nie możliwy — OCCT wyłączone (wymaga occt-wasm, blokada licencji LGPL-2.1-only) |
 | Multi-plik (wiele STL naraz) | 🟡 średni |
 
 ### Zaawansowane funkcje slicowania
 
 | Funkcja | Priorytet |
 |---------|-----------|
-| Szacowanie czasu druku | 🔴 wysoki — wymaga odczytu komentarzy G-code lub osobnego API |
-| Szacowanie zużycia filamentu | 🔴 wysoki — j.w. |
+| FuzzySkin (szorstkość powierzchni) | 🟡 średni — wymaga portu libnoise do WASM; aktualnie no-op |
 | Variable layer height | 🟡 średni |
-| Modifier meshes | 🟠 niski |
-| Support enforcement / blocking zones | 🟡 średni |
-| Multi-material / multi-extruder | 🟠 niski (wymaga zmian w silniku) |
+| Support enforcement / blocking | 🟡 średni |
+| Multi-material | 🟠 niski |
 | Multi-object na jednym stole | 🟡 średni |
-| Auto-arrange wielu obiektów | 🟡 średni |
+| Auto-arrange | 🟡 średni |
 
 ### Podgląd G-code
 
 | Funkcja | Priorytet |
 |---------|-----------|
-| Kolorowanie wg typu ruchu (perimeter / infill / support / travel) | 🔴 wysoki |
-| Wyświetlanie travel moves | 🟡 średni |
-| Suwak odtwarzania (czas, nie warstwa) | 🟠 niski |
+| Kolorowanie wg typu ruchu | 🔴 wysoki |
+| Travel moves | 🟡 średni |
 
 ### Integracje
 
 | Funkcja | Priorytet |
 |---------|-----------|
-| Wysyłanie G-code przez OctoPrint REST API | 🟡 średni |
-| Wysyłanie do drukarek Bambu Lab | 🟠 niski (protokół proprietarny) |
-| PWA / tryb offline | 🟡 średni — Service Worker + cache WASM |
-| Udostępnianie konfiguracji przez URL | 🟠 niski |
-
-### WASM build
-
-| Funkcja | Priorytet |
-|---------|-----------|
-| Skompilowany build OrcaSlicer v2.3.2 | 🔴 wysoki — infrastruktura gotowa w `orca-wasm/` |
-| Wielowątkowość (SharedArrayBuffer + WASM threads) | 🟠 niski — wymaga COOP/COEP i znacznej pracy |
+| OctoPrint REST API | 🟡 średni |
+| Bambu Lab wysyłanie | 🟠 niski (protokół proprietarny) |
+| PWA / tryb offline | 🟡 średni |
 
 ---
 
@@ -172,12 +157,15 @@ v0.1  ── ✅ STL import, 3D viewer, slicing, G-code viewer, download
       ── ✅ JSON profile import from OrcaSlicer
 
 v0.2  ── ✅ 3MF import (mesh + embedded profile extraction)
-      ── ✅ Per-printer bed size (dynamiczny stół w 3D viewer i G-code viewer)
-      ── ✅ Statystyki G-code (czas, warstwy, filament, waga)
+      ── ✅ Per-printer bed size
+      ── ✅ Statystyki G-code
 
-v0.3  ── Własny build WASM v2.3.2
-      ── Kolorowanie G-code wg typu ruchu (perimeter / infill / support / travel)
-      ── PWA / Service Worker (tryb offline)
+v0.3  ── ✅ Własny build WASM v2.3.2 (bez slicer.data)
+      ── ✅ AGPL-3.0 compliance
+      ── ✅ Override approach (engine clean layer)
+      ── ✅ Prawdziwy JPEG (PR #13)
+      ── Kolorowanie G-code wg typu ruchu
+      ── PWA / Service Worker
 
 v0.4  ── OctoPrint integration
       ── Multi-object plate
@@ -193,24 +181,26 @@ src/
 ├── App.tsx                ✅ pełna logika UI, tabs, WASM orchestration, 3MF loading
 ├── components/
 │   ├── FileUpload.tsx     ✅ drag & drop, STL + 3MF
-│   ├── ModelViewer.tsx    ✅ Three.js, STLLoader, dynamiczny rozmiar stołu (bedX/bedY)
-│   ├── GcodeViewer.tsx    ✅ toolpaths, layer slider, dynamiczny rozmiar stołu — ⚠️ brak travel
+│   ├── ModelViewer.tsx    ✅ Three.js, STLLoader, dynamiczny rozmiar stołu
+│   ├── GcodeViewer.tsx    ✅ toolpaths, layer slider — ⚠️ brak travel
 │   ├── SettingsPanel.tsx  ✅ presety, import profili — ⚠️ niekompletne mapowanie
-│   └── SlicePanel.tsx     ✅ progress states, statystyki G-code, download G-code
+│   └── SlicePanel.tsx     ✅ progress states, statystyki G-code, download
 ├── lib/
-│   ├── profiles.ts        ✅ presety z rozmiarami stołu, 30+ pól, parsowanie printable_area
-│   ├── parse3mf.ts        ✅ 3MF → binary STL + OrcaConfig (fflate, DOMParser)
+│   ├── profiles.ts        ✅ presety z rozmiarami stołu, 30+ pól
+│   ├── parse3mf.ts        ✅ 3MF → binary STL + OrcaConfig
 │   ├── wasm-loader.ts     ✅ orc_init / orc_slice / error codes
-│   └── worker-singleton.ts ✅ singleton, base URL z Vite BASE_URL
+│   └── worker-singleton.ts ✅ singleton, preload WASM
 ├── workers/
-│   └── slicer.worker.ts   ✅ WASM load + chunk reassembly + SLICE
-└── types/index.ts         ✅ OrcaConfig (+ bed_size_x/y), GcodeStats, WorkerMessages, SliceStatus
+│   └── slicer.worker.ts   ✅ WASM load + SLICE (brak chunk reassembly — slicer.data usunięty)
+└── types/index.ts         ✅ OrcaConfig, GcodeStats, WorkerMessages, SliceStatus
 
-orca-wasm/                 ⚠️ infrastruktura gotowa, NIE SKOMPILOWANO jeszcze
-├── bridge/slicer.cpp      ✅ napisany, nie testowany (wymaga buildu)
-├── wasm/shims/tbb/        ✅ kompletne stubs
-└── patches/apply.py       ✅ patcher gotowy
+orca-wasm/                 ✅ aktywny pipeline buildowy
+├── bridge/slicer.cpp      ✅ orc_init / orc_slice bridge
+├── wasm/                  ✅ CMakeLists, link flags, shims
+├── wasm/shims/tbb/        ✅ sekwencyjne stuby TBB
+├── overrides/             ✅ C++ stuby (OCCT/OpenVDB/OpenCV/Draco/FuzzySkin)
+└── patches/apply.py       ✅ patcher CMake + bugfixów
 
-public/wasm/               ⚠️ pliki z allanwrench v1.1, v2.3.2 pending
+public/wasm/               ✅ artefakty z release wasm-v2.3.2 (slicer.js + slicer.wasm)
 CLI (cli/)                 ✅ działa lokalnie
 ```

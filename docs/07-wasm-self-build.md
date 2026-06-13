@@ -1,7 +1,7 @@
 # 07 — Własny build WASM (OrcaSlicer v2.3.2)
 
-**Status:** ✅ Build zielony na CI  
-**Data:** 2026-06-12
+**Status:** ✅ Zweryfikowany, na produkcji  
+**Data:** 2026-06-13
 
 ## Cel
 
@@ -16,9 +16,9 @@ i produkuje artefakty:
 
 | Artefakt | Rozmiar |
 |----------|---------|
-| `slicer.wasm` | 7,3 MB |
-| `slicer.js` | 1,5 MB |
-| `slicer.data` (zasoby OrcaSlicer) | 200 MB |
+| `slicer.wasm` | ~7,5 MB |
+| `slicer.js` | ~1,5 MB |
+| `slicer.data` | **0** — usunięty (headless slicer nie czyta zasobów) |
 
 ## Pipeline budowania
 
@@ -41,8 +41,9 @@ Większość to wyłączanie opcjonalnych zależności niepotrzebnych w przeglą
 - **OpenVDB** (`OpenVDBUtils.hpp`, `SLA/Hollowing.cpp`) — guard nagłówka i no-op
   stuby (hollowing SLA jest nieistotny dla slicera FDM).
 - **OpenCV** (`ObjColorUtils`) — guard nagłówka + stub `.cpp`.
-- **Draco** (`DRC.cpp`), **JPEG miniatury** (`Thumbnails.cpp` → fallback na PNG,
-  bo libjpeg nie jest linkowany).
+- **Draco** (`DRC.cpp`) — stub no-op.
+- **JPEG miniatury** (`Thumbnails.cpp`) — RGBA→RGB + standard libjpeg (IJG 9d z emsdk);
+  JCS_EXT_RGBA (turbo extension) zastąpione przez JCS_RGB.
 - **Platform.cpp** — pominięty `static_assert` o nieznanej platformie.
 - **Shimy TBB** (`orca-wasm/wasm/shims/`) — sekwencyjne stuby: dodane
   `concurrent_unordered_set.h`, `parallel_for_each.h`, tagi partycjonerów
@@ -108,10 +109,10 @@ Implementacja (commit „drop orca/resources preload"):
 Efekt: `slicer.data` 200 MB → **0**, szybszy start modułu, prostszy pipeline
 deploya (bez limitu 100 MB/plik w git).
 
-## Pozostałe / następne kroki
+## Zrealizowane po tym dokumencie
 
-- Wygenerować release `wasm-v2.3.2` (run nie-PR: `workflow_dispatch` lub tag),
-  który deploy.yml pobiera do produkcji (to też cutover produkcji ze starego
-  silnika 144 MB na nasz v2.3.2 bez `slicer.data`).
-- Po cutoverze zaktualizować `docs/06-architecture.md` i
-  `mkdocs-docs/architecture.md` (opisują jeszcze stan z `slicer.data` 144 MB).
+- ✅ Release `wasm-v2.3.2` wygenerowany — deploy.yml pobiera `slicer.js` + `slicer.wasm`.
+- ✅ Cutover na produkcji — silnik v2.3.2 wdrożony na `master`.
+- ✅ `docs/06-architecture.md` i `mkdocs-docs/architecture.md` zaktualizowane.
+- ✅ Engine clean layer (PR #12) — override approach, AGPL-3.0 compliance, deploy resilience.
+- ✅ Prawdziwy JPEG (PR #13) — standard libjpeg z RGBA→RGB conversion.
