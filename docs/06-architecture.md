@@ -146,11 +146,15 @@ File (drop) ──▶ file state ──▶ ModelViewer (Three.js STLLoader)
 - Stół drukarki: 250×250 mm `PlaneGeometry`
 
 ### GcodeViewer — parser G-code
-- Parsuje `G0`/`G1` z ekstruzją (parametr `E`)
-- Grupuje segmenty po wartości Z
-- Centruje współrzędne (odejmuje środek ciężkości X/Y aby wyrównać z ModelViewer)
-- Warstwy kolorowane rotacyjnie (8 kolorów)
-- Suwak warstw: wyświetla od pierwszej do wybranej warstwy
+- Parsuje `G0`/`G1`; ruchy z ekstruzją (parametr `E`) → toolpaths; pozostałe → travel moves
+- Odczytuje komentarze `;TYPE:` (OrcaSlicer) i koloruje każdy typ feature osobno (outer wall, inner wall, infill, support itd.)
+- Gradient kolorów wg wysokości (niebieski → pomarańczowy) gdy GCode nie zawiera `;TYPE:`
+- Grupuje segmenty po wartości Z; centruje X/Y względem środka ciężkości
+- Renderuje linie przez `LineSegments2` + `LineSegmentsGeometry` + `LineMaterial` (grubość 1.6 px w screen-space) — `LineBasicMaterial` jest ignorowany przez WebGL poza linewidth=1
+- Travel moves (G0 / G1 bez E) renderowane osobno jako szare, półprzezroczyste `LineSegments`; domyślnie ukryte, przełącznik „Travels" w pasku sterowania
+- Layer cursor plane: półprzezroczysta płaszczyzna śledząca aktualną warstwę na suwaku
+- Legenda typów feature (overlay prawy górny róg) gdy `;TYPE:` są obecne
+- Suwak warstw: wyświetla od pierwszej do wybranej warstwy; `LineMaterial.resolution` aktualizowane przy resize
 
 ### Wyrównanie układów współrzędnych
 ```
