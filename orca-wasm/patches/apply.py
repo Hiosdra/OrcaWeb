@@ -6,7 +6,7 @@ Strategy
 --------
 * CMakeLists.txt files are patched in-place (unavoidable — OrcaSlicer has no
   upstream WASM build support).
-* C++ *stub .cpp* files (OCCT, OpenVDB, OpenCV, Draco, libnoise) are NOT
+* C++ *stub .cpp* files (OCCT, OpenVDB, OpenCV, Draco) are NOT
   modified.  The CMake injection in section 4c marks originals as
   HEADER_FILE_ONLY and adds our override implementations from
   ``orca-wasm/overrides/``.
@@ -123,11 +123,8 @@ patch("src/CMakeLists.txt", [
         r'if(NOT SLIC3R_WASM)\n\1\nendif()',
         0,
     ),
-    (
-        r'(find_package\s*\(\s*libnoise\b[^)]*\))',
-        r'if(NOT SLIC3R_WASM)\n\1\nendif()',
-        0,
-    ),
+    # libnoise: no longer excluded from WASM — Findlibnoise.cmake provides
+    # the WASM-compiled noise::noise target via CMAKE_MODULE_PATH.
 ])
 
 # =============================================================================
@@ -239,16 +236,30 @@ patch("src/libslic3r/CMakeLists.txt", [
         r'if(NOT SLIC3R_WASM)\n    \1\nendif()',
         0,
     ),
-    # noise::noise
-    (
-        r'\bnoise::noise\b',
-        r'$<$<NOT:$<BOOL:${SLIC3R_WASM}>>:noise::noise>',
-        0,
-    ),
+    # noise::noise — no longer excluded from WASM; links against the
+    # WASM-compiled libnoise provided by Findlibnoise.cmake.
     # encoding_check() runs a native binary — would fail on WASM runner
     (
         r'(encoding_check\s*\([^)]*\))',
         r'if(NOT SLIC3R_WASM)\n\1\nendif()',
+        0,
+    ),
+])
+
+# =============================================================================
+# 3c. FuzzySkin.cpp — thread_local compatibility
+#     Emscripten single-threaded mode may not support thread_local or
+#     std::this_thread without -sUSE_PTHREADS; replace with static equivalents.
+# =============================================================================
+patch("src/libslic3r/Feature/FuzzySkin/FuzzySkin.cpp", [
+    (
+        r'\bthread_local\b',
+        r'static',
+        0,
+    ),
+    (
+        r'rd\.entropy\(\)\s*>\s*0\s*\?\s*rd\(\)\s*:\s*std::hash<std::thread::id>\(\)\(std::this_thread::get_id\(\)\)',
+        r'rd()',
         0,
     ),
 ])
@@ -304,7 +315,6 @@ if(SLIC3R_WASM AND DEFINED ORCA_WEB_OVERRIDES_DIR)
   set(_wasm_maybe_stubs
     "${CMAKE_CURRENT_SOURCE_DIR}/SLA/Hollowing.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Shape/TextShape.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/Feature/FuzzySkin/FuzzySkin.cpp"
   )
   foreach(_f IN LISTS _wasm_maybe_stubs)
     if(EXISTS "${_f}")
@@ -321,7 +331,6 @@ if(SLIC3R_WASM AND DEFINED ORCA_WEB_OVERRIDES_DIR)
     "${ORCA_WEB_OVERRIDES_DIR}/src/libslic3r/ObjColorUtils.cpp"
     "${ORCA_WEB_OVERRIDES_DIR}/src/libslic3r/SLA/Hollowing.cpp"
     "${ORCA_WEB_OVERRIDES_DIR}/src/libslic3r/Shape/TextShape.cpp"
-    "${ORCA_WEB_OVERRIDES_DIR}/src/libslic3r/Feature/FuzzySkin/FuzzySkin.cpp"
   )
 
 endif()

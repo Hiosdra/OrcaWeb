@@ -91,7 +91,7 @@ export function getWorker(): Worker {
 
 ## Engine clean layer (override approach)
 
-OrcaSlicer C++ source is never modified. Dependencies unavailable in WASM (OCCT, OpenVDB, OpenCV, Draco, libnoise) are replaced by stub files in `orca-wasm/overrides/`:
+OrcaSlicer C++ source is never modified. Dependencies unavailable in WASM (OCCT, OpenVDB, OpenCV, Draco) are replaced by stub files in `orca-wasm/overrides/`. libnoise is compiled natively for WASM and linked directly.
 
 ```
 orca-wasm/
@@ -102,8 +102,7 @@ orca-wasm/
 │   ├── OpenVDBUtils.{hpp,cpp}      — empty header + no-op
 │   ├── ObjColorUtils.{hpp,cpp}     — empty header + no-op
 │   ├── SLA/Hollowing.cpp           — no-op (OpenVDB)
-│   ├── Shape/TextShape.cpp         — no-op (OCCT fonts)
-│   └── Feature/FuzzySkin/FuzzySkin.cpp  — no-op (libnoise)
+│   └── Shape/TextShape.cpp         — no-op (OCCT fonts)
 └── patches/apply.py  — injects stubs into CMake, patches CMakeLists + bugfixes
 ```
 
