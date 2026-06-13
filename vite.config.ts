@@ -12,21 +12,25 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       workbox: {
-        // Pre-cache lightweight app shell; WASM is handled via runtimeCaching
-        // below so a failed 15 MB download doesn't abort SW installation.
+        // Exclude wasm/ from precache — slicer.js + slicer.wasm must be cached
+        // together via runtimeCaching so they always come from the same build.
+        // Precaching only slicer.js (via **/*.js) would cause ABI mismatches
+        // after deploys: new slicer.js paired with a 30-day-old slicer.wasm.
         globPatterns: ['**/*.{js,css,html,svg,png,ico}'],
+        globIgnores: ['wasm/**'],
         navigateFallback: 'index.html',
         runtimeCaching: [
           {
-            // slicer.wasm (~15 MB) — cache on first use (CacheFirst) so the
-            // file is available offline after the initial visit without risking
-            // SW install failure on slow/unstable connections.
-            urlPattern: /\.wasm$/,
+            // slicer.js + slicer.wasm — CacheFirst so SW installs without
+            // downloading the full engine bundle (~9 MB) upfront; both files
+            // are cached on first use and stay version-matched in the same
+            // cache entry, sharing the same 30-day TTL.
+            urlPattern: /\/wasm\/slicer\.(js|wasm)$/,
             handler: 'CacheFirst',
             options: {
               cacheName: 'wasm-assets',
-              expiration: { maxEntries: 5, maxAgeSeconds: 60 * 60 * 24 * 30 },
-              cacheableResponse: { statuses: [0, 200] },
+              expiration: { maxEntries: 2, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [200] },
             },
           },
         ],
