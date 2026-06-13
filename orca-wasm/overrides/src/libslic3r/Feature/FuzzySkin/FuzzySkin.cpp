@@ -1,5 +1,5 @@
 // WASM override: libnoise and thread_local not available in WASM.
-#include "FuzzySkin.hpp"
+#include "Feature/FuzzySkin/FuzzySkin.hpp"
 
 namespace Slic3r::Feature::FuzzySkin {
 void fuzzy_polyline(Points&, bool, coordf_t, const FuzzySkinConfig&) {}

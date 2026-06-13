@@ -1,5 +1,5 @@
 // WASM override: OpenVDB not available — SLA mesh hollowing disabled.
-#include "Hollowing.hpp"
+#include "SLA/Hollowing.hpp"
 #include <libslic3r/ExPolygon.hpp>
 #include <array>
 #include <functional>

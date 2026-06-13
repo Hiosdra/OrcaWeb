@@ -1,5 +1,5 @@
 // WASM override: OCCT (text shapes) not available.
-#include "TextShape.hpp"
+#include "Shape/TextShape.hpp"
 #include <map>
 #include <string>
 #include <vector>
