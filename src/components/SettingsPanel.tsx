@@ -36,13 +36,23 @@ export function SettingsPanel({
     reader.onload = (ev) => {
       try {
         const json = ev.target?.result as string
+        const parsed = JSON.parse(json) as Record<string, unknown> | null
         const patch = parseOrcaProfileJson(json)
-        const keys = Object.keys(patch)
-        if (keys.length === 0) {
+        const { _passthrough, ...knownFields } = patch
+        const knownCount = Object.keys(knownFields).length
+        const passthroughCount = _passthrough ? Object.keys(_passthrough).length : 0
+        const total = knownCount + passthroughCount
+        if (total === 0) {
           setImportMsg({ ok: false, text: 'No recognised settings found in this JSON.' })
         } else {
           onChange(patch)
-          setImportMsg({ ok: true, text: `Imported ${keys.length} settings from "${file.name}"` })
+          const profileName = typeof parsed?.name === 'string' ? parsed.name : null
+          const profileType = typeof parsed?.type === 'string' ? parsed.type : null
+          const label = profileName ? `"${profileName}"` : `"${file.name}"`
+          const typeSuffix = profileType === 'machine'
+            ? ` · machine profile · ${total} settings`
+            : ` · ${total} settings`
+          setImportMsg({ ok: true, text: `Imported ${label}${typeSuffix}` })
         }
       } catch {
         setImportMsg({ ok: false, text: 'Invalid JSON file.' })

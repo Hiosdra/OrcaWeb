@@ -10,28 +10,24 @@ interface Props {
   disabled: boolean
 }
 
-function useElapsedSeconds(active: boolean) {
+function SlicingLabel() {
   const [elapsed, setElapsed] = useState(0)
 
   useEffect(() => {
-    if (!active) { setElapsed(0); return }
     const start = Date.now()
     const id = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 250)
     return () => clearInterval(id)
-  }, [active])
+  }, [])
 
-  return elapsed
+  return <>Slicing… ({elapsed}s)</>
 }
 
 export function SlicePanel({ status, wasmStatus, onSlice, disabled }: Props) {
   const isIdle = status.phase === 'idle'
   const isLoading = status.phase === 'loading-wasm' || status.phase === 'slicing'
-  const isSlicing = status.phase === 'slicing'
   const isDone = status.phase === 'done'
   const isError = status.phase === 'error'
   const engineLoading = wasmStatus === 'loading' && isIdle
-
-  const elapsed = useElapsedSeconds(isSlicing)
 
   return (
     <div className="space-y-4">
@@ -51,7 +47,7 @@ export function SlicePanel({ status, wasmStatus, onSlice, disabled }: Props) {
         {isLoading ? (
           <>
             <Spinner />
-            {status.phase === 'loading-wasm' ? 'Loading slicer engine…' : `Slicing… (${elapsed}s)`}
+            {status.phase === 'loading-wasm' ? 'Loading slicer engine…' : <SlicingLabel />}
           </>
         ) : (
           <>
