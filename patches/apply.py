@@ -225,17 +225,8 @@ patch("src/libslic3r/CMakeLists.txt", [
         r'$<$<NOT:$<BOOL:${SLIC3R_WASM}>>:OpenVDB::openvdb>',
         0,
     ),
-    # Wrap JPEG find / link
-    (
-        r'(find_package\s*\(\s*JPEG\b[^)]*\))',
-        r'if(NOT SLIC3R_WASM)\n\1\nendif()',
-        0,
-    ),
-    (
-        r'(JPEG::JPEG)',
-        r'$<$<NOT:$<BOOL:${SLIC3R_WASM}>>:JPEG::JPEG>',
-        0,
-    ),
+    # JPEG: embuilder pre-builds libjpeg into the Emscripten sysroot, so
+    # find_package(JPEG) finds it automatically — no WASM guard needed.
     # Freetype is linked for non-WIN32; Emscripten is non-WIN32, so guard it
     (
         r'(if\s*\(\s*NOT\s+WIN32\s*\)\s*\n\s*)(target_link_libraries\s*\(\s*libslic3r\s+PRIVATE\s+\$\{FREETYPE_LIBRARIES\}\s*\))',
@@ -360,9 +351,11 @@ patch("src/libslic3r/Platform.cpp", [
 
 # =============================================================================
 # 6. GCode/Thumbnails.cpp — JPEG compatibility for Emscripten
-#    6a: define JCS_EXT_RGBA if libjpeg-turbo extension is missing
-#    6b: replace compress_thumbnail_jpg body with a PNG fallback
-#        (libjpeg is not linked in WASM; JPEG::JPEG is guarded in CMakeLists)
+#    6a: define JCS_EXT_RGBA if not already defined (libjpeg-turbo extension —
+#        must satisfy any compile-time references even though we don't use it)
+#    6b: replace compress_thumbnail_jpg body to strip alpha before compressing
+#        (Emscripten ships standard IJG libjpeg, not libjpeg-turbo; JCS_EXT_RGBA
+#        at value 13 is not a valid input colour space in standard libjpeg)
 # =============================================================================
 patch("src/libslic3r/GCode/Thumbnails.cpp", [
     (
@@ -375,7 +368,7 @@ patch("src/libslic3r/GCode/Thumbnails.cpp", [
 _thumb_cpp = ORCA / "src/libslic3r/GCode/Thumbnails.cpp"
 if _thumb_cpp.exists():
     _tc = _thumb_cpp.read_text(encoding="utf-8", errors="replace")
-    if "// WASM: JPG thumbnails fall back to PNG" not in _tc:
+    if "// WASM: strip alpha" not in _tc:
         _m = re.search(
             r'std::unique_ptr<CompressedImageBuffer>\s+compress_thumbnail_jpg\s*\([^)]*\)\s*',
             _tc,
@@ -392,20 +385,59 @@ if _thumb_cpp.exists():
                     if _depth == 0:
                         _body_end = _i + 1
                         break
+            # Replace RGBA+JCS_EXT_RGBA path with a standard-libjpeg RGB path.
+            # Emscripten's IJG libjpeg does not support 4-component input — convert
+            # RGBA→RGB (dropping alpha) and use JCS_RGB instead.
             _new_body = (
                 "{\n"
-                "    // WASM: JPG thumbnails fall back to PNG (libjpeg not linked).\n"
-                "    return compress_thumbnail_png(data);\n"
+                "    // WASM: strip alpha channel; Emscripten's libjpeg is standard IJG\n"
+                "    // (no JCS_EXT_RGBA support), so convert RGBA → RGB before compressing.\n"
+                "    const unsigned int in_row  = data.width * 4;\n"
+                "    const unsigned int out_row = data.width * 3;\n"
+                "    std::vector<unsigned char> rgb(data.height * out_row);\n"
+                "    for (unsigned int y = 0; y < data.height; ++y) {\n"
+                "        const unsigned char* s = data.pixels.data() + (data.height - 1 - y) * in_row;\n"
+                "        unsigned char*       d = rgb.data() + y * out_row;\n"
+                "        for (unsigned int x = 0; x < data.width; ++x, s += 4, d += 3) {\n"
+                "            d[0] = s[0]; d[1] = s[1]; d[2] = s[2];\n"
+                "        }\n"
+                "    }\n"
+                "    std::vector<unsigned char*> rows(data.height);\n"
+                "    for (unsigned int y = 0; y < data.height; ++y)\n"
+                "        rows[y] = rgb.data() + y * out_row;\n"
+                "\n"
+                "    unsigned char* jbuf = nullptr;\n"
+                "    unsigned long  jsz  = 0;\n"
+                "    jpeg_error_mgr       jerr;\n"
+                "    jpeg_compress_struct cinfo;\n"
+                "    cinfo.err = jpeg_std_error(&jerr);\n"
+                "    jpeg_create_compress(&cinfo);\n"
+                "    jpeg_mem_dest(&cinfo, &jbuf, &jsz);\n"
+                "    cinfo.image_width      = data.width;\n"
+                "    cinfo.image_height     = data.height;\n"
+                "    cinfo.input_components = 3;\n"
+                "    cinfo.in_color_space   = JCS_RGB;\n"
+                "    jpeg_set_defaults(&cinfo);\n"
+                "    jpeg_set_quality(&cinfo, 85, TRUE);\n"
+                "    jpeg_start_compress(&cinfo, TRUE);\n"
+                "    jpeg_write_scanlines(&cinfo, rows.data(), data.height);\n"
+                "    jpeg_finish_compress(&cinfo);\n"
+                "    jpeg_destroy_compress(&cinfo);\n"
+                "\n"
+                "    auto out = std::make_unique<CompressedJPG>();\n"
+                "    out->data = jbuf;  // malloc-allocated by libjpeg\n"
+                "    out->size = size_t(jsz);\n"
+                "    return out;\n"
                 "}"
             )
             _tc_new = _tc[:_brace_start] + _new_body + _tc[_body_end:]
             if not DRY_RUN:
                 _thumb_cpp.write_text(_tc_new, encoding="utf-8")
-            print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/GCode/Thumbnails.cpp (jpg->png fallback)")
+            print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/GCode/Thumbnails.cpp (rgba→rgb jpeg)")
         else:
             print("  WARN: compress_thumbnail_jpg not found in Thumbnails.cpp")
     else:
-        print("  OK (no change): src/libslic3r/GCode/Thumbnails.cpp (jpg fallback)")
+        print("  OK (no change): src/libslic3r/GCode/Thumbnails.cpp (jpeg patch)")
 
 # =============================================================================
 # 7. utils.cpp — single-threaded Boost.Log compatibility
