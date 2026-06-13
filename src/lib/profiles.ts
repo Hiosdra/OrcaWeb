@@ -192,6 +192,8 @@ const ORCA_FIELD_MAP: Record<string, { key: keyof OrcaConfig; type: 'num' | 'pct
   // machine fields
   printer_model:           { key: 'printer_model',          type: 'str' },
   nozzle_diameter:         { key: 'nozzle_diameter',        type: 'num' },
+  printable_height:        { key: 'printable_height',       type: 'num' },
+  max_print_height:        { key: 'printable_height',       type: 'num' }, // alias
   // bed size — handled separately via parsePrintableArea() below
 }
 
@@ -273,6 +275,31 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
         if (dims) { config.bed_size_x = dims[0]; config.bed_size_y = dims[1] }
       }
     }
+
+    // ── Passthrough for unmapped OrcaSlicer fields ───────────────────────────
+    // Collect every field not already processed so it can be forwarded verbatim
+    // to the WASM slicer (which accepts any DynamicPrintConfig key).
+    const SKIP_META = new Set(['type', 'name', 'inherits', 'from', 'version', 'description', '__proto__', 'constructor', 'prototype'])
+    const SKIP_BED  = new Set(['printable_area', 'bed_size'])
+    const alreadyMapped = new Set(Object.keys(ORCA_FIELD_MAP))
+    const passthrough: Record<string, string> = Object.create(null) as Record<string, string>
+    for (const [field, val] of Object.entries(raw)) {
+      if (SKIP_META.has(field) || SKIP_BED.has(field) || alreadyMapped.has(field)) continue
+      if (val === null || val === undefined) continue
+      let sv: string
+      if (Array.isArray(val)) {
+        // OrcaSlicer wraps values in arrays (single-extruder: ["0.8"], multi: ["0.8","1.0"]).
+        // OrcaSlicer's config deserializer expects multi-value options as comma-separated strings.
+        sv = val
+          .filter((x) => x !== null && x !== undefined)
+          .map((x) => (typeof x === 'boolean' ? (x ? '1' : '0') : String(x)))
+          .join(',')
+      } else {
+        sv = typeof val === 'boolean' ? (val ? '1' : '0') : String(val)
+      }
+      if (sv !== '') passthrough[field] = sv
+    }
+    if (Object.keys(passthrough).length > 0) config._passthrough = passthrough
 
     return config
   } catch {

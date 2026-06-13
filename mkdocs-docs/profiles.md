@@ -74,8 +74,9 @@ OrcaWeb maps OrcaSlicer profile fields to its internal `OrcaConfig`. Aliases fro
 | `nozzle_diameter` | `nozzle_diameter` | mm |
 | `printable_area` | `bed_size_x` + `bed_size_y` | array of `"XxY"` corner strings; max X/Y taken as bed dimensions |
 | `bed_size` | `bed_size_x` + `bed_size_y` | legacy format: `["W","H"]` or `"WxH"` |
+| `printable_height` / `max_print_height` | `printable_height` | max Z height in mm |
 
-Fields not in this table are silently ignored.
+Fields not in this table are **forwarded verbatim to the WASM slicer** (passthrough) rather than silently ignored. This means all machine-profile fields recognised by OrcaSlicer — `gcode_flavor`, `retract_length`, `retract_speed`, `lift_z`, `machine_start_gcode`, `machine_end_gcode`, `layer_change_gcode`, `machine_max_speed_*`, and more — reach the engine automatically when importing a machine profile JSON.
 
 ## 3MF profile extraction
 
@@ -93,12 +94,16 @@ The mesh geometry (`3D/3dmodel.model`) is converted from the 3MF XML format to b
 
 When you import a profile:
 
-1. OrcaWeb reads the JSON and extracts all recognised fields
-2. The extracted settings are applied as **overrides** on top of the current preset
-3. A confirmation message shows how many settings were imported
-4. You can still manually adjust individual settings after importing
+1. OrcaWeb reads the JSON and extracts all recognised fields into the UI model
+2. Any remaining OrcaSlicer fields are collected and forwarded verbatim to the WASM slicer
+3. The extracted settings are applied as **overrides** on top of the current preset
+4. A confirmation message shows the profile name and type (e.g. `Imported "Bambu Lab P1S 0.4 nozzle" · machine profile · 42 settings`)
+5. You can still manually adjust individual settings after importing
 
 Importing a second profile replaces the overrides from the first.
+
+!!! tip "Machine profiles"
+    Import a machine profile JSON from your OrcaSlicer installation (`%APPDATA%\OrcaSlicer\user\default\machine\` on Windows) to transfer the full printer configuration — G-code dialect, retraction, Z-hop, start/end G-code scripts, and kinematics limits — to the browser slicer.
 
 ## Built-in presets
 

@@ -41,6 +41,12 @@ export interface OrcaConfig {
   seam_position?: SeamPosition
   fuzzy_skin?: FuzzySkin
   enable_ironing?: boolean
+
+  // Machine
+  printable_height?: number
+
+  // Arbitrary OrcaSlicer fields not modeled above — forwarded verbatim to WASM
+  _passthrough?: Record<string, string>
 }
 
 export type InfillPattern =

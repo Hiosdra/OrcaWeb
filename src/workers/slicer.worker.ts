@@ -98,7 +98,9 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
 function doSlice(stl: ArrayBuffer, config: Record<string, unknown>) {
   if (!orcaModule) return
   try {
-    const configJson = JSON.stringify(config)
+    const { _passthrough, ...rest } = config as Record<string, unknown> & { _passthrough?: Record<string, string> }
+    const flat = _passthrough ? { ...rest, ..._passthrough } : rest
+    const configJson = JSON.stringify(flat)
     const gcode = sliceStl(orcaModule, new Uint8Array(stl), configJson)
     send({ type: 'SLICE_COMPLETE', gcode })
   } catch (err) {
