@@ -12,11 +12,24 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       workbox: {
-        // Pre-cache all app assets including WASM on first visit
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,wasm}'],
-        // slicer.wasm can be ~15 MB — raise the per-file limit accordingly
-        maximumFileSizeToCacheInBytes: 50 * 1024 * 1024,
+        // Pre-cache lightweight app shell; WASM is handled via runtimeCaching
+        // below so a failed 15 MB download doesn't abort SW installation.
+        globPatterns: ['**/*.{js,css,html,svg,png,ico}'],
         navigateFallback: 'index.html',
+        runtimeCaching: [
+          {
+            // slicer.wasm (~15 MB) — cache on first use (CacheFirst) so the
+            // file is available offline after the initial visit without risking
+            // SW install failure on slow/unstable connections.
+            urlPattern: /\.wasm$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'wasm-assets',
+              expiration: { maxEntries: 5, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
       },
       manifest: {
         name: 'OrcaWeb — Browser Slicer',
