@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import clsx from 'clsx'
 import type { SliceStatus, GcodeStats } from '../types'
 import type { WasmStatus } from '../lib/worker-singleton'
@@ -7,6 +8,18 @@ interface Props {
   wasmStatus: WasmStatus
   onSlice: () => void
   disabled: boolean
+}
+
+function SlicingLabel() {
+  const [elapsed, setElapsed] = useState(0)
+
+  useEffect(() => {
+    const start = Date.now()
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 250)
+    return () => clearInterval(id)
+  }, [])
+
+  return <>Slicing… ({elapsed}s)</>
 }
 
 export function SlicePanel({ status, wasmStatus, onSlice, disabled }: Props) {
@@ -34,7 +47,7 @@ export function SlicePanel({ status, wasmStatus, onSlice, disabled }: Props) {
         {isLoading ? (
           <>
             <Spinner />
-            {status.phase === 'loading-wasm' ? 'Loading slicer engine…' : 'Slicing…'}
+            {status.phase === 'loading-wasm' ? 'Loading slicer engine…' : <SlicingLabel />}
           </>
         ) : (
           <>

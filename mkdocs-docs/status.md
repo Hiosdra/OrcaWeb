@@ -2,7 +2,7 @@
 
 Ten dokument opisuje aktualny stan projektu: zaimplementowane funkcje, znane ograniczenia i planowane ulepszenia.
 
-Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (własny build, wdrożony na produkcji) · wersja aplikacji: **PR #14 merged**
+Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (własny build, wdrożony na produkcji) · wersja aplikacji: **PR #15 merged**
 
 ---
 
@@ -36,6 +36,7 @@ Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (
 | Obsługa błędów | Kody błędów `-1`…`-9`, czytelne komunikaty |
 | Wczytanie WASM gdy slicowanie w trakcie | Kolejkowanie żądania `SLICE` gdy WASM jeszcze się ładuje |
 | JPEG miniatury G-code | Prawdziwy JPEG (RGBA→RGB, standard libjpeg) — od PR #13 |
+| Licznik czasu slicowania | Przycisk pokazuje `Slicing… (12s)` — rzetelna informacja bez fikcyjnych etapów — od PR #15 |
 
 ### Override approach (engine clean layer)
 
@@ -107,7 +108,6 @@ Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (
 
 | Problem | Szczegóły |
 |---------|-----------|
-| Brak wskaźnika postępu slicowania | Spinner bez informacji o etapie |
 | Duże pliki STL (>50 MB) | Mogą powodować zacinanie się podczas podglądu |
 
 ---
@@ -166,6 +166,7 @@ v0.3  ── ✅ Własny build WASM v2.3.2 (bez slicer.data)
       ── ✅ Override approach (engine clean layer)
       ── ✅ Prawdziwy JPEG (PR #13)
       ── ✅ Import pełnych profili maszyny z OrcaSlicera (PR #14)
+      ── ✅ Licznik czasu slicowania (PR #15)
       ── Kolorowanie G-code wg typu ruchu
       ── PWA / Service Worker
 
