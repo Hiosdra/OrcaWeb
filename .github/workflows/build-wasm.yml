@@ -71,7 +71,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: orca-wasm/deps-install
-          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v13
+          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v14
 
       # ── Boost ────────────────────────────────────────────────────────
       # Build Boost using b2 with the clang-emscripten toolset.  The standard
@@ -262,6 +262,36 @@ jobs:
             -DBUILD_DOC=OFF
           cmake --build /tmp/cereal-build --target install
 
+          touch "${STAMP}"
+
+      # ── libnoise ─────────────────────────────────────────────────────────
+      # SoftFever's Orca-deps-libnoise fork — pure C++, no OS calls, compiles
+      # cleanly with Emscripten. Provides noise::noise (Perlin/Billow/RidgedMulti/
+      # Voronoi) consumed by libslic3r's FuzzySkin feature.
+      - name: Build WASM deps — libnoise
+        run: |
+          source /opt/emsdk/emsdk_env.sh
+          INSTALL="$(pwd)/orca-wasm/deps-install"
+          STAMP="${INSTALL}/.libnoise_built"
+          [[ -f "${STAMP}" ]] && echo "[libnoise] stamp exists — skip" && exit 0
+
+          echo "[libnoise] downloading Orca-deps-libnoise 1.0…"
+          curl -fL --retry 3 \
+            "https://github.com/SoftFever/Orca-deps-libnoise/archive/refs/tags/1.0.tar.gz" \
+            | tar xz -C /tmp/
+          mv /tmp/Orca-deps-libnoise-1.0 /tmp/libnoise-src
+
+          echo "[libnoise] configuring with Emscripten…"
+          emcmake cmake -S /tmp/libnoise-src -B /tmp/libnoise-build -G Ninja \
+            -DCMAKE_INSTALL_PREFIX="${INSTALL}" \
+            -DCMAKE_BUILD_TYPE=Release
+
+          echo "[libnoise] building…"
+          emmake cmake --build /tmp/libnoise-build --target install -j"$(nproc)"
+
+          echo "[libnoise] verifying install…"
+          ls "${INSTALL}/include/libnoise/noise.h" && echo "  headers OK"
+          ls "${INSTALL}/lib/liblibnoise_static.a" && echo "  lib OK"
           touch "${STAMP}"
 
       # ── Emscripten ports — ZLIB / libpng / libjpeg ───────────────────────
