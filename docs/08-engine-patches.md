@@ -13,7 +13,7 @@ poprawek nakładanych na świeży checkout submodułu.  Strategia jest trójwars
 |---------|-------------|-----------------|
 | **Patche in-place** | `orca-wasm/patches/apply.py` | przy każdym CMake configure (CI + local) |
 | **Override .cpp/.hpp** | `orca-wasm/overrides/` | zamiast oryginalnych plików zależnych od brakujących bibliotek |
-| **Header shimy** | `orca-wasm/wasm/shims/` | podmiana TBB / OpenVDB / FreeType / OpenSSL przez `-isystem` |
+| **Header shimy** | `orca-wasm/wasm/shims/` | podmiana TBB / OpenVDB / FreeType / OpenSSL przez `BEFORE PUBLIC` include path |
 
 Skrypt `apply.py` uruchamiany jest przed `cmake` i jest idempotentny (powtórne
 wywołanie nie zmienia nic gdy łatki są już naniesione).  Tryb dry-run:
@@ -52,9 +52,10 @@ generatorami.
 ## 2. Override — stub `.cpp` zamiast implementacji zależnych od brakujących bibliotek
 
 Oryginalne pliki `.cpp` są oznaczane jako `HEADER_FILE_ONLY` (nie kompilowane)
-i zastępowane stubami z `orca-wasm/overrides/`.  Każdy stub zwraca błąd
-lub wartość zerową — zachowanie identyczne z tym, co widzi użytkownik WebAssembly
-(te funkcje nigdy nie będą wywołane przez headless slicer FDM).
+i zastępowane stubami z `orca-wasm/overrides/`.  Stuby są minimalne: niektóre
+zwracają błąd lub wartość zerową, inne są pustymi plikami (gdy odpowiedni `.hpp`
+nie deklaruje żadnych funkcji do implementacji).  Wszystkie funkcje z tych modułów
+nigdy nie będą wywołane przez headless slicer FDM.
 
 | Override plik | Zastępuje | Powód |
 |---------------|-----------|-------|
@@ -68,7 +69,7 @@ lub wartość zerową — zachowanie identyczne z tym, co widzi użytkownik WebA
 | `ObjColorUtils.hpp` | nagłówek OpenCV | `#include <opencv2/…>` wywołałby błąd |
 | `SLA/Hollowing.cpp` | hollowing SLA | zależy od OpenVDB |
 | `Shape/TextShape.cpp` | tekst 3D | zależy od FreeType + OCCT |
-| `Feature/FuzzySkin/FuzzySkin.cpp` | fuzzy skin | może zależeć od libnoise |
+| `Feature/FuzzySkin/FuzzySkin.cpp` | fuzzy skin | libnoise i `thread_local` niedostępne w WASM |
 
 > Nagłówki (`.hpp`) są **kopiowane bezpośrednio do drzewa `orca/`** (nie przez
 > `-I`).  Kompilator przeszukuje katalog pliku włączającego przed ścieżkami `-I`,
@@ -79,8 +80,7 @@ lub wartość zerową — zachowanie identyczne z tym, co widzi użytkownik WebA
 
 ## 3. Shimy nagłówkowe (`orca-wasm/wasm/shims/`)
 
-Podawane przez `-isystem orca-wasm/wasm/shims/` — wyższy priorytet niż zainstalowane
-nagłówki systemowe.
+Katalog `orca-wasm/wasm/shims/` dodany przez `target_include_directories(orca_web_bridge BEFORE PUBLIC ...)` w `bridge/CMakeLists.txt` — flaga `BEFORE` gwarantuje wyższy priorytet niż pozostałe ścieżki projektu.
 
 ### TBB → sekwencyjne stuby
 
@@ -93,9 +93,9 @@ zastępowane implementacjami działającymi sekwencyjnie w tym samym wątku.
 | `tbb/parallel_for_each.h` | `std::for_each` |
 | `tbb/parallel_reduce.h` | iteracja sekwencyjna + merge |
 | `tbb/parallel_invoke.h` | wywołanie wszystkich funktorów sekwencyjnie |
-| `tbb/parallel_pipeline.h` | no-op (pipeline SLA nieużywany) |
+| `tbb/parallel_pipeline.h` | sekwencyjna implementacja pipeline (`flow_control`, `filter_t`, `make_filter`) |
 | `tbb/task_arena.h` | `max_concurrency()` → 1; `execute()` wywołuje funktor |
-| `tbb/task_group.h` | kolejkuje zadania, uruchamia w `wait()` |
+| `tbb/task_group.h` | `run()` wywołuje funktor natychmiast; `wait()` jest no-op |
 | `tbb/spin_mutex.h` | no-op mutex (single-thread) |
 | `tbb/partitioner.h` | puste typy `simple/auto/static/affinity_partitioner` |
 | `tbb/global_control.h` | no-op |
@@ -108,13 +108,15 @@ zastępowane implementacjami działającymi sekwencyjnie w tym samym wątku.
 
 ### OpenVDB → header stub
 
-`openvdb/openvdb.h` — plik pusty z deklaracją namespace; kompilacja przechodzi,
-linkowanie nie potrzebuje libopenvdb (pliki `.cpp` zastąpione overridami).
+`openvdb/openvdb.h` — minimalne typy wymagane przez nagłówki OrcaSlicer:
+`Index32`, `Index64`, `math::Transform`, `initialize()`, sub-namespace `math`/`tools`/`util`.
+Kompilacja przechodzi, linkowanie nie potrzebuje libopenvdb (pliki `.cpp` zastąpione overridami).
 
 ### FreeType → minimalne typy
 
-`ft2build.h` + `freetype/*.h` — typy i stałe wymagane przez `Shape/TextShape.hpp`
-(kod GUI — i tak nie trafia do buildu WASM, ale nagłówki są włączane przechodnio).
+`ft2build.h` + `freetype/*.h` — typy i stałe wymagane przez `Shape/TextShape.hpp`,
+który jest kompilowany jako stub (patrz tabela w sekcji 2). Bez shima kompilacja
+stubu `TextShape.cpp` failuje na brakujących nagłówkach FreeType.
 
 ### OpenSSL MD5 → stub
 
@@ -161,7 +163,7 @@ src/libslic3r/AABBTreeLines.hpp
 `origin.cast<Scalar>()` zwraca `CwiseUnaryOp` (wyrażenie leniwe), które nie
 dopasowuje się do `Eigen::Matrix` przy dedukcji szablonu argumentu.
 
-**Fix:** `decltype(nearest_point)(origin.cast<Scalar>())` — explicit konstruktor.
+**Fix:** `decltype(nearest_point)(origin.template cast<typename LineType::Scalar>())` — explicit konstruktor z pełną kwalifikowaną formą `.template` (zachowaną przez capture group w regex apply.py).
 
 ### 4.4 `Platform.cpp` — nieznana platforma Emscripten
 
@@ -185,12 +187,14 @@ przestrzeń kolorów wejściowych dla miniatury JPEG z kanałem alfa.  Emscripte
 dostarcza standardową IJG libjpeg (`embuilder build libjpeg`), która tego
 rozszerzenia nie obsługuje — kompresja kończyłaby się błędem runtime.
 
-**Dwa kroki:**
-1. `#define JCS_EXT_RGBA ((J_COLOR_SPACE)13)` po `#include <jpeglib.h>` —
-   kompilacja przechodzi (wartość liczbowa jest dostępna).
-2. Cała funkcja `compress_thumbnail_jpg` zastąpiona implementacją
+Dwa niezależne bloki kodu w `apply.py` (każdy z własnym guardiem idempotencji):
+
+1. **`patch()` (regex):** wstawia `#ifndef JCS_EXT_RGBA / #define JCS_EXT_RGBA ((J_COLOR_SPACE)13) / #endif`
+   po `#include <jpeglib.h>` — kompilacja przechodzi, wartość liczbowa jest dostępna.
+2. **Brace-counting block:** zastępuje całe ciało `compress_thumbnail_jpg` implementacją
    konwertującą RGBA → RGB (odwrócone wiersze + pominięcie kanału alfa),
    po czym kompresja z `JCS_RGB` przez standardowe API IJG.
+   Guard: `if "// WASM: strip alpha" not in _tc`.
 
 ### 4.6 `utils.cpp` — Boost.Log single-thread
 
@@ -208,8 +212,8 @@ jednowątkowym.
 - całe wyrażenie `<< "[Thread " << expr::attr<…>("ThreadID") << "]"` → usunięte
 
 Ten sam define (`BOOST_LOG_NO_THREADS=1`) musi być przekazany do całego buildu
-libslic3r przez `wasm_find_paths.cmake` + `CMAKE_CXX_FLAGS` — bez tego linker
-zgłasza setki `undefined symbol: boost::log::v2s_mt_posix::*`.
+libslic3r przez `add_compile_definitions()` w `orca-wasm/cmake/wasm_find_paths.cmake`
+— bez tego linker zgłasza setki `undefined symbol: boost::log::v2s_mt_posix::*`.
 
 ---
 
@@ -224,7 +228,8 @@ przestrzeni `v2s_st` (single-thread).  Konsument (`libslic3r`) bez tego define'a
 szuka przestrzeni `v2s_mt_posix` — ABI mismatch.
 
 **Rozwiązanie:** `BOOST_LOG_NO_THREADS=1` musi być zdefiniowany **zarówno przy
-budowaniu Boost jak i przy budowaniu libslic3r**.  Patch 4.6 (`utils.cpp`)
+budowaniu Boost jak i przy budowaniu libslic3r** (przez `add_compile_definitions()`
+w `wasm_find_paths.cmake`).  Patch 4.6 (`utils.cpp`)
 usuwa wywołania do `synchronous_sink` i `current_thread_id`, które nie istnieją
 w jednowątkowej wersji Boost (ST-mode).
 
@@ -253,8 +258,11 @@ if(SLIC3R_WASM AND DEFINED ORCA_WEB_BRIDGE_DIR)
 endif()
 ```
 
-Zmienne `ORCA_WEB_BRIDGE_DIR` i `ORCA_WEB_WASM_DIR` są przekazywane przez
-`scripts/build.sh` jako `-D` argumenty do `cmake`.  Efekt: bridge (`slicer.cpp`)
+Zmienne `ORCA_WEB_BRIDGE_DIR` i `ORCA_WEB_WASM_DIR` są potrzebne tylko gdy
+OrcaSlicer CMakeLists.txt jest rootem (np. standalone cmake invocation na gałęzi
+orca).  W normalnym buildzie `scripts/build.sh` używa `orca-wasm/CMakeLists.txt`
+jako root (`cmake -S .`) — ten plik dodaje bridge i wasm subdirectory bezpośrednio,
+bez potrzeby przekazywania tych zmiennych.  Efekt: bridge (`slicer.cpp`)
 i cel Emscripten (`wasm/CMakeLists.txt` produkujący `slicer.js` + `slicer.wasm`)
 są częścią tego samego drzewa CMake co `libslic3r`, ale ich kod źródłowy nigdy
 nie trafia do submodułu `orca/`.
@@ -272,8 +280,8 @@ nie trafia do submodułu `orca/`.
    utwórz `orca-wasm/overrides/src/libslic3r/<path>.hpp`, dodaj
    `copy_override("src/libslic3r/<path>.hpp")` w sekcji 4b `apply.py`.
 4. **Nowy shim nagłówkowy** (nowe API TBB / OpenSSL / itd.) →
-   dodaj plik do `orca-wasm/wasm/shims/` — jest on automatycznie brany przez
-   `-isystem` zdefiniowane w `wasm/CMakeLists.txt`.
+   dodaj plik do `orca-wasm/wasm/shims/` — katalog jest automatycznie brany przez
+   `target_include_directories(... BEFORE PUBLIC ...)` w `bridge/CMakeLists.txt`.
 
 Po zmianie uruchom `python3 orca-wasm/patches/apply.py --check` żeby
 zweryfikować bez modyfikacji plików.
