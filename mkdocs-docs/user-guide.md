@@ -6,7 +6,7 @@ OrcaWeb is a three-step workflow: **Model → Settings → Slice**.
 
 ### Model tab
 
-Upload your model by dragging it onto the drop zone or clicking to browse. Supported formats: **STL** (ASCII and binary), **3MF**, **STEP / IGES**, and **OBJ**.
+Upload your model by dragging it onto the drop zone or clicking to browse. Supported formats: **STL** (ASCII and binary), **3MF**, **STEP / IGES** (converted via `occt-import-js`; ~8 MB extra WASM loaded on first use), and **OBJ**.
 
 - Rotate: left-drag
 - Pan: right-drag / Ctrl+drag

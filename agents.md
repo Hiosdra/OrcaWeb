@@ -16,7 +16,7 @@ If you touch the WASM pipeline, CI workflow, shims, or UI — check whether any 
 
 ```bash
 npm install
-node scripts/download-wasm.mjs   # downloads ~150 MB WASM artifacts into public/wasm/
+node scripts/download-wasm.mjs   # downloads ~9 MB WASM artifacts (slicer.js + slicer.wasm) into public/wasm/
 npm run dev                      # Vite dev server at http://localhost:5173
 ```
 
@@ -25,7 +25,7 @@ WASM artifacts (`public/wasm/`) are gitignored — run the download script after
 ## Architecture
 
 - **React 19 + TypeScript + Vite + Tailwind CSS v4** — frontend in `src/`
-- **Web Worker** (`src/slicer.worker.ts`) — runs OrcaSlicer WASM off the main thread
+- **Web Worker** (`src/workers/slicer.worker.ts`) — runs OrcaSlicer WASM off the main thread
 - **WASM engine** — OrcaSlicer compiled via Emscripten; artifacts in `public/wasm/`
 - **CLI** — Node.js wrapper in `cli/`
 - **WASM build pipeline** — `orca-wasm/` contains the Emscripten build, CMake config, shims, and patch script (`orca-wasm/patches/apply.py`)

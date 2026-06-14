@@ -14,7 +14,7 @@ OrcaWeb to przeglądarkowy slicer oparty na WebAssembly. Cały pipeline slicowan
 │  ┌──────────┐   ┌────────────┐   ┌──────────────┐  │
 │  │ React UI │──▶│  Web Worker│──▶│ slicer.wasm  │  │
 │  │ (main    │◀──│  (slicer.  │◀──│ (OrcaSlicer  │  │
-│  │  thread) │   │  worker.ts)│   │  v2.3.1 core)│  │
+│  │  thread) │   │  worker.ts)│   │  v2.3.2 core)│  │
 │  └──────────┘   └────────────┘   └──────────────┘  │
 │        │                                             │
 │        ▼                                             │
@@ -30,18 +30,14 @@ OrcaWeb to przeglądarkowy slicer oparty na WebAssembly. Cały pipeline slicowan
 ### Pliki artefaktów (`public/wasm/`)
 | Plik | Rozmiar | Opis |
 |------|---------|------|
-| `slicer.js` | 1.2 MB | Emscripten glue code (IIFE) |
-| `slicer.wasm` | 6.4 MB | Skompilowany OrcaSlicer core |
-| `slicer.data` | 144 MB | Dane profili, materiałów, domyślne konfiguracje |
+| `slicer.js` | ~1.5 MB | Emscripten glue code (IIFE) |
+| `slicer.wasm` | ~7.5 MB | Skompilowany OrcaSlicer v2.3.2 core |
 
-Źródło: [`allanwrench28/orcaslicer-wasm`](https://github.com/allanwrench28/orcaslicer-wasm) release v1.1.  
+Brak `slicer.data` — headless flat-config slicer nie czyta `orca/resources` w runtime;
+plik danych został usunięty (200 MB → 0).
+
+Źródło: OrcaWeb GitHub Release [`wasm-v2.3.2`](https://github.com/Hiosdra/OrcaWeb/releases/tag/wasm-v2.3.2) (własny build `orca-wasm/`).  
 Pobieranie: `node scripts/download-wasm.mjs`
-
-> **Uwaga (kierunek):** powyższe opisuje obecny, wdrożony silnik. Nasz własny
-> build OrcaSlicer v2.3.2 ([`07-wasm-self-build.md`](07-wasm-self-build.md))
-> **nie ma `slicer.data`** — preload `orca/resources` został usunięty (headless
-> slicing go nie czyta), więc po cutoverze zostają tylko `slicer.js` +
-> `slicer.wasm`, bez dzielenia na kawałki i sklejania w workerze.
 
 ### API WASM
 ```typescript
@@ -98,7 +94,7 @@ Jeśli `SLICE` nadejdzie przed zakończeniem `LOAD_WASM`, worker kolejkuje żąd
 
 **`src/lib/worker-singleton.ts`** — moduł-poziomowy singleton zapobiegający podwójnemu tworzeniu workera.
 
-Problem: React StrictMode montuje komponenty dwukrotnie w dev → dwa workery → dwa pobrania 144 MB.
+Problem: React StrictMode montuje komponenty dwukrotnie w dev → dwa workery → podwójne pobranie i inicjalizacja ~9 MB WASM.
 
 Rozwiązanie: Worker jest tworzony raz per sesja przeglądarki, przechowywany w zmiennej modułu (`let worker: Worker | null = null`). `preloadWasm()` wywołany w `main.tsx` przed renderem React — WASM zaczyna się ładować zanim użytkownik cokolwiek kliknie.
 
@@ -189,16 +185,16 @@ Wartości numeryczne są zakodowane jako stringi — `parseOrcaProfileJson` konw
 
 | Warstwa | Technologia |
 |---------|-------------|
-| UI | React 18, TypeScript 5, Tailwind CSS |
+| UI | React 19, TypeScript 5, Tailwind CSS v4 |
 | 3D | Three.js 0.170 (STLLoader, OrbitControls) |
 | Bundler | Vite 5 (worker ES format, COOP/COEP headers) |
-| WASM | OrcaSlicer v2.3.1 via Emscripten (orcaslicer-wasm) |
+| WASM | OrcaSlicer v2.3.2 via Emscripten (własny build `orca-wasm/`) |
 | Worker | Web Worker (ES module, blob URL trick) |
 | CLI | Commander, tsx, chalk, ora |
 
 ## Skalowanie i ograniczenia
 
-- Plik `slicer.data` (144 MB) nie może być w repozytorium — za duży dla GitHub (limit 100 MB/plik)
-- Pobieranie WASM przy pierwszym uruchomieniu: ~150 MB, jednorazowo (przeglądarka może cache'ować)
+- Pobieranie WASM przy pierwszym uruchomieniu: ~9 MB jednorazowo (slicer.js + slicer.wasm z GitHub Releases); PWA Service Worker pre-cache'uje je automatycznie
 - Slicowanie blokuje worker thread ~50–500 ms w zależności od złożoności modelu
-- Tylko format STL (binary i ASCII) — brak 3MF/OBJ/AMF
+- Tylko formaty STL (binary i ASCII), 3MF oraz STEP/IGES (konwertowane przez occt-import-js; ~8 MB dodatkowego WASM ładowane przy pierwszym użyciu) — brak OBJ/AMF
+- Duże pliki STL (>50 MB) mogą powodować zacinanie podczas podglądu 3D

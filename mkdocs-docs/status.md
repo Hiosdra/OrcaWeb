@@ -47,7 +47,7 @@ Ostatnia aktualizacja: **2026-06-14** · wersja silnika: **OrcaSlicer v2.3.2** (
 | Aspekt | Szczegóły |
 |--------|-----------|
 | Brak modyfikacji kodu OrcaSlicer | Źródła C++ pozostają nienaruszone; stubs w `orca-wasm/overrides/` |
-| Wyłączone zależności WASM | OCCT, OpenVDB, OpenCV, Draco, libnoise — zastąpione stubami |
+| Wyłączone zależności WASM | OCCT, OpenVDB, OpenCV, Draco — zastąpione stubami; libnoise skompilowane dla WASM |
 | Aktualizacja do nowej wersji | Tylko `ORCA_VERSION` w workflow + ewentualna korekta stubów |
 | Zgodność AGPL-3.0 | `LICENSE`, `NOTICE.md`, link do źródeł w UI — `§13` network copyleft spełniony |
 
@@ -121,7 +121,7 @@ Ostatnia aktualizacja: **2026-06-14** · wersja silnika: **OrcaSlicer v2.3.2** (
 
 | Funkcja | Priorytet |
 |---------|-----------|
-| FuzzySkin (szorstkość powierzchni) | 🟡 średni — wymaga portu libnoise do WASM; aktualnie no-op |
+| FuzzySkin (szorstkość powierzchni) | 🟢 — libnoise skompilowane dla WASM; Perlin/Billow/RidgedMulti/Voronoi aktywne |
 | Variable layer height | 🟡 średni |
 | Support enforcement / blocking | 🟡 średni |
 | Multi-material | 🟠 niski |
@@ -192,7 +192,7 @@ orca-wasm/                 ✅ aktywny pipeline buildowy
 ├── bridge/slicer.cpp      ✅ orc_init / orc_slice / orc_obj_to_stl bridge
 ├── wasm/                  ✅ CMakeLists, link flags, shims
 ├── wasm/shims/tbb/        ✅ sekwencyjne stuby TBB
-├── overrides/             ✅ C++ stuby (OCCT/OpenVDB/OpenCV/Draco/FuzzySkin)
+├── overrides/             ✅ C++ stuby (OCCT/OpenVDB/OpenCV/Draco)
 └── patches/apply.py       ✅ patcher CMake + bugfixów
 
 public/wasm/               ✅ artefakty z release wasm-v2.3.2 (slicer.js + slicer.wasm)
