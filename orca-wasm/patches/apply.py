@@ -346,12 +346,24 @@ endif()
 _libslic3r_cmake = ORCA / "src/libslic3r/CMakeLists.txt"
 if _libslic3r_cmake.exists():
     _lc = _libslic3r_cmake.read_text(encoding="utf-8")
-    if "OrcaWeb WASM overrides" not in _lc:
+    _marker = "# ── OrcaWeb WASM overrides"
+    if _marker not in _lc:
         if not DRY_RUN:
             _libslic3r_cmake.write_text(_lc + LIBSLIC3R_OVERRIDES_INJECTION, encoding="utf-8")
         print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/CMakeLists.txt (overrides injection)")
     else:
-        print("  OK (no change): src/libslic3r/CMakeLists.txt (overrides injection)")
+        # Already injected — check content matches current template.
+        # If apply.py changed (e.g. FuzzySkin removed from injection), the old
+        # injected block must be replaced so stale overrides don't linger in
+        # local orca/ checkouts across apply.py updates.
+        _inject_start = _lc.index(_marker)
+        if _lc[_inject_start:].rstrip() != LIBSLIC3R_OVERRIDES_INJECTION.rstrip():
+            _lc_updated = _lc[:_inject_start].rstrip() + "\n" + LIBSLIC3R_OVERRIDES_INJECTION
+            if not DRY_RUN:
+                _libslic3r_cmake.write_text(_lc_updated, encoding="utf-8")
+            print(f"  {'WOULD UPDATE' if DRY_RUN else 'UPDATED'}: src/libslic3r/CMakeLists.txt (overrides injection changed)")
+        else:
+            print("  OK (no change): src/libslic3r/CMakeLists.txt (overrides injection)")
 
 # =============================================================================
 # 5. Platform.cpp — suppress unknown-platform static_assert
