@@ -11,7 +11,7 @@
 │   │  React 19 + TypeScript + Tailwind CSS v4        │    │
 │   │                                                │    │
 │   │  App.tsx                                       │    │
-│   │  ├── FileUpload     drag & drop STL / 3MF      │    │
+│   │  ├── FileUpload     drag & drop STL/3MF/STEP/OBJ│    │
 │   │  ├── ModelViewer    Three.js, real mm scale    │    │
 │   │  ├── SettingsPanel  presets + profile import   │    │
 │   │  ├── SlicePanel     slice button + download    │    │
@@ -24,7 +24,8 @@
 │   │  Web Worker: slicer.worker.ts                  │    │
 │   │  └── wasm-loader.ts                            │    │
 │   │      ├── _orc_init(configJson)                 │    │
-│   │      └── _orc_slice(stl) → gcode string        │    │
+│   │      ├── _orc_slice(stl) → gcode string        │    │
+│   │      └── _orc_obj_to_stl(obj) → stl bytes      │    │
 │   └──────────────────┬─────────────────────────────┘    │
 │                      │ fetch                             │
 │   ┌──────────────────▼─────────────────────────────┐    │
@@ -127,8 +128,19 @@ Upgrading to a new OrcaSlicer version: change `ORCA_VERSION` in `build-wasm.yml`
 ```
 File drop
   │
-  ▼ File state
-ModelViewer ←─ Three.js STLLoader (visual only)
+  ├─ .stl / .3mf ──► File state
+  │                       │
+  │               ModelViewer (Three.js STLLoader)
+  │
+  ├─ .step / .iges ─► cadToStl() [main thread, occt-import-js]
+  │                       └─► synthetic .stl File → File state
+  │
+  └─ .obj ──────────► worker.postMessage(OBJ_TO_STL, obj bytes)
+                           │
+                   [worker] _orc_obj_to_stl()
+                           │
+                   OBJ_STL_COMPLETE { stl }
+                           └─► synthetic .stl File → File state
 
   │ config = buildConfig(printer, filament, preset) + overrides
   │
