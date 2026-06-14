@@ -14,6 +14,7 @@ Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (
 |---------|-------|
 | Drag & drop pliku STL | ASCII i binary STL |
 | Import pliku 3MF | Ekstrakcja siatki + profili OrcaSlicera z metadanych archiwum |
+| Import STEP / IGES | Konwersja CAD → STL przez `occt-import-js` (OCCT 7.7 skompilowany do WASM); lazy-load ~8 MB przy pierwszym użyciu |
 | Podgląd 3D modelu (Three.js) | Model na wirtualnym stole drukarskim w skali mm, OrbitControls |
 | Siatka stołu — dynamiczny rozmiar | Rozmiar stołu pobierany z presetu drukarki lub profilu maszyny |
 | Zakładki Model / Settings / Slice | Płynna nawigacja, zakładki zablokowane do momentu wczytania pliku |
@@ -113,7 +114,6 @@ Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (
 | Funkcja | Priorytet |
 |---------|-----------|
 | OBJ import | 🟡 średni |
-| STEP / IGES import | 🔴 nie możliwy — OCCT wyłączone (wymaga occt-wasm, blokada licencji LGPL-2.1-only) |
 | Multi-plik (wiele STL naraz) | 🟡 średni |
 
 ### Zaawansowane funkcje slicowania
@@ -155,6 +155,7 @@ v0.3  ── ✅ Własny build WASM v2.3.2 (bez slicer.data)
       ── ✅ Licznik czasu slicowania (PR #15)
       ── ✅ Kolorowanie G-code wg typu ruchu, travel moves, grube linie 3D (PR #16)
       ── ✅ PWA / Service Worker — pre-cache WASM przy pierwszej wizycie
+      ── ✅ Import STEP / IGES (occt-import-js, PR #19)
 
 v0.4  ── OctoPrint integration
       ── Multi-object plate
@@ -169,7 +170,7 @@ v0.4  ── OctoPrint integration
 src/
 ├── App.tsx                ✅ pełna logika UI, tabs, WASM orchestration, 3MF loading
 ├── components/
-│   ├── FileUpload.tsx     ✅ drag & drop, STL + 3MF
+│   ├── FileUpload.tsx     ✅ drag & drop, STL + 3MF + STEP/IGES
 │   ├── ModelViewer.tsx    ✅ Three.js, STLLoader, dynamiczny rozmiar stołu
 │   ├── GcodeViewer.tsx    ✅ toolpaths, layer slider, feature-type colors, travel moves, grube linie 3D
 │   ├── SettingsPanel.tsx  ✅ presety, import profili — passthrough wszystkich pól OrcaSlicera
@@ -177,6 +178,7 @@ src/
 ├── lib/
 │   ├── profiles.ts        ✅ presety z rozmiarami stołu, 30+ pól + passthrough wszystkich pozostałych
 │   ├── parse3mf.ts        ✅ 3MF → binary STL + OrcaConfig
+│   ├── step-converter.ts  ✅ STEP/IGES → binary STL (occt-import-js, lazy WASM)
 │   ├── wasm-loader.ts     ✅ orc_init / orc_slice / error codes
 │   └── worker-singleton.ts ✅ singleton, preload WASM
 ├── workers/

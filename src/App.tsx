@@ -8,6 +8,7 @@ import { GcodeViewer } from './components/GcodeViewer'
 import type { OrcaConfig, SliceStatus, WorkerOutMessage } from './types'
 import { buildConfig } from './lib/profiles'
 import { parse3mf } from './lib/parse3mf'
+import { cadToStl } from './lib/step-converter'
 import {
   getWorker,
   addWorkerListener,
@@ -106,6 +107,26 @@ export default function App() {
         })
         return
       }
+    } else if (/\.(step|stp|iges|igs)$/i.test(f.name)) {
+      try {
+        setSliceStatus({ phase: 'loading-wasm' })
+        const buf = await f.arrayBuffer()
+        const stlBytes = await cadToStl(f.name, buf)
+        const stlFile = new File(
+          [stlBytes],
+          f.name.replace(/\.(step|stp|iges|igs)$/i, '.stl'),
+          { type: 'model/stl' },
+        )
+        setFile(stlFile)
+        setConfigOverrides({})
+        setSliceStatus({ phase: 'idle' })
+      } catch (err) {
+        setSliceStatus({
+          phase: 'error',
+          message: `Failed to convert STEP/IGES: ${err instanceof Error ? err.message : String(err)}`,
+        })
+        return
+      }
     } else {
       setFile(f)
       // Clear any 3MF-extracted overrides so they don't bleed into plain STL slices
@@ -188,6 +209,11 @@ export default function App() {
         {activeTab === 'upload' && (
           <div className="space-y-4">
             <FileUpload file={file} onFile={handleFileSelect} />
+            {sliceStatus.phase === 'error' && !file && (
+              <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+                {sliceStatus.message}
+              </div>
+            )}
             {file && (
               <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white" style={{ height: 360 }}>
                 <ModelViewer file={file} bedX={bedX} bedY={bedY} />

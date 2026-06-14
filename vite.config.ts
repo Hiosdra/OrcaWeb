@@ -67,5 +67,8 @@ export default defineConfig({
   build: {
     chunkSizeWarningLimit: 10000,
   },
+  optimizeDeps: {
+    exclude: ['occt-import-js'],
+  },
   assetsInclude: ['**/*.wasm'],
 })
