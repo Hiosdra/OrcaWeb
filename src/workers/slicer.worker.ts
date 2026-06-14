@@ -3,7 +3,8 @@ import { sliceStl, OrcaSliceError } from '../lib/wasm-loader'
 
 let orcaModule: OrcaModule | null = null
 let loadingWasm = false
-// Slice request that arrived before WASM was ready
+// Slice request that arrived before WASM was ready — last-wins (UI disables
+// the Slice button while loading, so only one request can queue in practice)
 let pendingSlice: { stl: ArrayBuffer; config: Record<string, unknown> } | null = null
 
 function send(msg: WorkerOutMessage) {

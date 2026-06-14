@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import clsx from 'clsx'
 import { FileUpload } from './components/FileUpload'
 import { ModelViewer } from './components/ModelViewer'
@@ -40,10 +40,14 @@ export default function App() {
   const pendingSliceRef = useRef<{ stl: ArrayBuffer; config: OrcaConfig } | null>(null)
   const fileRef = useRef<File | null>(null)
 
-  const config: OrcaConfig = {
-    ...buildConfig(selectedPrinter, selectedFilament, selectedPreset),
-    ...configOverrides,
-  }
+  const baseConfig = useMemo(
+    () => buildConfig(selectedPrinter, selectedFilament, selectedPreset),
+    [selectedPrinter, selectedFilament, selectedPreset],
+  )
+  const config: OrcaConfig = useMemo(
+    () => ({ ...baseConfig, ...configOverrides }),
+    [baseConfig, configOverrides],
+  )
 
   const bedX = config.bed_size_x ?? 256
   const bedY = config.bed_size_y ?? 256
@@ -91,9 +95,9 @@ export default function App() {
       try {
         const buf = await f.arrayBuffer()
         const { stlBytes, config: profileConfig } = parse3mf(buf)
-        // Apply any settings extracted from the 3MF metadata
+        // Replace overrides with 3MF settings — don't merge with previous file's stale values
         if (Object.keys(profileConfig).length > 0) {
-          setConfigOverrides((prev) => ({ ...prev, ...profileConfig }))
+          setConfigOverrides(profileConfig)
         }
         // Wrap extracted STL bytes as a synthetic File so ModelViewer can read it
         const stlFile = new File([stlBytes.buffer as ArrayBuffer], f.name.replace(/\.3mf$/i, '.stl'), {
@@ -141,9 +145,18 @@ export default function App() {
     setConfigOverrides({})
   }
 
-  const handleSlice = async () => {
+  const handleSlice = useCallback(async () => {
     if (!file) return
-    const stlBuffer = await file.arrayBuffer()
+    let stlBuffer: ArrayBuffer
+    try {
+      stlBuffer = await file.arrayBuffer()
+    } catch (err) {
+      setSliceStatus({
+        phase: 'error',
+        message: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`,
+      })
+      return
+    }
 
     if (wasmStatus === 'ready') {
       setSliceStatus({ phase: 'slicing' })
@@ -160,7 +173,7 @@ export default function App() {
         message: `Slicer engine failed to load: ${getWasmError()}`,
       })
     }
-  }
+  }, [file, wasmStatus, config])
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-orca-50 flex flex-col">

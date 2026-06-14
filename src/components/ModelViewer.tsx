@@ -56,8 +56,10 @@ export function ModelViewer({ file, bedX = 256, bedY = 256 }: Props) {
     scene.add(grid)
 
     // Bed border
-    const edgeGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(bedX, 0.5, bedY))
-    scene.add(new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({ color: 0xb0bec5 })))
+    const innerBoxGeo = new THREE.BoxGeometry(bedX, 0.5, bedY)
+    const edgeGeo = new THREE.EdgesGeometry(innerBoxGeo)
+    const edgeMat = new THREE.LineBasicMaterial({ color: 0xb0bec5 })
+    scene.add(new THREE.LineSegments(edgeGeo, edgeMat))
 
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
@@ -68,11 +70,10 @@ export function ModelViewer({ file, bedX = 256, bedY = 256 }: Props) {
 
     const loader = new STLLoader()
     let mesh: THREE.Mesh | null = null
+    let cancelled = false
 
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const buffer = e.target?.result as ArrayBuffer
-      if (!buffer) return
+    file.arrayBuffer().then((buffer) => {
+      if (cancelled) return
 
       const geometry = loader.parse(buffer)
       geometry.computeBoundingBox()
@@ -99,8 +100,7 @@ export function ModelViewer({ file, bedX = 256, bedY = 256 }: Props) {
       camera.position.set(dist * 0.6, dist * 0.7, dist)
       controls.target.set(0, size.y / 2, 0)
       controls.update()
-    }
-    reader.readAsArrayBuffer(file)
+    })
 
     let animId: number
     const animate = () => {
@@ -120,6 +120,7 @@ export function ModelViewer({ file, bedX = 256, bedY = 256 }: Props) {
     resizeObs.observe(el)
 
     return () => {
+      cancelled = true
       cancelAnimationFrame(animId)
       resizeObs.disconnect()
       controls.dispose()
@@ -128,6 +129,9 @@ export function ModelViewer({ file, bedX = 256, bedY = 256 }: Props) {
       ;(mesh?.material as THREE.Material | undefined)?.dispose()
       bedGeo.dispose()
       bedMat.dispose()
+      innerBoxGeo.dispose()
+      edgeGeo.dispose()
+      edgeMat.dispose()
       el.removeChild(renderer.domElement)
     }
   }, [file, bedX, bedY])
