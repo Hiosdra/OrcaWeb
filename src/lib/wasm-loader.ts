@@ -104,24 +104,24 @@ export function objToStl(module: OrcaModule, objData: Uint8Array): Uint8Array {
   const outPtrPtr = module._malloc(4)
   const outLenPtr = module._malloc(4)
 
-  const result = module._orc_obj_to_stl(objPtr, objData.length, outPtrPtr, outLenPtr)
-  module._free(objPtr)
+  try {
+    const result = module._orc_obj_to_stl(objPtr, objData.length, outPtrPtr, outLenPtr)
+    if (result !== 0) {
+      throw new OrcaSliceError(result, objErrorMessage(result))
+    }
 
-  if (result !== 0) {
+    const stlPtr = module.getValue(outPtrPtr, 'i32')
+    const stlLen = module.getValue(outLenPtr, 'i32')
+    try {
+      return module.HEAPU8.slice(stlPtr, stlPtr + stlLen)
+    } finally {
+      module._orc_free(stlPtr)
+    }
+  } finally {
+    module._free(objPtr)
     module._free(outPtrPtr)
     module._free(outLenPtr)
-    throw new OrcaSliceError(result, objErrorMessage(result))
   }
-
-  const stlPtr = module.getValue(outPtrPtr, 'i32')
-  const stlLen = module.getValue(outLenPtr, 'i32')
-  const stl = module.HEAPU8.slice(stlPtr, stlPtr + stlLen)
-
-  module._orc_free(stlPtr)
-  module._free(outPtrPtr)
-  module._free(outLenPtr)
-
-  return stl
 }
 
 export class OrcaSliceError extends Error {

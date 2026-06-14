@@ -233,54 +233,75 @@ int orc_obj_to_stl(const char* obj_data, int obj_len,
     {
         FILE* f = std::fopen("/tmp/ow_in.obj", "wb");
         if (!f) { record_error("cannot open /tmp/ow_in.obj for writing"); return -3; }
-        std::fwrite(obj_data, 1, static_cast<std::size_t>(obj_len), f);
+        std::size_t written = std::fwrite(obj_data, 1, static_cast<std::size_t>(obj_len), f);
         std::fclose(f);
+        if (written != static_cast<std::size_t>(obj_len)) {
+            std::remove("/tmp/ow_in.obj");
+            record_error("failed to write complete OBJ data to MEMFS");
+            return -3;
+        }
     }
 
+    int status = -9;
     try {
         Slic3r::Model model;
         Slic3r::ObjInfo obj_info;
         std::string message;
         if (!Slic3r::load_obj("/tmp/ow_in.obj", &model, obj_info, message, "object")) {
             record_error(message.empty() ? "OBJ load failed" : message);
-            return -4;
-        }
-        if (model.objects.empty()) {
+            status = -4;
+        } else if (model.objects.empty()) {
             record_error("OBJ contains no geometry");
-            return -5;
+            status = -5;
+        } else {
+            // Merge all volumes from all objects into one mesh
+            Slic3r::TriangleMesh combined;
+            for (auto* obj : model.objects)
+                for (auto* vol : obj->volumes)
+                    combined.merge(vol->mesh());
+
+            if (!Slic3r::store_stl("/tmp/ow_out.stl", &combined, true)) {
+                record_error("STL export failed");
+                status = -8;
+            } else {
+                FILE* sf = std::fopen("/tmp/ow_out.stl", "rb");
+                if (!sf) {
+                    record_error("STL export produced no output");
+                    status = -8;
+                } else {
+                    std::fseek(sf, 0, SEEK_END);
+                    long sz = std::ftell(sf);
+                    std::rewind(sf);
+                    if (sz <= 0) {
+                        std::fclose(sf);
+                        record_error("STL export produced empty output");
+                        status = -8;
+                    } else {
+                        char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz)));
+                        if (!buf) {
+                            std::fclose(sf);
+                            record_error("out of memory");
+                            status = -9;
+                        } else {
+                            std::fread(buf, 1, static_cast<std::size_t>(sz), sf);
+                            std::fclose(sf);
+                            *out_stl = buf;
+                            *out_len = static_cast<int>(sz);
+                            status = 0;
+                        }
+                    }
+                }
+            }
         }
-
-        // Merge all volumes from all objects into one mesh
-        Slic3r::TriangleMesh combined;
-        for (auto* obj : model.objects)
-            for (auto* vol : obj->volumes)
-                combined.merge(vol->mesh());
-
-        if (!Slic3r::store_stl("/tmp/ow_out.stl", &combined, true)) {
-            record_error("STL export failed");
-            return -8;
-        }
-
-        FILE* sf = std::fopen("/tmp/ow_out.stl", "rb");
-        if (!sf) { record_error("STL export produced no output"); return -8; }
-
-        std::fseek(sf, 0, SEEK_END);
-        long sz = std::ftell(sf);
-        std::rewind(sf);
-
-        char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz)));
-        if (!buf) { std::fclose(sf); record_error("out of memory"); return -9; }
-        std::fread(buf, 1, static_cast<std::size_t>(sz), sf);
-        std::fclose(sf);
-
-        *out_stl = buf;
-        *out_len = static_cast<int>(sz);
-        return 0;
-
     } catch (const std::exception& e) {
         record_error(e.what());
-        return -9;
+        status = -9;
     }
+
+    // Always clean up MEMFS temp files to avoid heap leaks in long-running sessions
+    std::remove("/tmp/ow_in.obj");
+    std::remove("/tmp/ow_out.stl");
+    return status;
 }
 
 /** Free a buffer returned by orc_slice or orc_obj_to_stl. */

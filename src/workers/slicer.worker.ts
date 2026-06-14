@@ -113,7 +113,7 @@ function doObjToStl(obj: ArrayBuffer) {
   try {
     const stl = objToStl(orcaModule, new Uint8Array(obj))
     const stlBuffer = stl.buffer as ArrayBuffer
-    send({ type: 'OBJ_STL_COMPLETE', stl: stlBuffer })
+    self.postMessage({ type: 'OBJ_STL_COMPLETE', stl: stlBuffer }, [stlBuffer])
   } catch (err) {
     send({ type: 'OBJ_STL_ERROR', message: err instanceof Error ? err.message : String(err) })
   }
