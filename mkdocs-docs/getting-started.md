@@ -22,7 +22,7 @@ npm install
 
 ### 3. Download WASM artifacts
 
-The OrcaSlicer WASM files are not stored in the repository (too large for Git). Download them once with:
+The OrcaSlicer WASM files are not stored in the repository (served from a tagged GitHub Release to keep clone size small). Download them once with:
 
 ```bash
 node scripts/download-wasm.mjs

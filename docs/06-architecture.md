@@ -94,7 +94,7 @@ Jeśli `SLICE` nadejdzie przed zakończeniem `LOAD_WASM`, worker kolejkuje żąd
 
 **`src/lib/worker-singleton.ts`** — moduł-poziomowy singleton zapobiegający podwójnemu tworzeniu workera.
 
-Problem: React StrictMode montuje komponenty dwukrotnie w dev → dwa workery → dwa pobrania 144 MB.
+Problem: React StrictMode montuje komponenty dwukrotnie w dev → dwa workery → podwójne pobranie i inicjalizacja ~9 MB WASM.
 
 Rozwiązanie: Worker jest tworzony raz per sesja przeglądarki, przechowywany w zmiennej modułu (`let worker: Worker | null = null`). `preloadWasm()` wywołany w `main.tsx` przed renderem React — WASM zaczyna się ładować zanim użytkownik cokolwiek kliknie.
 
@@ -185,7 +185,7 @@ Wartości numeryczne są zakodowane jako stringi — `parseOrcaProfileJson` konw
 
 | Warstwa | Technologia |
 |---------|-------------|
-| UI | React 18, TypeScript 5, Tailwind CSS |
+| UI | React 19, TypeScript 5, Tailwind CSS v4 |
 | 3D | Three.js 0.170 (STLLoader, OrbitControls) |
 | Bundler | Vite 5 (worker ES format, COOP/COEP headers) |
 | WASM | OrcaSlicer v2.3.2 via Emscripten (własny build `orca-wasm/`) |
@@ -196,5 +196,5 @@ Wartości numeryczne są zakodowane jako stringi — `parseOrcaProfileJson` konw
 
 - Pobieranie WASM przy pierwszym uruchomieniu: ~9 MB jednorazowo (slicer.js + slicer.wasm z GitHub Releases); PWA Service Worker pre-cache'uje je automatycznie
 - Slicowanie blokuje worker thread ~50–500 ms w zależności od złożoności modelu
-- Tylko formaty STL (binary i ASCII), 3MF oraz STEP/IGES — brak OBJ/AMF
+- Tylko formaty STL (binary i ASCII), 3MF oraz STEP/IGES (konwertowane przez occt-import-js; ~8 MB dodatkowego WASM ładowane przy pierwszym użyciu) — brak OBJ/AMF
 - Duże pliki STL (>50 MB) mogą powodować zacinanie podczas podglądu 3D

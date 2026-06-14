@@ -18,7 +18,7 @@ OrcaSlicer compiled to WebAssembly. Slice STL files directly in the browser — 
 git clone https://github.com/Hiosdra/OrcaWeb.git
 cd OrcaWeb
 npm install
-node scripts/download-wasm.mjs   # ~150 MB, one-time download
+node scripts/download-wasm.mjs   # ~9 MB, one-time download
 npm run dev
 ```
 
@@ -86,9 +86,9 @@ npm run cli -- profiles
 
 | | |
 |---|---|
-| UI | React 18, TypeScript, Tailwind CSS |
+| UI | React 19, TypeScript, Tailwind CSS v4 |
 | 3D | Three.js (STLLoader, OrbitControls) |
-| Bundler | Vite 5 |
+| Bundler | Vite 8 |
 | WASM | OrcaSlicer v2.3.2 via Emscripten (own build) |
 | Docs | Material for MkDocs |
 | CI/CD | GitHub Actions → GitHub Pages |
