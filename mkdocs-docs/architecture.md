@@ -8,7 +8,7 @@
 │                                                          │
 │   main thread                                            │
 │   ┌────────────────────────────────────────────────┐    │
-│   │  React 18 + TypeScript + Tailwind CSS          │    │
+│   │  React 19 + TypeScript + Tailwind CSS v4        │    │
 │   │                                                │    │
 │   │  App.tsx                                       │    │
 │   │  ├── FileUpload     drag & drop STL / 3MF      │    │
@@ -74,7 +74,7 @@ const { default: factory } = await import(URL.createObjectURL(blob))
 
 ## Singleton worker pattern
 
-React 18 StrictMode mounts components twice in development, which would create two workers and trigger two downloads. The solution: a module-level singleton in `worker-singleton.ts`.
+React StrictMode mounts components twice in development, which would create two workers and trigger two downloads. The solution: a module-level singleton in `worker-singleton.ts`.
 
 ```typescript
 let worker: Worker | null = null
@@ -178,10 +178,10 @@ handleSlice()
 
 | Layer | Technology | Notes |
 |-------|-----------|-------|
-| UI | React 18, TypeScript 5 | No React Router — single-page tab state |
-| Styling | Tailwind CSS v3 | Custom `orca-*` colour scale |
+| UI | React 19, TypeScript 5 | No React Router — single-page tab state |
+| Styling | Tailwind CSS v4 | Custom `orca-*` colour scale |
 | 3D | Three.js 0.170 | STLLoader, OrbitControls, LineSegments2 (fat lines) |
-| Bundler | Vite 5 | Worker ES format, configurable base |
+| Bundler | Vite 8 | Worker ES format, configurable base |
 | WASM | OrcaSlicer **v2.3.2** | Emscripten, single-threaded, self-built |
 | Worker | Web Worker (ES module) | Blob URL for dynamic import |
 | CLI | Commander + tsx | Node.js, same WASM API |
