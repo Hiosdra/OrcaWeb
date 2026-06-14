@@ -226,7 +226,7 @@ szuka przestrzeni `v2s_mt_posix` — ABI mismatch.
 **Rozwiązanie:** `BOOST_LOG_NO_THREADS=1` musi być zdefiniowany **zarówno przy
 budowaniu Boost jak i przy budowaniu libslic3r**.  Patch 4.6 (`utils.cpp`)
 usuwa wywołania do `synchronous_sink` i `current_thread_id`, które nie istnieją
-w MT-modefix Boost.
+w jednowątkowej wersji Boost (ST-mode).
 
 ### 5.2 `-sEMULATE_FUNCTION_POINTER_CASTS=1` wywala `wasm-opt`
 
