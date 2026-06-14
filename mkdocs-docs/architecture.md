@@ -179,7 +179,7 @@ handleSlice()
 
 | Layer | Technology | Notes |
 |-------|-----------|-------|
-| UI | React 18, TypeScript 5 | No React Router — single-page tab state |
+| UI | React 19, TypeScript 5 | No React Router — single-page tab state |
 | Styling | Tailwind CSS v3 | Custom `orca-*` colour scale |
 | 3D | Three.js 0.170 | STLLoader, OrbitControls, LineSegments2 (fat lines) |
 | Bundler | Vite 5 | Worker ES format, configurable base |

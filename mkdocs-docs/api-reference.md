@@ -143,7 +143,7 @@ Communication between the main thread and the Web Worker.
 
 ## Config JSON schema
 
-Sent to `_orc_init`. All fields are optional; unset fields use OrcaSlicer defaults from `slicer.data`.
+Sent to `_orc_init`. All fields are optional; unset fields use OrcaSlicer built-in defaults.
 
 ```typescript
 interface OrcaConfig {
