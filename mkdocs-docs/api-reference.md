@@ -56,6 +56,53 @@ Slice an STL file and write G-code to a newly allocated buffer.
 
 ---
 
+### `_orc_obj_to_stl`
+
+```c
+int _orc_obj_to_stl(
+  const char* obj_data, int obj_len,
+  char**      out_ptr,
+  int*        out_len
+);
+```
+
+Convert an OBJ file to binary STL using OrcaSlicer's native parser. Does **not** require `_orc_init`.
+
+**Parameters**
+
+- `obj_data` — pointer to raw OBJ file bytes on the WASM heap
+- `obj_len` — byte length of the OBJ data
+- `out_ptr` — written with the address of the output STL buffer
+- `out_len` — written with the byte length of the output STL
+
+**Returns**
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `-3` | Could not stage OBJ to MEMFS |
+| `-4` | OBJ load failed (invalid or unsupported format) |
+| `-5` | OBJ contains no geometry |
+| `-8` | Internal STL export failed |
+| `-9` | Unexpected C++ exception |
+
+**Supported OBJ features:** triangle and quad faces (quads auto-triangulated), multiple named objects (merged into one mesh), `v/vt/vn` vertex format variants.  
+**Ignored:** MTL material files, vertex colors, NURBS curves/surfaces.
+
+**After reading** the output buffer, free it with `_orc_free(out_ptr)`.
+
+---
+
+### `_orc_free`
+
+```c
+void _orc_free(void* ptr);
+```
+
+Free a buffer allocated by `_orc_slice` or `_orc_obj_to_stl`.
+
+---
+
 ## Memory management
 
 The WASM module uses an Emscripten-managed heap. JavaScript must allocate and free manually.
@@ -93,6 +140,11 @@ interface OrcaModule {
     stlPtr: number, stlLen: number,
     outPtrPtr: number, outLenPtr: number,
   ): number
+  _orc_obj_to_stl(
+    objPtr: number, objLen: number,
+    outPtrPtr: number, outLenPtr: number,
+  ): number
+  _orc_free(ptr: number): void
   setValue(ptr: number, value: number, type: string): void
   getValue(ptr: number, type: string): number
   UTF8ToString(ptr: number): string
@@ -118,6 +170,12 @@ Communication between the main thread and the Web Worker.
   stl: ArrayBuffer   // transferred (zero-copy)
   config: OrcaConfig
 }
+
+// Convert an OBJ file to binary STL
+{
+  type: 'OBJ_TO_STL'
+  obj: ArrayBuffer   // transferred (zero-copy)
+}
 ```
 
 ### Worker → Main
@@ -137,6 +195,12 @@ Communication between the main thread and the Web Worker.
 
 // Slicing failed
 { type: 'SLICE_ERROR'; code: number; message: string }
+
+// OBJ → STL conversion finished
+{ type: 'OBJ_STL_COMPLETE'; stl: ArrayBuffer }
+
+// OBJ → STL conversion failed
+{ type: 'OBJ_STL_ERROR'; message: string }
 ```
 
 ---

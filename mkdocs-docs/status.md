@@ -2,7 +2,7 @@
 
 Ten dokument opisuje aktualny stan projektu: zaimplementowane funkcje, znane ograniczenia i planowane ulepszenia.
 
-Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (własny build, wdrożony na produkcji) · wersja aplikacji: **v0.3**
+Ostatnia aktualizacja: **2026-06-14** · wersja silnika: **OrcaSlicer v2.3.2** (własny build, wdrożony na produkcji) · wersja aplikacji: **v0.4**
 
 ---
 
@@ -15,6 +15,7 @@ Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (
 | Drag & drop pliku STL | ASCII i binary STL |
 | Import pliku 3MF | Ekstrakcja siatki + profili OrcaSlicera z metadanych archiwum |
 | Import STEP / IGES | Konwersja CAD → STL przez `occt-import-js` (OCCT 7.7 skompilowany do WASM); lazy-load ~8 MB przy pierwszym użyciu |
+| Import OBJ | Konwersja OBJ → STL przez natywny parser OrcaSlicer (`objparser.cpp` + `OBJ.cpp`) skompilowany w WASM — bez dodatkowych zależności; obsługuje trójkąty, quady, multi-obiekt |
 | Podgląd 3D modelu (Three.js) | Model na wirtualnym stole drukarskim w skali mm, OrbitControls |
 | Siatka stołu — dynamiczny rozmiar | Rozmiar stołu pobierany z presetu drukarki lub profilu maszyny |
 | Zakładki Model / Settings / Slice | Płynna nawigacja, zakładki zablokowane do momentu wczytania pliku |
@@ -32,6 +33,7 @@ Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (
 |---------|-------|
 | Slicowanie STL → G-code | W Web Workerze, nie blokuje UI |
 | Własny build OrcaSlicer **v2.3.2** | Zbudowany przez `orca-wasm/` + Emscripten; artefakty w release `wasm-v2.3.2` |
+| `orc_obj_to_stl` | Nowy eksport WASM: konwersja OBJ → binary STL bez potrzeby `orc_init`; wynik zwracany jako `ArrayBuffer` do workera |
 | Brak `slicer.data` | Headless flat-config slicer nie czyta `orca/resources` → plik danych zredukowany **200 MB → 0** |
 | Singleton Worker | Jeden Worker przez cały czas sesji |
 | Obsługa błędów | Kody błędów `-1`…`-9`, czytelne komunikaty |
@@ -113,7 +115,6 @@ Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (
 
 | Funkcja | Priorytet |
 |---------|-----------|
-| OBJ import | 🟡 średni |
 | Multi-plik (wiele STL naraz) | 🟡 średni |
 
 ### Zaawansowane funkcje slicowania
@@ -157,7 +158,8 @@ v0.3  ── ✅ Własny build WASM v2.3.2 (bez slicer.data)
       ── ✅ PWA / Service Worker — pre-cache WASM przy pierwszej wizycie
       ── ✅ Import STEP / IGES (occt-import-js, PR #19)
 
-v0.4  ── OctoPrint integration
+v0.4  ── ✅ Import OBJ (natywny parser OrcaSlicer w WASM, `orc_obj_to_stl`)
+      ── OctoPrint integration
       ── Multi-object plate
       ── Variable layer height UI
 ```
@@ -170,7 +172,7 @@ v0.4  ── OctoPrint integration
 src/
 ├── App.tsx                ✅ pełna logika UI, tabs, WASM orchestration, 3MF loading
 ├── components/
-│   ├── FileUpload.tsx     ✅ drag & drop, STL + 3MF + STEP/IGES
+│   ├── FileUpload.tsx     ✅ drag & drop, STL + 3MF + STEP/IGES + OBJ
 │   ├── ModelViewer.tsx    ✅ Three.js, STLLoader, dynamiczny rozmiar stołu
 │   ├── GcodeViewer.tsx    ✅ toolpaths, layer slider, feature-type colors, travel moves, grube linie 3D
 │   ├── SettingsPanel.tsx  ✅ presety, import profili — passthrough wszystkich pól OrcaSlicera
@@ -179,6 +181,7 @@ src/
 │   ├── profiles.ts        ✅ presety z rozmiarami stołu, 30+ pól + passthrough wszystkich pozostałych
 │   ├── parse3mf.ts        ✅ 3MF → binary STL + OrcaConfig
 │   ├── step-converter.ts  ✅ STEP/IGES → binary STL (occt-import-js, lazy WASM)
+│   │                        OBJ → binary STL via orc_obj_to_stl (slicer WASM, worker)
 │   ├── wasm-loader.ts     ✅ orc_init / orc_slice / error codes
 │   └── worker-singleton.ts ✅ singleton, preload WASM
 ├── workers/
@@ -186,7 +189,7 @@ src/
 └── types/index.ts         ✅ OrcaConfig, GcodeStats, WorkerMessages, SliceStatus
 
 orca-wasm/                 ✅ aktywny pipeline buildowy
-├── bridge/slicer.cpp      ✅ orc_init / orc_slice bridge
+├── bridge/slicer.cpp      ✅ orc_init / orc_slice / orc_obj_to_stl bridge
 ├── wasm/                  ✅ CMakeLists, link flags, shims
 ├── wasm/shims/tbb/        ✅ sekwencyjne stuby TBB
 ├── overrides/             ✅ C++ stuby (OCCT/OpenVDB/OpenCV/Draco/FuzzySkin)

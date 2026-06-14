@@ -6,7 +6,7 @@ OrcaWeb is a three-step workflow: **Model → Settings → Slice**.
 
 ### Model tab
 
-Upload your model by dragging it onto the drop zone or clicking to browse. Supported formats: **STL** (ASCII and binary) and **3MF**.
+Upload your model by dragging it onto the drop zone or clicking to browse. Supported formats: **STL** (ASCII and binary), **3MF**, **STEP / IGES**, and **OBJ**.
 
 - Rotate: left-drag
 - Pan: right-drag / Ctrl+drag
@@ -26,6 +26,21 @@ If the 3MF contains a machine profile with a `printable_area` field the bed visu
 
 !!! note
     Loading a plain STL after a 3MF clears the extracted overrides so you start fresh.
+
+#### OBJ files
+
+When you load a `.obj` file, OrcaWeb converts it to binary STL using OrcaSlicer's own C++ parser (`objparser.cpp`) compiled into the WASM engine — the same code used by OrcaSlicer desktop.
+
+- Supported: triangulated meshes, quad faces (auto-triangulated), multi-object files (merged into one)
+- Not supported: NURBS / curves, MTL material files (geometry only — colors are ignored for slicing)
+- Conversion happens in the Web Worker; no extra WASM download required (reuses the slicer engine)
+
+#### STEP / IGES files
+
+When you load a `.step`, `.stp`, `.iges`, or `.igs` file, OrcaWeb uses `occt-import-js` (Open CASCADE Technology compiled to WASM) to tessellate the CAD geometry into a triangle mesh, then converts it to binary STL.
+
+- The OCCT WASM (~8 MB) is downloaded on first use and cached by the browser
+- Conversion happens on the main thread (separate from the slicer WASM)
 
 ### Settings tab
 
