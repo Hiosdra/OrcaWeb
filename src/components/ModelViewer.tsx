@@ -9,9 +9,75 @@ interface Props {
   bedX?: number
   /** Bed depth (Y axis) in mm — default 256 */
   bedY?: number
+  /** Bed shape — 'circle' for delta/round printers, default 'rectangle' */
+  bedShape?: 'rectangle' | 'circle'
 }
 
-export function ModelViewer({ file, bedX = 256, bedY = 256 }: Props) {
+function buildBed(
+  scene: THREE.Scene,
+  bedX: number,
+  bedY: number,
+  bedShape: 'rectangle' | 'circle',
+): THREE.Object3D[] {
+  const disposables: THREE.Object3D[] = []
+
+  if (bedShape === 'circle') {
+    const radius = Math.min(bedX, bedY) / 2
+
+    const bedGeo = new THREE.CircleGeometry(radius, 64)
+    bedGeo.rotateX(-Math.PI / 2)
+    const bedMat = new THREE.MeshPhongMaterial({ color: 0xe2e8f0, side: THREE.DoubleSide })
+    const bed = new THREE.Mesh(bedGeo, bedMat)
+    bed.receiveShadow = true
+    scene.add(bed)
+    disposables.push(bed)
+
+    const gridDiv = Math.max(4, Math.round((radius * 2) / 10))
+    const grid = new THREE.GridHelper(radius * 2, gridDiv, 0xcccccc, 0xdde3ed)
+    grid.position.y = 0.1
+    scene.add(grid)
+    disposables.push(grid)
+
+    // Circle border
+    const points: THREE.Vector3[] = []
+    const segs = 64
+    for (let i = 0; i <= segs; i++) {
+      const a = (i / segs) * Math.PI * 2
+      points.push(new THREE.Vector3(Math.cos(a) * radius, 0, Math.sin(a) * radius))
+    }
+    const borderGeo = new THREE.BufferGeometry().setFromPoints(points)
+    const borderMat = new THREE.LineBasicMaterial({ color: 0xb0bec5 })
+    const border = new THREE.Line(borderGeo, borderMat)
+    scene.add(border)
+    disposables.push(border)
+  } else {
+    const bedGeo = new THREE.PlaneGeometry(bedX, bedY)
+    bedGeo.rotateX(-Math.PI / 2)
+    const bedMat = new THREE.MeshPhongMaterial({ color: 0xe2e8f0, side: THREE.DoubleSide })
+    const bed = new THREE.Mesh(bedGeo, bedMat)
+    bed.receiveShadow = true
+    scene.add(bed)
+    disposables.push(bed)
+
+    const gridDiv = Math.round(Math.max(bedX, bedY) / 10)
+    const grid = new THREE.GridHelper(Math.max(bedX, bedY), gridDiv, 0xcccccc, 0xdde3ed)
+    grid.scale.set(bedX / Math.max(bedX, bedY), 1, bedY / Math.max(bedX, bedY))
+    grid.position.y = 0.1
+    scene.add(grid)
+    disposables.push(grid)
+
+    const innerBoxGeo = new THREE.BoxGeometry(bedX, 0.5, bedY)
+    const edgeGeo = new THREE.EdgesGeometry(innerBoxGeo)
+    const edgeMat = new THREE.LineBasicMaterial({ color: 0xb0bec5 })
+    const border = new THREE.LineSegments(edgeGeo, edgeMat)
+    scene.add(border)
+    disposables.push(border)
+  }
+
+  return disposables
+}
+
+export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangle' }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -41,25 +107,7 @@ export function ModelViewer({ file, bedX = 256, bedY = 256 }: Props) {
     fillLight.position.set(-100, -50, -100)
     scene.add(fillLight)
 
-    // Print bed: centred at origin, Y=0
-    const bedGeo = new THREE.PlaneGeometry(bedX, bedY)
-    bedGeo.rotateX(-Math.PI / 2)
-    const bedMat = new THREE.MeshPhongMaterial({ color: 0xe2e8f0, side: THREE.DoubleSide })
-    const bed = new THREE.Mesh(bedGeo, bedMat)
-    bed.receiveShadow = true
-    scene.add(bed)
-
-    const gridDiv = Math.round(Math.max(bedX, bedY) / 10)
-    const grid = new THREE.GridHelper(Math.max(bedX, bedY), gridDiv, 0xcccccc, 0xdde3ed)
-    grid.scale.set(bedX / Math.max(bedX, bedY), 1, bedY / Math.max(bedX, bedY))
-    grid.position.y = 0.1
-    scene.add(grid)
-
-    // Bed border
-    const innerBoxGeo = new THREE.BoxGeometry(bedX, 0.5, bedY)
-    const edgeGeo = new THREE.EdgesGeometry(innerBoxGeo)
-    const edgeMat = new THREE.LineBasicMaterial({ color: 0xb0bec5 })
-    scene.add(new THREE.LineSegments(edgeGeo, edgeMat))
+    const bedObjects = buildBed(scene, bedX, bedY, bedShape)
 
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
@@ -127,14 +175,19 @@ export function ModelViewer({ file, bedX = 256, bedY = 256 }: Props) {
       renderer.dispose()
       mesh?.geometry.dispose()
       ;(mesh?.material as THREE.Material | undefined)?.dispose()
-      bedGeo.dispose()
-      bedMat.dispose()
-      innerBoxGeo.dispose()
-      edgeGeo.dispose()
-      edgeMat.dispose()
+      for (const obj of bedObjects) {
+        if (obj instanceof THREE.Mesh || obj instanceof THREE.Line || obj instanceof THREE.LineSegments) {
+          obj.geometry.dispose()
+          if (Array.isArray(obj.material)) {
+            obj.material.forEach((m) => m.dispose())
+          } else {
+            ;(obj.material as THREE.Material).dispose()
+          }
+        }
+      }
       el.removeChild(renderer.domElement)
     }
-  }, [file, bedX, bedY])
+  }, [file, bedX, bedY, bedShape])
 
   return (
     <div

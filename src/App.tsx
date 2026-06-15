@@ -51,6 +51,7 @@ export default function App() {
 
   const bedX = config.bed_size_x ?? 256
   const bedY = config.bed_size_y ?? 256
+  const bedShape = config.bed_shape ?? 'rectangle'
 
   useEffect(() => { fileRef.current = file }, [file])
 
@@ -250,7 +251,7 @@ export default function App() {
             )}
             {file && (
               <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white" style={{ height: 360 }}>
-                <ModelViewer file={file} bedX={bedX} bedY={bedY} />
+                <ModelViewer file={file} bedX={bedX} bedY={bedY} bedShape={bedShape} />
               </div>
             )}
             {file && (
@@ -270,7 +271,7 @@ export default function App() {
               className="rounded-2xl overflow-hidden border border-slate-200 bg-white order-last sm:order-first"
               style={{ height: 320 }}
             >
-              <ModelViewer file={file} bedX={bedX} bedY={bedY} />
+              <ModelViewer file={file} bedX={bedX} bedY={bedY} bedShape={bedShape} />
             </div>
             <div className="bg-white rounded-2xl border border-slate-200 p-5 overflow-y-auto">
               <SettingsPanel
@@ -300,13 +301,13 @@ export default function App() {
                 <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white" style={{ height: 420 }}>
                   <div className="px-4 pt-3 pb-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">Model</div>
                   <div style={{ height: 380 }}>
-                    <ModelViewer file={file} bedX={bedX} bedY={bedY} />
+                    <ModelViewer file={file} bedX={bedX} bedY={bedY} bedShape={bedShape} />
                   </div>
                 </div>
                 <div className="rounded-2xl overflow-hidden border border-slate-800" style={{ height: 420 }}>
                   <div className="px-4 pt-3 pb-1 text-xs font-semibold text-slate-400 uppercase tracking-wider bg-slate-900">G-code</div>
                   <div style={{ height: 380 }}>
-                    <GcodeViewer gcode={sliceStatus.gcode} bedX={bedX} bedY={bedY} />
+                    <GcodeViewer gcode={sliceStatus.gcode} bedX={bedX} bedY={bedY} bedShape={bedShape} />
                   </div>
                 </div>
               </div>

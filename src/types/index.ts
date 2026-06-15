@@ -6,6 +6,8 @@ export interface OrcaConfig {
   bed_size_x?: number
   /** Print bed depth in mm (used for model centering in the WASM bridge) */
   bed_size_y?: number
+  /** Bed shape — 'circle' for delta / round printers, 'rectangle' (default) for cartesian */
+  bed_shape?: 'rectangle' | 'circle'
 
   // Filament
   filament_type?: string

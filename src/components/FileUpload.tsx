@@ -12,7 +12,7 @@ export function FileUpload({ onFile, file }: Props) {
   const [dragging, setDragging] = useState(false)
 
   const isAccepted = (f: File) =>
-    /\.(stl|3mf|step|stp|iges|igs|obj)$/i.test(f.name)
+    /\.(stl|3mf|obj|step|stp|iges|igs)$/i.test(f.name)
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -51,7 +51,7 @@ export function FileUpload({ onFile, file }: Props) {
       <input
         ref={inputRef}
         type="file"
-        accept=".stl,.3mf,.step,.stp,.iges,.igs,.obj"
+        accept=".stl,.3mf,.obj,.step,.stp,.iges,.igs"
         className="hidden"
         onChange={handleChange}
       />
@@ -72,7 +72,7 @@ export function FileUpload({ onFile, file }: Props) {
             <p className="font-semibold text-slate-700">Drop your model here</p>
             <p className="text-sm text-slate-500 mt-1">or click to browse</p>
           </div>
-          <p className="text-xs text-slate-400">.stl · .3mf · .step · .iges · .obj</p>
+          <p className="text-xs text-slate-400">.stl · .3mf · .obj · .step · .iges</p>
         </>
       )}
     </div>
