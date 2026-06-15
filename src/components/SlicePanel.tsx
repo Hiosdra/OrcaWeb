@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import clsx from 'clsx'
 import type { SliceStatus, GcodeStats } from '../types'
 import type { WasmStatus } from '../lib/worker-singleton'
+import { formatBytes } from '../lib/format'
 
 interface Props {
   status: SliceStatus
@@ -153,7 +154,7 @@ function parseGcodeStats(gcode: string): GcodeStats {
 }
 
 function GcodeStatsGrid({ gcode }: { gcode: string }) {
-  const s = parseGcodeStats(gcode)
+  const s = useMemo(() => parseGcodeStats(gcode), [gcode])
 
   const tiles: { label: string; value: string; sub?: string }[] = []
 
@@ -187,7 +188,9 @@ function GcodeStatsGrid({ gcode }: { gcode: string }) {
 }
 
 function GcodePreview({ gcode }: { gcode: string }) {
-  const lines = gcode.slice(0, 20_000).split('\n').slice(0, 50).join('\n')
+  // Split first, then limit lines — avoids a single long line (e.g. embedded thumbnail
+  // comment) consuming the entire character budget before the 50-line cap is reached
+  const lines = gcode.split('\n', 51).slice(0, 50).join('\n')
   return (
     <details className="mt-1">
       <summary className="text-xs text-green-700 cursor-pointer hover:text-green-900 font-medium">
@@ -200,20 +203,17 @@ function GcodePreview({ gcode }: { gcode: string }) {
   )
 }
 
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
 function downloadGcode(gcode: string, filename: string) {
   const blob = new Blob([gcode], { type: 'text/plain' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = filename
+  document.body.appendChild(a)
   a.click()
-  URL.revokeObjectURL(url)
+  document.body.removeChild(a)
+  // Defer revocation so the browser has time to start the download
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 function Spinner() {
