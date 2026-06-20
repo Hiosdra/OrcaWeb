@@ -20,7 +20,7 @@ Download WASM artifacts to `public/wasm/`.
 npm run cli -- setup
 ```
 
-Equivalent to `node scripts/download-wasm.mjs`. Downloads `slicer.js`, `slicer.wasm`, and `slicer.data` from the [orcaslicer-wasm](https://github.com/allanwrench28/orcaslicer-wasm) GitHub release.
+Equivalent to `node scripts/download-wasm.mjs`. Downloads `slicer.js` and `slicer.wasm` (~9 MB total) from the OrcaWeb GitHub Release [`wasm-v2.3.2`](https://github.com/Hiosdra/OrcaWeb/releases/tag/wasm-v2.3.2) into `public/wasm/`.
 
 ---
 
