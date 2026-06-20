@@ -92,24 +92,79 @@ export function getWorker(): Worker {
 
 ## Engine clean layer (override approach)
 
-OrcaSlicer C++ source is never modified. Dependencies unavailable in WASM (OCCT, OpenVDB, OpenCV, Draco) are replaced by stub files in `orca-wasm/overrides/`. libnoise is compiled natively for WASM and linked directly.
+OrcaSlicer C++ source is never modified. The WASM build uses a three-layer strategy to strip out dependencies that are unavailable in a browser:
 
-```
-orca-wasm/
-├── overrides/src/libslic3r/
-│   ├── Format/STEP.{hpp,cpp}       — no-op (OCCT)
-│   ├── Format/DRC.cpp              — no-op (Draco)
-│   ├── Format/svg.cpp              — no-op (OCCT)
-│   ├── OpenVDBUtils.{hpp,cpp}      — empty header + no-op
-│   ├── ObjColorUtils.{hpp,cpp}     — empty header + no-op
-│   ├── SLA/Hollowing.cpp           — no-op (OpenVDB)
-│   └── Shape/TextShape.cpp         — no-op (OCCT fonts)
-└── patches/apply.py  — injects stubs into CMake, patches CMakeLists + bugfixes
-```
+| Layer | Location | Purpose |
+|-------|----------|---------|
+| Header shims | `orca-wasm/wasm/shims/` | Replace system library headers (TBB, OpenVDB, FreeType, OpenSSL) with minimal stubs so the compiler sees the right types |
+| C++ override stubs | `orca-wasm/overrides/` | Replace OrcaSlicer `.cpp`/`.hpp` files whose implementation depends on missing libraries |
+| In-place patches | `orca-wasm/patches/apply.py` | Fix C++ compatibility issues in OrcaSlicer source (narrowing, ABI, platform guards) |
 
-Headers that include unavailable system headers (`STEP.hpp`, `OpenVDBUtils.hpp`, `ObjColorUtils.hpp`) are physically copied into the OrcaSlicer source tree by `apply.py` at CI time. The originals are replaced; `overrides/` is the canonical source.
+`apply.py` runs before `cmake` and is idempotent. CI applies all three layers automatically.
 
-Upgrading to a new OrcaSlicer version: change `ORCA_VERSION` in `build-wasm.yml`, re-run CI. Only signature changes in the overridden functions require stub updates.
+### Header shims (`orca-wasm/wasm/shims/`)
+
+Added to the compiler search path before all other include paths (`BEFORE PUBLIC` in CMake), so these stubs shadow the real system headers.
+
+#### TBB — sequential stubs
+
+WASM is single-threaded. Every TBB parallel algorithm is replaced by a sequential equivalent that runs in the same thread.
+
+| Shim | Sequential equivalent |
+|------|-----------------------|
+| `tbb/parallel_for.h` | plain `for` loop |
+| `tbb/parallel_for_each.h` | `std::for_each` |
+| `tbb/parallel_reduce.h` | sequential iterate + merge |
+| `tbb/parallel_invoke.h` | call each functor in order |
+| `tbb/parallel_pipeline.h` | sequential `flow_control` / `filter_t` / `make_filter` pipeline |
+| `tbb/task_arena.h` | `max_concurrency()` → 1; `execute()` calls functor directly |
+| `tbb/task_group.h` | `run()` calls functor immediately; `wait()` is a no-op |
+| `tbb/spin_mutex.h` | no-op mutex (single-threaded — no contention possible) |
+| `tbb/partitioner.h` | empty `simple/auto/static/affinity_partitioner` types |
+| `tbb/global_control.h` | no-op |
+| `tbb/concurrent_vector.h` | alias for `std::vector` |
+| `tbb/concurrent_unordered_map.h` | alias for `std::unordered_map` |
+| `tbb/concurrent_unordered_set.h` | alias for `std::unordered_set` |
+| `tbb/blocked_range.h` + `blocked_range2d.h` | lightweight range containers |
+| `tbb/version.h` | version constants |
+| `oneapi/tbb/…` | re-exports → `tbb/…` (same headers, dual include path) |
+
+#### OpenVDB — minimal type stub
+
+`openvdb/openvdb.h` defines only the types referenced by OrcaSlicer headers: `Index32`, `Index64`, `math::Transform`, `initialize()`, and the `math`/`tools`/`util` sub-namespaces. No linking to libopenvdb is needed because the `.cpp` files that would use it are replaced by overrides (see below).
+
+#### FreeType — minimal type stub
+
+`ft2build.h` + `freetype/*.h` provide the types and constants required by `Shape/TextShape.hpp`. The stub is needed because `TextShape.cpp` is compiled as a no-op override and the compiler still needs to parse its header.
+
+#### OpenSSL MD5 — minimal stub
+
+`openssl/md5.h` — minimal stub; MD5 is not used on the FDM slicing path. Emscripten does not bundle OpenSSL.
+
+### C++ override stubs (`orca-wasm/overrides/`)
+
+These replace OrcaSlicer `.cpp` (and some `.hpp`) files whose implementation depends on a library unavailable in WASM. The original files are excluded from compilation; the overrides are compiled in their place. Override `.hpp` headers are physically copied into the OrcaSlicer source tree at CI time so that `#include` from neighbouring files resolves to the stub.
+
+| Override file | Replaces | Missing library | What the stub does |
+|--------------|----------|-----------------|--------------------|
+| `Format/STEP.cpp` + `STEP.hpp` | STEP/IGES CAD import | **OCCT** (Open CASCADE) | Stub returns error; `read_from_step()` guarded out of `Model.cpp` by patch |
+| `Format/DRC.cpp` | Draco mesh import | **Draco** | Empty no-op |
+| `Format/svg.cpp` | SVG export | **OCCT** | Empty no-op |
+| `OpenVDBUtils.cpp` + `OpenVDBUtils.hpp` | VDB volume operations used by FDM infill | **OpenVDB** | Empty header; empty `.cpp` |
+| `SLA/Hollowing.cpp` | SLA model hollowing | **OpenVDB** | Empty no-op (SLA not used) |
+| `ObjColorUtils.cpp` + `ObjColorUtils.hpp` | OBJ colour calibration | **OpenCV** | Empty header; empty `.cpp` |
+| `Shape/TextShape.cpp` | 3D text extrusion | **FreeType** + **OCCT** | Empty no-op |
+
+!!! note "STEP/IGES in the browser"
+    Although the WASM engine stubs out OCCT, STEP and IGES files are still supported in the UI via `occt-import-js` — a separate OCCT build compiled to WASM by a third party. The conversion happens on the main thread before the STL is handed to the slicer engine.
+
+### libnoise
+
+libnoise (Perlin / Billow / RidgedMulti / Voronoi noise) **is** compiled into the WASM engine and linked normally. `Feature/FuzzySkin/FuzzySkin.cpp` is not stubbed — it is patched in-place by `apply.py`: `thread_local` storage (unsupported by Emscripten in single-threaded mode) is rewritten to `static`, and `std::this_thread::get_id()` is replaced with a fixed seed. Fuzzy skin effect is therefore **active** in the engine when `fuzzy_skin ≠ none`.
+
+### Upgrading OrcaSlicer version
+
+Change `ORCA_VERSION` in `build-wasm.yml` and re-run CI. Only changes to the signatures of overridden functions require stub updates.
 
 ## Coordinate systems
 
