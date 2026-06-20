@@ -218,21 +218,25 @@ function parsePrintableArea(raw: unknown): { dims: [number, number]; circle: boo
     if (!s) return null
     pts = s.split(',')
   }
-  let maxX = 0, maxY = 0
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
   let pointCount = 0
   for (const pt of pts) {
     const parts = pt.trim().split('x')
     if (parts.length < 2) continue
     const x = parseFloat(parts[0]), y = parseFloat(parts[1])
     if (!isNaN(x) && !isNaN(y)) {
-      maxX = Math.max(maxX, x)
-      maxY = Math.max(maxY, y)
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x)
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y)
       pointCount++
     }
   }
-  if (maxX <= 0 || maxY <= 0) return null
+  // Bed size is the bounding-box extent. For corner-origin rectangular beds the
+  // origin is (0,0) so this equals maxX/maxY; for center-origin circular/delta
+  // beds (coords −r..+r) this gives the full diameter, not the radius.
+  const sizeX = maxX - minX, sizeY = maxY - minY
+  if (!(sizeX > 0) || !(sizeY > 0)) return null
   // Circular beds are approximated as polygons with many vertices in OrcaSlicer profiles.
-  return { dims: [maxX, maxY], circle: pointCount > 8 }
+  return { dims: [sizeX, sizeY], circle: pointCount > 8 }
 }
 
 export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
