@@ -6,4 +6,5 @@ artifacts/slicer.js
 artifacts/slicer.wasm
 artifacts/slicer.data
 .env
-.claude/
+.claude/*
+!.claude/skills/
