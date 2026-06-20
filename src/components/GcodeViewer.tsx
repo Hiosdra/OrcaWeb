@@ -9,6 +9,7 @@ interface Props {
   gcode: string
   bedX?: number
   bedY?: number
+  bedShape?: 'rectangle' | 'circle'
 }
 
 interface Feature {
@@ -153,7 +154,7 @@ interface SceneObjects {
   layerPlane: THREE.Mesh
 }
 
-export function GcodeViewer({ gcode, bedX = 256, bedY = 256 }: Props) {
+export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectangle' }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<SceneObjects | null>(null)
   const [visibleLayers, setVisibleLayers] = useState(0)
@@ -181,21 +182,47 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256 }: Props) {
     renderer.setSize(w, h)
     el.appendChild(renderer.domElement)
 
-    // Bed
-    const bedGeo = new THREE.PlaneGeometry(bedX, bedY)
-    bedGeo.rotateX(-Math.PI / 2)
+    // Bed — collect grid/border helpers so their geometries & materials can be disposed
+    let bedGeo: THREE.PlaneGeometry | THREE.CircleGeometry
+    let layerPlaneGeo: THREE.PlaneGeometry | THREE.CircleGeometry
     const bedMat = new THREE.MeshBasicMaterial({ color: 0x1e293b })
-    const bed = new THREE.Mesh(bedGeo, bedMat)
-    scene.add(bed)
-    const gridDiv = Math.round(Math.max(bedX, bedY) / 10)
-    const grid = new THREE.GridHelper(Math.max(bedX, bedY), gridDiv, 0x334155, 0x1e293b)
-    grid.scale.set(bedX / Math.max(bedX, bedY), 1, bedY / Math.max(bedX, bedY))
-    grid.position.y = 0.15
-    scene.add(grid)
+    const bedExtras: THREE.Object3D[] = []
+    if (bedShape === 'circle') {
+      const radius = Math.min(bedX, bedY) / 2
+      bedGeo = new THREE.CircleGeometry(radius, 64)
+      bedGeo.rotateX(-Math.PI / 2)
+      scene.add(new THREE.Mesh(bedGeo, bedMat))
+      const gridDiv = Math.max(4, Math.round((radius * 2) / 10))
+      const grid = new THREE.GridHelper(radius * 2, gridDiv, 0x334155, 0x1e293b)
+      grid.position.y = 0.15
+      scene.add(grid)
+      bedExtras.push(grid)
+      const borderPts: THREE.Vector3[] = []
+      for (let i = 0; i <= 64; i++) {
+        const a = (i / 64) * Math.PI * 2
+        borderPts.push(new THREE.Vector3(Math.cos(a) * radius, 0.2, Math.sin(a) * radius))
+      }
+      const borderGeo = new THREE.BufferGeometry().setFromPoints(borderPts)
+      const borderMat = new THREE.LineBasicMaterial({ color: 0x334155 })
+      const border = new THREE.Line(borderGeo, borderMat)
+      scene.add(border)
+      bedExtras.push(border)
+      layerPlaneGeo = new THREE.CircleGeometry(radius * 0.96, 64)
+    } else {
+      bedGeo = new THREE.PlaneGeometry(bedX, bedY)
+      bedGeo.rotateX(-Math.PI / 2)
+      scene.add(new THREE.Mesh(bedGeo, bedMat))
+      const gridDiv = Math.round(Math.max(bedX, bedY) / 10)
+      const grid = new THREE.GridHelper(Math.max(bedX, bedY), gridDiv, 0x334155, 0x1e293b)
+      grid.scale.set(bedX / Math.max(bedX, bedY), 1, bedY / Math.max(bedX, bedY))
+      grid.position.y = 0.15
+      scene.add(grid)
+      bedExtras.push(grid)
+      layerPlaneGeo = new THREE.PlaneGeometry(bedX * 0.92, bedY * 0.92)
+    }
+    layerPlaneGeo.rotateX(-Math.PI / 2)
 
     // Layer cursor plane — semi-transparent plane tracking the current layer height
-    const layerPlaneGeo = new THREE.PlaneGeometry(bedX * 0.92, bedY * 0.92)
-    layerPlaneGeo.rotateX(-Math.PI / 2)
     const layerPlaneMat = new THREE.MeshBasicMaterial({
       color: 0x38bdf8,
       transparent: true,
@@ -305,9 +332,16 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256 }: Props) {
       bedMat.dispose()
       layerPlaneGeo.dispose()
       layerPlaneMat.dispose()
+      for (const obj of bedExtras) {
+        if (obj instanceof THREE.Line || obj instanceof THREE.LineSegments || obj instanceof THREE.GridHelper) {
+          obj.geometry.dispose()
+          if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose())
+          else (obj.material as THREE.Material).dispose()
+        }
+      }
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement)
     }
-  }, [layers, bedX, bedY, hasFeatureTypes])
+  }, [layers, bedX, bedY, bedShape, hasFeatureTypes])
 
   // Sync layer visibility, travel toggle, and layer cursor position
   useEffect(() => {

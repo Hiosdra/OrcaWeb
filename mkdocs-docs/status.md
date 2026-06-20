@@ -2,7 +2,7 @@
 
 Ten dokument opisuje aktualny stan projektu: zaimplementowane funkcje, znane ograniczenia i planowane ulepszenia.
 
-Ostatnia aktualizacja: **2026-06-14** · wersja silnika: **OrcaSlicer v2.3.2** (własny build, wdrożony na produkcji) · wersja aplikacji: **v0.4**
+Ostatnia aktualizacja: **2026-06-15** · wersja silnika: **OrcaSlicer v2.3.2** (własny build, wdrożony na produkcji) · wersja aplikacji: **v0.4**
 
 ---
 
@@ -14,10 +14,11 @@ Ostatnia aktualizacja: **2026-06-14** · wersja silnika: **OrcaSlicer v2.3.2** (
 |---------|-------|
 | Drag & drop pliku STL | ASCII i binary STL |
 | Import pliku 3MF | Ekstrakcja siatki + profili OrcaSlicera z metadanych archiwum |
-| Import STEP / IGES | Konwersja CAD → STL przez `occt-import-js` (OCCT 7.7 skompilowany do WASM); lazy-load ~8 MB przy pierwszym użyciu |
 | Import OBJ | Konwersja OBJ → STL przez natywny parser OrcaSlicer (`objparser.cpp` + `OBJ.cpp`) skompilowany w WASM — bez dodatkowych zależności; obsługuje trójkąty, quady, multi-obiekt |
+| Import STEP / IGES | Konwersja CAD → STL przez `occt-import-js` (OCCT 7.7 skompilowany do WASM); lazy-load ~8 MB przy pierwszym użyciu |
 | Podgląd 3D modelu (Three.js) | Model na wirtualnym stole drukarskim w skali mm, OrbitControls |
 | Siatka stołu — dynamiczny rozmiar | Rozmiar stołu pobierany z presetu drukarki lub profilu maszyny |
+| Kształt stołu (`bed_shape`) | Prostokątny lub okrągły (np. Bambu Lab P1S); wizualizacja w podglądzie 3D i G-code |
 | Zakładki Model / Settings / Slice | Płynna nawigacja, zakładki zablokowane do momentu wczytania pliku |
 | Panel ustawień | Wybór drukarki, filamentu, jakości |
 | Podgląd G-code (warstwa po warstwie) | Slider warstw, kolorowanie wg typu ruchu (perimeter/infill/support/travel), grube linie 3D, kursor warstwy — od PR #16 |
@@ -91,7 +92,6 @@ Ostatnia aktualizacja: **2026-06-14** · wersja silnika: **OrcaSlicer v2.3.2** (
 
 | Problem | Szczegóły |
 |---------|-----------|
-| Brak konfiguracji `bed_shape` | Bambu Lab P1S ma okrągły stół — kształt stołu nie jest wizualizowany w podglądzie 3D |
 | Zakres temperatur niezweryfikowany | Presety printer+filament mogą być niespójne dla egzotycznych kombinacji |
 
 ### Importowanie profili
@@ -159,6 +159,7 @@ v0.3  ── ✅ Własny build WASM v2.3.2 (bez slicer.data)
       ── ✅ Import STEP / IGES (occt-import-js, PR #19)
 
 v0.4  ── ✅ Import OBJ (natywny parser OrcaSlicer w WASM, `orc_obj_to_stl`)
+      ── ✅ bed_shape — okrągły stół (P1S) wizualizowany w podglądzie 3D i G-code
       ── OctoPrint integration
       ── Multi-object plate
       ── Variable layer height UI
@@ -172,20 +173,19 @@ v0.4  ── ✅ Import OBJ (natywny parser OrcaSlicer w WASM, `orc_obj_to_stl`)
 src/
 ├── App.tsx                ✅ pełna logika UI, tabs, WASM orchestration, 3MF loading
 ├── components/
-│   ├── FileUpload.tsx     ✅ drag & drop, STL + 3MF + STEP/IGES + OBJ
-│   ├── ModelViewer.tsx    ✅ Three.js, STLLoader, dynamiczny rozmiar stołu
-│   ├── GcodeViewer.tsx    ✅ toolpaths, layer slider, feature-type colors, travel moves, grube linie 3D
+│   ├── FileUpload.tsx     ✅ drag & drop, STL + 3MF + OBJ + STEP/IGES
+│   ├── ModelViewer.tsx    ✅ Three.js, STLLoader, dynamiczny rozmiar stołu, okrągły stół (bed_shape)
+│   ├── GcodeViewer.tsx    ✅ toolpaths, layer slider, feature-type colors, travel moves, grube linie 3D, okrągły stół
 │   ├── SettingsPanel.tsx  ✅ presety, import profili — passthrough wszystkich pól OrcaSlicera
 │   └── SlicePanel.tsx     ✅ progress states, statystyki G-code, download
 ├── lib/
-│   ├── profiles.ts        ✅ presety z rozmiarami stołu, 30+ pól + passthrough wszystkich pozostałych
+│   ├── profiles.ts        ✅ presety z rozmiarami + kształtem stołu, 30+ pól + passthrough wszystkich pozostałych
 │   ├── parse3mf.ts        ✅ 3MF → binary STL + OrcaConfig
 │   ├── step-converter.ts  ✅ STEP/IGES → binary STL (occt-import-js, lazy WASM)
-│   │                        OBJ → binary STL via orc_obj_to_stl (slicer WASM, worker)
-│   ├── wasm-loader.ts     ✅ orc_init / orc_slice / error codes
+│   ├── wasm-loader.ts     ✅ orc_init / orc_slice / orc_obj_to_stl / error codes
 │   └── worker-singleton.ts ✅ singleton, preload WASM
 ├── workers/
-│   └── slicer.worker.ts   ✅ WASM load + SLICE (brak chunk reassembly — slicer.data usunięty)
+│   └── slicer.worker.ts   ✅ WASM load + SLICE + OBJ_TO_STL
 └── types/index.ts         ✅ OrcaConfig, GcodeStats, WorkerMessages, SliceStatus
 
 orca-wasm/                 ✅ aktywny pipeline buildowy

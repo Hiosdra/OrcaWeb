@@ -99,6 +99,7 @@ export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = {
     nozzle_diameter: 0.4,
     bed_size_x: 256,
     bed_size_y: 256,
+    bed_shape: 'circle' as const,
     default_speed: 300,
     outer_wall_speed: 150,
     travel_speed: 500,
@@ -194,6 +195,7 @@ const ORCA_FIELD_MAP: Record<string, { key: keyof OrcaConfig; type: 'num' | 'pct
   nozzle_diameter:         { key: 'nozzle_diameter',        type: 'num' },
   printable_height:        { key: 'printable_height',       type: 'num' },
   max_print_height:        { key: 'printable_height',       type: 'num' }, // alias
+  bed_shape:               { key: 'bed_shape',              type: 'str' },
   // bed size — handled separately via parsePrintableArea() below
 }
 
@@ -204,9 +206,10 @@ const ORCA_FIELD_MAP: Record<string, { key: keyof OrcaConfig; type: 'num' | 'pct
  *   ["0x0", "256x0", "256x256", "0x256"]
  * or as a flat comma-joined string: "0x0,256x0,256x256,0x256"
  *
- * Returns [maxX, maxY] i.e. the bed dimensions, or null if unparseable.
+ * Returns { dims: [maxX, maxY], circle: boolean } or null if unparseable.
+ * When the polygon has more than 8 points it's treated as a circular bed.
  */
-function parsePrintableArea(raw: unknown): [number, number] | null {
+function parsePrintableArea(raw: unknown): { dims: [number, number]; circle: boolean } | null {
   let pts: string[]
   if (Array.isArray(raw)) {
     pts = raw.map(String)
@@ -215,15 +218,25 @@ function parsePrintableArea(raw: unknown): [number, number] | null {
     if (!s) return null
     pts = s.split(',')
   }
-  let maxX = 0, maxY = 0
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  let pointCount = 0
   for (const pt of pts) {
     const parts = pt.trim().split('x')
     if (parts.length < 2) continue
     const x = parseFloat(parts[0]), y = parseFloat(parts[1])
-    if (!isNaN(x)) maxX = Math.max(maxX, x)
-    if (!isNaN(y)) maxY = Math.max(maxY, y)
+    if (!isNaN(x) && !isNaN(y)) {
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x)
+      minY = Math.min(minY, y); maxY = Math.max(maxY, y)
+      pointCount++
+    }
   }
-  return maxX > 0 && maxY > 0 ? [maxX, maxY] : null
+  // Bed size is the bounding-box extent. For corner-origin rectangular beds the
+  // origin is (0,0) so this equals maxX/maxY; for center-origin circular/delta
+  // beds (coords −r..+r) this gives the full diameter, not the radius.
+  const sizeX = maxX - minX, sizeY = maxY - minY
+  if (!(sizeX > 0) || !(sizeY > 0)) return null
+  // Circular beds are approximated as polygons with many vertices in OrcaSlicer profiles.
+  return { dims: [sizeX, sizeY], circle: pointCount > 8 }
 }
 
 export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
@@ -262,8 +275,12 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
     // ── Bed size ─────────────────────────────────────────────────────────────
     // OrcaSlicer machine profiles carry printable_area / bed_size for bed dims.
     if ('printable_area' in raw) {
-      const dims = parsePrintableArea(raw['printable_area'])
-      if (dims) { config.bed_size_x = dims[0]; config.bed_size_y = dims[1] }
+      const result = parsePrintableArea(raw['printable_area'])
+      if (result) {
+        config.bed_size_x = result.dims[0]
+        config.bed_size_y = result.dims[1]
+        if (result.circle && !config.bed_shape) config.bed_shape = 'circle'
+      }
     } else if ('bed_size' in raw) {
       // Some older profiles use bed_size: ["256", "256"] or "256x256"
       const bs = unwrap(raw['bed_size'])
@@ -272,8 +289,12 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
         if (!isNaN(x) && x > 0) config.bed_size_x = x
         if (!isNaN(y) && y > 0) config.bed_size_y = y
       } else {
-        const dims = parsePrintableArea(bs)
-        if (dims) { config.bed_size_x = dims[0]; config.bed_size_y = dims[1] }
+        const result = parsePrintableArea(bs)
+        if (result) {
+          config.bed_size_x = result.dims[0]
+          config.bed_size_y = result.dims[1]
+          if (result.circle && !config.bed_shape) config.bed_shape = 'circle'
+        }
       }
     }
 
