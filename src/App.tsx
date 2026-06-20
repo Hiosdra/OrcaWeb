@@ -78,11 +78,27 @@ export default function App() {
           phase: 'error',
           message: `Failed to load slicer engine: ${msg.message}. Make sure WASM artifacts are in public/wasm/ (run: node scripts/download-wasm.mjs)`,
         })
+        return
       } else if (msg.type === 'SLICE_COMPLETE') {
         const filename = fileRef.current?.name.replace(/\.stl$/i, '.gcode') ?? 'output.gcode'
         setSliceStatus({ phase: 'done', gcode: msg.gcode, filename })
       } else if (msg.type === 'SLICE_ERROR') {
         setSliceStatus({ phase: 'error', message: msg.message })
+      } else if (msg.type === 'OBJ_STL_COMPLETE') {
+        const stlFile = new File(
+          [msg.stl],
+          msg.filename.replace(/\.obj$/i, '.stl'),
+          { type: 'model/stl' },
+        )
+        setFile(stlFile)
+        setConfigOverrides({})
+        setSliceStatus({ phase: 'idle' })
+        setActiveTab('settings')
+      } else if (msg.type === 'OBJ_STL_ERROR') {
+        setSliceStatus({
+          phase: 'error',
+          message: `Failed to convert OBJ: ${msg.message}`,
+        })
       }
     })
 
@@ -131,6 +147,11 @@ export default function App() {
         })
         return
       }
+    } else if (/\.obj$/i.test(f.name)) {
+      setSliceStatus({ phase: 'loading-wasm' })
+      const buf = await f.arrayBuffer()
+      getWorker().postMessage({ type: 'OBJ_TO_STL', obj: buf, filename: f.name }, [buf])
+      return // state update happens in the OBJ_STL_COMPLETE listener
     } else {
       setFile(f)
       // Clear any 3MF-extracted overrides so they don't bleed into plain STL slices

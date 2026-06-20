@@ -34,6 +34,7 @@
 #include "libslic3r/Print.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Format/STL.hpp"
+#include "libslic3r/Format/OBJ.hpp"
 #include "libslic3r/GCode.hpp"
 #include "libslic3r/Exception.hpp"
 
@@ -211,7 +212,108 @@ int orc_slice(const void* stl_data, int stl_len,
     }
 }
 
-/** Free a buffer returned by orc_slice. */
+/**
+ * Convert an OBJ file (raw bytes) to a binary STL.
+ * On success *out_stl points to a malloc'd buffer containing the STL and
+ * *out_len contains its byte length.  Caller must free with orc_free().
+ *
+ * Error codes:
+ *   -3  could not write OBJ to MEMFS
+ *   -4  OBJ load failed (invalid / unsupported format)
+ *   -5  OBJ contains no geometry
+ *   -8  STL export failed
+ *   -9  unexpected C++ exception
+ */
+EMSCRIPTEN_KEEPALIVE
+int orc_obj_to_stl(const char* obj_data, int obj_len,
+                   char** out_stl, int* out_len) {
+    g_last_error.clear();
+    if (!obj_data || obj_len <= 0 || !out_stl || !out_len) return -1;
+
+    {
+        FILE* f = std::fopen("/tmp/ow_in.obj", "wb");
+        if (!f) { record_error("cannot open /tmp/ow_in.obj for writing"); return -3; }
+        std::size_t written = std::fwrite(obj_data, 1, static_cast<std::size_t>(obj_len), f);
+        std::fclose(f);
+        if (written != static_cast<std::size_t>(obj_len)) {
+            std::remove("/tmp/ow_in.obj");
+            record_error("failed to write complete OBJ data to MEMFS");
+            return -3;
+        }
+    }
+
+    int status = -9;
+    try {
+        Slic3r::Model model;
+        Slic3r::ObjInfo obj_info;
+        std::string message;
+        if (!Slic3r::load_obj("/tmp/ow_in.obj", &model, obj_info, message, "object")) {
+            record_error(message.empty() ? "OBJ load failed" : message);
+            status = -4;
+        } else if (model.objects.empty()) {
+            record_error("OBJ contains no geometry");
+            status = -5;
+        } else {
+            // Merge all volumes from all objects into one mesh
+            Slic3r::TriangleMesh combined;
+            for (auto* obj : model.objects)
+                for (auto* vol : obj->volumes)
+                    combined.merge(vol->mesh());
+
+            if (combined.facets_count() == 0) {
+                record_error("OBJ contains no printable geometry");
+                status = -5;
+            } else if (!Slic3r::store_stl("/tmp/ow_out.stl", &combined, true)) {
+                record_error("STL export failed");
+                status = -8;
+            } else {
+                FILE* sf = std::fopen("/tmp/ow_out.stl", "rb");
+                if (!sf) {
+                    record_error("STL export produced no output");
+                    status = -8;
+                } else {
+                    std::fseek(sf, 0, SEEK_END);
+                    long sz = std::ftell(sf);
+                    std::rewind(sf);
+                    if (sz <= 0) {
+                        std::fclose(sf);
+                        record_error("STL export produced empty output");
+                        status = -8;
+                    } else {
+                        char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz)));
+                        if (!buf) {
+                            std::fclose(sf);
+                            record_error("out of memory");
+                            status = -9;
+                        } else {
+                            std::size_t nread = std::fread(buf, 1, static_cast<std::size_t>(sz), sf);
+                            std::fclose(sf);
+                            if (nread != static_cast<std::size_t>(sz)) {
+                                std::free(buf);
+                                record_error("STL read incomplete");
+                                status = -8;
+                            } else {
+                                *out_stl = buf;
+                                *out_len = static_cast<int>(sz);
+                                status = 0;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        record_error(e.what());
+        status = -9;
+    }
+
+    // Always clean up MEMFS temp files to avoid heap leaks in long-running sessions
+    std::remove("/tmp/ow_in.obj");
+    std::remove("/tmp/ow_out.stl");
+    return status;
+}
+
+/** Free a buffer returned by orc_slice or orc_obj_to_stl. */
 EMSCRIPTEN_KEEPALIVE
 void orc_free(void* ptr) {
     std::free(ptr);

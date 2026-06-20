@@ -1,11 +1,12 @@
 import type { OrcaModule, WorkerInMessage, WorkerOutMessage } from '../types'
-import { sliceStl, OrcaSliceError } from '../lib/wasm-loader'
+import { sliceStl, objToStl, OrcaSliceError } from '../lib/wasm-loader'
 
 let orcaModule: OrcaModule | null = null
 let loadingWasm = false
 // Slice request that arrived before WASM was ready — last-wins (UI disables
 // the Slice button while loading, so only one request can queue in practice)
 let pendingSlice: { stl: ArrayBuffer; config: Record<string, unknown> } | null = null
+const pendingObjConvertQueue: { obj: ArrayBuffer; filename: string }[] = []
 
 function send(msg: WorkerOutMessage) {
   self.postMessage(msg)
@@ -70,7 +71,11 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       loadingWasm = false
       send({ type: 'WASM_LOADED' })
 
-      // Fire any slice that queued up during loading
+      // Fire any requests that queued up during loading
+      for (const pending of pendingObjConvertQueue) {
+        doObjToStl(pending.obj, pending.filename)
+      }
+      pendingObjConvertQueue.length = 0
       if (pendingSlice) {
         const { stl, config } = pendingSlice
         pendingSlice = null
@@ -88,13 +93,31 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
 
   if (msg.type === 'SLICE') {
     if (!orcaModule) {
-      // WASM not ready yet — queue and wait
       pendingSlice = { stl: msg.stl, config: msg.config as Record<string, unknown> }
       return
     }
     doSlice(msg.stl, msg.config as Record<string, unknown>)
   }
+
+  if (msg.type === 'OBJ_TO_STL') {
+    if (!orcaModule) {
+      pendingObjConvertQueue.push({ obj: msg.obj, filename: msg.filename })
+      return
+    }
+    doObjToStl(msg.obj, msg.filename)
+  }
 })
+
+function doObjToStl(obj: ArrayBuffer, filename: string) {
+  if (!orcaModule) return
+  try {
+    const stl = objToStl(orcaModule, new Uint8Array(obj))
+    const stlBuffer = stl.buffer as ArrayBuffer
+    self.postMessage({ type: 'OBJ_STL_COMPLETE', stl: stlBuffer, filename }, [stlBuffer])
+  } catch (err) {
+    send({ type: 'OBJ_STL_ERROR', message: err instanceof Error ? err.message : String(err) })
+  }
+}
 
 function doSlice(stl: ArrayBuffer, config: Record<string, unknown>) {
   if (!orcaModule) return

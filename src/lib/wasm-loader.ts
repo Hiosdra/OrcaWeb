@@ -93,6 +93,33 @@ export function sliceStl(
   return gcode
 }
 
+export function objToStl(module: OrcaModule, objData: Uint8Array): Uint8Array {
+  const objPtr = module._malloc(objData.length)
+  module.HEAPU8.set(objData, objPtr)
+
+  const outPtrPtr = module._malloc(4)
+  const outLenPtr = module._malloc(4)
+
+  try {
+    const result = module._orc_obj_to_stl(objPtr, objData.length, outPtrPtr, outLenPtr)
+    if (result !== 0) {
+      throw new OrcaSliceError(result, objErrorMessage(result))
+    }
+
+    const stlPtr = module.getValue(outPtrPtr, 'i32')
+    const stlLen = module.getValue(outLenPtr, 'i32')
+    try {
+      return module.HEAPU8.slice(stlPtr, stlPtr + stlLen)
+    } finally {
+      module._orc_free(stlPtr)
+    }
+  } finally {
+    module._free(objPtr)
+    module._free(outPtrPtr)
+    module._free(outLenPtr)
+  }
+}
+
 export class OrcaSliceError extends Error {
   constructor(
     public readonly code: number,
@@ -110,5 +137,16 @@ function sliceErrorMessage(code: number): string {
     case -3: return 'G-code generation failed'
     case -4: return 'Internal OrcaSlicer exception'
     default: return `Unknown slice error (code ${code})`
+  }
+}
+
+function objErrorMessage(code: number): string {
+  switch (code) {
+    case -1: return 'OBJ conversion called with invalid arguments (internal error)'
+    case -3: return 'Could not stage OBJ file for conversion'
+    case -4: return 'OBJ load failed (invalid or unsupported format)'
+    case -5: return 'OBJ file contains no geometry'
+    case -8: return 'STL export failed after OBJ conversion'
+    default: return `OBJ conversion error (code ${code})`
   }
 }
