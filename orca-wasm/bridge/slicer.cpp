@@ -260,7 +260,10 @@ int orc_obj_to_stl(const char* obj_data, int obj_len,
                 for (auto* vol : obj->volumes)
                     combined.merge(vol->mesh());
 
-            if (!Slic3r::store_stl("/tmp/ow_out.stl", &combined, true)) {
+            if (combined.facets_count() == 0) {
+                record_error("OBJ contains no printable geometry");
+                status = -5;
+            } else if (!Slic3r::store_stl("/tmp/ow_out.stl", &combined, true)) {
                 record_error("STL export failed");
                 status = -8;
             } else {
@@ -283,11 +286,17 @@ int orc_obj_to_stl(const char* obj_data, int obj_len,
                             record_error("out of memory");
                             status = -9;
                         } else {
-                            std::fread(buf, 1, static_cast<std::size_t>(sz), sf);
+                            std::size_t nread = std::fread(buf, 1, static_cast<std::size_t>(sz), sf);
                             std::fclose(sf);
-                            *out_stl = buf;
-                            *out_len = static_cast<int>(sz);
-                            status = 0;
+                            if (nread != static_cast<std::size_t>(sz)) {
+                                std::free(buf);
+                                record_error("STL read incomplete");
+                                status = -8;
+                            } else {
+                                *out_stl = buf;
+                                *out_len = static_cast<int>(sz);
+                                status = 0;
+                            }
                         }
                     }
                 }

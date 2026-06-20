@@ -142,6 +142,7 @@ function sliceErrorMessage(code: number): string {
 
 function objErrorMessage(code: number): string {
   switch (code) {
+    case -1: return 'OBJ conversion called with invalid arguments (internal error)'
     case -3: return 'Could not stage OBJ file for conversion'
     case -4: return 'OBJ load failed (invalid or unsupported format)'
     case -5: return 'OBJ file contains no geometry'

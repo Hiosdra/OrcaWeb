@@ -76,7 +76,7 @@ export interface SlicePreset {
 export type WorkerInMessage =
   | { type: 'LOAD_WASM'; url: string }
   | { type: 'SLICE'; stl: ArrayBuffer; config: OrcaConfig }
-  | { type: 'OBJ_TO_STL'; obj: ArrayBuffer }
+  | { type: 'OBJ_TO_STL'; obj: ArrayBuffer; filename: string }
 
 export type WorkerOutMessage =
   | { type: 'WORKER_READY' }
@@ -84,7 +84,7 @@ export type WorkerOutMessage =
   | { type: 'WASM_ERROR'; message: string }
   | { type: 'SLICE_COMPLETE'; gcode: string }
   | { type: 'SLICE_ERROR'; code: number; message: string }
-  | { type: 'OBJ_STL_COMPLETE'; stl: ArrayBuffer }
+  | { type: 'OBJ_STL_COMPLETE'; stl: ArrayBuffer; filename: string }
   | { type: 'OBJ_STL_ERROR'; message: string }
 
 // --- G-code statistics ---

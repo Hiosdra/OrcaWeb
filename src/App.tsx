@@ -39,8 +39,6 @@ export default function App() {
   // Pending slice: holds STL + config while WASM loads
   const pendingSliceRef = useRef<{ stl: ArrayBuffer; config: OrcaConfig } | null>(null)
   const fileRef = useRef<File | null>(null)
-  // Filename saved during OBJ→STL conversion (to name the synthetic STL file)
-  const pendingObjFilenameRef = useRef<string | null>(null)
 
   const baseConfig = useMemo(
     () => buildConfig(selectedPrinter, selectedFilament, selectedPreset),
@@ -80,17 +78,16 @@ export default function App() {
           phase: 'error',
           message: `Failed to load slicer engine: ${msg.message}. Make sure WASM artifacts are in public/wasm/ (run: node scripts/download-wasm.mjs)`,
         })
+        return
       } else if (msg.type === 'SLICE_COMPLETE') {
         const filename = fileRef.current?.name.replace(/\.stl$/i, '.gcode') ?? 'output.gcode'
         setSliceStatus({ phase: 'done', gcode: msg.gcode, filename })
       } else if (msg.type === 'SLICE_ERROR') {
         setSliceStatus({ phase: 'error', message: msg.message })
       } else if (msg.type === 'OBJ_STL_COMPLETE') {
-        const name = pendingObjFilenameRef.current ?? 'model.stl'
-        pendingObjFilenameRef.current = null
         const stlFile = new File(
           [msg.stl],
-          name.replace(/\.obj$/i, '.stl'),
+          msg.filename.replace(/\.obj$/i, '.stl'),
           { type: 'model/stl' },
         )
         setFile(stlFile)
@@ -98,7 +95,6 @@ export default function App() {
         setSliceStatus({ phase: 'idle' })
         setActiveTab('settings')
       } else if (msg.type === 'OBJ_STL_ERROR') {
-        pendingObjFilenameRef.current = null
         setSliceStatus({
           phase: 'error',
           message: `Failed to convert OBJ: ${msg.message}`,
@@ -153,9 +149,8 @@ export default function App() {
       }
     } else if (/\.obj$/i.test(f.name)) {
       setSliceStatus({ phase: 'loading-wasm' })
-      pendingObjFilenameRef.current = f.name
       const buf = await f.arrayBuffer()
-      getWorker().postMessage({ type: 'OBJ_TO_STL', obj: buf }, [buf])
+      getWorker().postMessage({ type: 'OBJ_TO_STL', obj: buf, filename: f.name }, [buf])
       return // state update happens in the OBJ_STL_COMPLETE listener
     } else {
       setFile(f)

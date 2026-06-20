@@ -6,7 +6,7 @@ let loadingWasm = false
 // Slice request that arrived before WASM was ready — last-wins (UI disables
 // the Slice button while loading, so only one request can queue in practice)
 let pendingSlice: { stl: ArrayBuffer; config: Record<string, unknown> } | null = null
-let pendingObjConvert: ArrayBuffer | null = null
+const pendingObjConvertQueue: { obj: ArrayBuffer; filename: string }[] = []
 
 function send(msg: WorkerOutMessage) {
   self.postMessage(msg)
@@ -72,11 +72,10 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       send({ type: 'WASM_LOADED' })
 
       // Fire any requests that queued up during loading
-      if (pendingObjConvert) {
-        const obj = pendingObjConvert
-        pendingObjConvert = null
-        doObjToStl(obj)
+      for (const pending of pendingObjConvertQueue) {
+        doObjToStl(pending.obj, pending.filename)
       }
+      pendingObjConvertQueue.length = 0
       if (pendingSlice) {
         const { stl, config } = pendingSlice
         pendingSlice = null
@@ -102,19 +101,19 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
 
   if (msg.type === 'OBJ_TO_STL') {
     if (!orcaModule) {
-      pendingObjConvert = msg.obj
+      pendingObjConvertQueue.push({ obj: msg.obj, filename: msg.filename })
       return
     }
-    doObjToStl(msg.obj)
+    doObjToStl(msg.obj, msg.filename)
   }
 })
 
-function doObjToStl(obj: ArrayBuffer) {
+function doObjToStl(obj: ArrayBuffer, filename: string) {
   if (!orcaModule) return
   try {
     const stl = objToStl(orcaModule, new Uint8Array(obj))
     const stlBuffer = stl.buffer as ArrayBuffer
-    self.postMessage({ type: 'OBJ_STL_COMPLETE', stl: stlBuffer }, [stlBuffer])
+    self.postMessage({ type: 'OBJ_STL_COMPLETE', stl: stlBuffer, filename }, [stlBuffer])
   } catch (err) {
     send({ type: 'OBJ_STL_ERROR', message: err instanceof Error ? err.message : String(err) })
   }
