@@ -42,6 +42,8 @@ export interface OrcaConfig {
   // Process — other
   seam_position?: SeamPosition
   fuzzy_skin?: FuzzySkin
+  fuzzy_skin_thickness?: number
+  fuzzy_skin_point_dist?: number
   enable_ironing?: boolean
 
   // Machine
@@ -64,7 +66,7 @@ export type SupportType = 'normal(auto)' | 'normal(manual)' | 'tree(auto)' | 'tr
 
 export type SeamPosition = 'aligned' | 'nearest' | 'back' | 'random'
 
-export type FuzzySkin = 'none' | 'outer' | 'all'
+export type FuzzySkin = 'none' | 'external' | 'all'
 
 export interface SlicePreset {
   name: string

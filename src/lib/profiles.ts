@@ -183,6 +183,8 @@ const ORCA_FIELD_MAP: Record<string, { key: keyof OrcaConfig; type: 'num' | 'pct
   enable_ironing:          { key: 'enable_ironing',         type: 'bool' },
   ironing:                 { key: 'enable_ironing',         type: 'bool' },
   fuzzy_skin:              { key: 'fuzzy_skin',             type: 'str' },
+  fuzzy_skin_thickness:    { key: 'fuzzy_skin_thickness',   type: 'num' },
+  fuzzy_skin_point_dist:   { key: 'fuzzy_skin_point_dist',  type: 'num' },
   // filament fields
   filament_type:           { key: 'filament_type',          type: 'str' },
   nozzle_temperature:      { key: 'nozzle_temperature',     type: 'num' },
