@@ -53,6 +53,17 @@ Key pieces:
 Conventional commits: `feat`, `fix`, `chore`, `docs`, `refactor`.  
 Scope examples: `(wasm)`, `(ui)`, `(ci)`, `(cli)`.
 
+## Releasing
+
+Use the `/release` skill to cut a new app version. It handles:
+
+1. `package.json` version bump
+2. `mkdocs-docs/status.md` — updates `Ostatnia aktualizacja` date and `wersja aplikacji`
+3. Commit (`chore(release): bump to vX.Y.Z`) + optional push + GitHub tag
+
+> WASM engine releases are separate — trigger `build-wasm.yml` manually with the
+> new OrcaSlicer tag when the engine version changes.
+
 ## PR checklist
 
 - [ ] `docs/` updated if architecture or a major feature changed
