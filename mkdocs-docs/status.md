@@ -128,13 +128,6 @@ Ostatnia aktualizacja: **2026-06-20** · wersja silnika: **OrcaSlicer v2.3.2** (
 | Multi-object na jednym stole | 🟡 średni |
 | Auto-arrange | 🟡 średni |
 
-### Integracje
-
-| Funkcja | Priorytet |
-|---------|-----------|
-| OctoPrint REST API | 🟡 średni |
-| Bambu Lab wysyłanie | 🟠 niski (protokół proprietarny) |
-
 ---
 
 ## 🗺️ Roadmap
@@ -160,7 +153,6 @@ v0.3  ── ✅ Własny build WASM v2.3.2 (bez slicer.data)
 
 v0.4  ── ✅ Import OBJ (natywny parser OrcaSlicer w WASM, `orc_obj_to_stl`)
       ── ✅ bed_shape — okrągły stół (P1S) wizualizowany w podglądzie 3D i G-code
-      ── OctoPrint integration
       ── Multi-object plate
       ── Variable layer height UI
 ```
