@@ -126,8 +126,9 @@ WASM is single-threaded. Every TBB parallel algorithm is replaced by a sequentia
 | `tbb/concurrent_unordered_map.h` | alias for `std::unordered_map` |
 | `tbb/concurrent_unordered_set.h` | alias for `std::unordered_set` |
 | `tbb/blocked_range.h` + `blocked_range2d.h` | lightweight range containers |
+| `tbb/tbb.h` | umbrella include — pulls in all of the above |
 | `tbb/version.h` | version constants |
-| `oneapi/tbb/…` | re-exports → `tbb/…` (same headers, dual include path) |
+| `oneapi/tbb/…` | re-exports → `tbb/…` (same headers, dual include path; also includes `scalable_allocator.h`) |
 
 #### OpenVDB — minimal type stub
 
@@ -160,7 +161,7 @@ These replace OrcaSlicer `.cpp` (and some `.hpp`) files whose implementation dep
 
 ### libnoise
 
-libnoise (Perlin / Billow / RidgedMulti / Voronoi noise) **is** compiled into the WASM engine and linked normally. `Feature/FuzzySkin/FuzzySkin.cpp` is not stubbed — it is patched in-place by `apply.py`: `thread_local` storage (unsupported by Emscripten in single-threaded mode) is rewritten to `static`, and `std::this_thread::get_id()` is replaced with a fixed seed. Fuzzy skin effect is therefore **active** in the engine when `fuzzy_skin ≠ none`.
+libnoise (Perlin / Billow / RidgedMulti / Voronoi noise) **is** compiled into the WASM engine and linked normally. `Feature/FuzzySkin/FuzzySkin.cpp` is not stubbed — it is patched in-place by `apply.py`: `thread_local` storage (unsupported by Emscripten in single-threaded mode) is rewritten to `static`, and the seed-fallback expression `std::hash<std::thread::id>()(std::this_thread::get_id())` is replaced with `rd()` (the `std::random_device` already in scope). Fuzzy skin effect is therefore **active** in the engine when `fuzzy_skin ≠ none`.
 
 ### Upgrading OrcaSlicer version
 

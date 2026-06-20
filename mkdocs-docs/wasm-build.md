@@ -49,13 +49,18 @@ Dependencies are cached between runs (GitHub Actions cache key based on dependen
 
 === "GitHub Actions (recommended)"
 
-    Go to **Actions → Build WASM → Run workflow** on the `master` branch. The workflow:
+    Two ways to trigger:
 
-    1. Builds and caches dependencies
-    2. Checks out the OrcaSlicer v2.3.2 submodule
-    3. Applies `patches/apply.py`
-    4. Compiles with `cmake + ninja`
-    5. Publishes artifacts to GitHub Release `wasm-v2.3.2`
+    - **Manual dispatch:** go to **Actions → Build WASM → Run workflow**, enter the OrcaSlicer tag (e.g. `v2.3.2`), and run.
+    - **Tag push:** push a tag matching `wasm-v*.*.*` (e.g. `git tag wasm-v2.3.2-ow2 && git push --tags`). The workflow picks up the tag automatically.
+
+    Both paths:
+
+    1. Build and cache dependencies
+    2. Check out the OrcaSlicer submodule at the specified tag
+    3. Apply `patches/apply.py`
+    4. Compile with `cmake + ninja`
+    5. Publish artifacts to the corresponding GitHub Release
 
     Builds on pull requests that touch `orca-wasm/**` run automatically but skip the release-publish step.
 
