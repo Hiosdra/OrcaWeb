@@ -246,9 +246,10 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
         const n = parseFloat(String(raw_val))
         if (!isNaN(n)) out[meta.key] = n
       } else if (meta.type === 'pct') {
-        // "15%" → 15, or "0.15" → 15
+        // "15%" → 15, "0.15" → 15, "15" → 15 (OrcaSlicer integer), "1" → 1 (not 100)
         const s = String(raw_val).trim()
-        const n = s.endsWith('%') ? parseFloat(s) : parseFloat(s) * (parseFloat(s) <= 1 ? 100 : 1)
+        const parsed = parseFloat(s)
+        const n = s.endsWith('%') ? parsed : parsed < 1 ? parsed * 100 : parsed
         if (!isNaN(n)) out[meta.key] = Math.round(n)
       } else if (meta.type === 'bool') {
         const s = String(raw_val).toLowerCase()

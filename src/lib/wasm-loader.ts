@@ -56,9 +56,7 @@ export function sliceStl(
 
   // Write config to WASM heap
   const configPtr = module._malloc(configBytes.length)
-  for (let i = 0; i < configBytes.length; i++) {
-    module.setValue(configPtr + i, configBytes[i], 'i8')
-  }
+  module.HEAPU8.set(configBytes, configPtr)
 
   const initResult = module._orc_init(configPtr, configBytes.length)
   module._free(configPtr)
@@ -69,9 +67,7 @@ export function sliceStl(
 
   // Write STL data to WASM heap
   const stlPtr = module._malloc(stlData.length)
-  for (let i = 0; i < stlData.length; i++) {
-    module.setValue(stlPtr + i, stlData[i], 'i8')
-  }
+  module.HEAPU8.set(stlData, stlPtr)
 
   const outPtrPtr = module._malloc(4)
   const outLenPtr = module._malloc(4)

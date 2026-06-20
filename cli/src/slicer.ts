@@ -17,6 +17,7 @@ export interface OrcaModule {
   setValue(ptr: number, value: number, type: string): void
   getValue(ptr: number, type: string): number
   UTF8ToString(ptr: number, len?: number): string
+  HEAPU8: Uint8Array
 }
 
 const SLICE_ERRORS: Record<number, string> = {
@@ -52,9 +53,7 @@ export function sliceStl(module: OrcaModule, options: SliceOptions): string {
   const configJson = JSON.stringify(config)
   const configBytes = Buffer.from(configJson, 'utf8')
   const configPtr = module._malloc(configBytes.length)
-  for (let i = 0; i < configBytes.length; i++) {
-    module.setValue(configPtr + i, configBytes[i], 'i8')
-  }
+  module.HEAPU8.set(configBytes, configPtr)
   const initResult = module._orc_init(configPtr, configBytes.length)
   module._free(configPtr)
 
@@ -65,9 +64,7 @@ export function sliceStl(module: OrcaModule, options: SliceOptions): string {
   // Load and slice STL
   const stlData = readFileSync(stlPath)
   const stlPtr = module._malloc(stlData.length)
-  for (let i = 0; i < stlData.length; i++) {
-    module.setValue(stlPtr + i, stlData[i], 'i8')
-  }
+  module.HEAPU8.set(stlData, stlPtr)
 
   const outPtrPtr = module._malloc(4)
   const outLenPtr = module._malloc(4)

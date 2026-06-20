@@ -62,6 +62,13 @@ export function parse3mf(data: ArrayBuffer): Parse3mfResult {
 function modelXmlToStl(xml: string): Uint8Array {
   const doc = new DOMParser().parseFromString(xml, 'application/xml')
 
+  // DOMParser returns a <parsererror> document on malformed XML instead of throwing
+  const parseErr = doc.querySelector('parsererror')
+  if (parseErr) {
+    const msg = parseErr.textContent?.split('\n')[0]?.trim() ?? 'XML parse error'
+    throw new Error(`Invalid 3MF XML: ${msg}`)
+  }
+
   // Build a map of object id → {vertices, triangles}
   const objectMap = new Map<
     string,
@@ -134,13 +141,18 @@ function modelXmlToStl(xml: string): Uint8Array {
   return trianglesToStl(allTriangles)
 }
 
-/** Parse a 3MF 4×3 row-major transform string into a 4×3 matrix (or null). */
+/** Parse a 3MF column-major 3×4 transform string into a 12-element array (or null). */
 function parseTransform(s: string): number[] | null {
   const nums = s.trim().split(/\s+/).map(Number)
   return nums.length === 12 ? nums : null
 }
 
-/** Apply a 4×3 transform matrix to a point.  Matrix layout: m00..m22 + tx ty tz */
+/**
+ * Apply a 3MF column-major transform matrix to a point.
+ * The 3MF spec stores the matrix as three column vectors followed by translation:
+ *   m00 m01 m02  m10 m11 m12  m20 m21 m22  tx ty tz
+ * So result = col0*x + col1*y + col2*z + t
+ */
 function transformPoint(
   p: number[],
   m: number[] | null,

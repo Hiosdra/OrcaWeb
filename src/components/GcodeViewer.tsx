@@ -156,14 +156,12 @@ interface SceneObjects {
 export function GcodeViewer({ gcode, bedX = 256, bedY = 256 }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<SceneObjects | null>(null)
-  const [totalLayers, setTotalLayers] = useState(0)
   const [visibleLayers, setVisibleLayers] = useState(0)
   const [showTravels, setShowTravels] = useState(false)
 
   const { layers, hasFeatureTypes, maxR } = useMemo(() => parseGcode(gcode), [gcode])
 
   useEffect(() => {
-    setTotalLayers(layers.length)
     setVisibleLayers(layers.length)
   }, [layers])
 
@@ -186,7 +184,8 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256 }: Props) {
     // Bed
     const bedGeo = new THREE.PlaneGeometry(bedX, bedY)
     bedGeo.rotateX(-Math.PI / 2)
-    const bed = new THREE.Mesh(bedGeo, new THREE.MeshBasicMaterial({ color: 0x1e293b }))
+    const bedMat = new THREE.MeshBasicMaterial({ color: 0x1e293b })
+    const bed = new THREE.Mesh(bedGeo, bedMat)
     scene.add(bed)
     const gridDiv = Math.round(Math.max(bedX, bedY) / 10)
     const grid = new THREE.GridHelper(Math.max(bedX, bedY), gridDiv, 0x334155, 0x1e293b)
@@ -197,12 +196,13 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256 }: Props) {
     // Layer cursor plane — semi-transparent plane tracking the current layer height
     const layerPlaneGeo = new THREE.PlaneGeometry(bedX * 0.92, bedY * 0.92)
     layerPlaneGeo.rotateX(-Math.PI / 2)
-    const layerPlane = new THREE.Mesh(layerPlaneGeo, new THREE.MeshBasicMaterial({
+    const layerPlaneMat = new THREE.MeshBasicMaterial({
       color: 0x38bdf8,
       transparent: true,
       opacity: 0.06,
       depthWrite: false,
-    }))
+    })
+    const layerPlane = new THREE.Mesh(layerPlaneGeo, layerPlaneMat)
     scene.add(layerPlane)
 
     const controls = new OrbitControls(camera, renderer.domElement)
@@ -302,7 +302,9 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256 }: Props) {
         ;(travel?.material as THREE.Material | undefined)?.dispose()
       })
       bedGeo.dispose()
+      bedMat.dispose()
       layerPlaneGeo.dispose()
+      layerPlaneMat.dispose()
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement)
     }
   }, [layers, bedX, bedY, hasFeatureTypes])
@@ -363,13 +365,13 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256 }: Props) {
         <input
           type="range"
           min={1}
-          max={totalLayers}
-          value={visibleLayers}
+          max={layers.length}
+          value={Math.max(1, visibleLayers)}
           onChange={e => setVisibleLayers(Number(e.target.value))}
           className="flex-1 accent-orca-400"
         />
         <span className="text-xs text-slate-300 font-mono shrink-0 w-20 text-right">
-          {visibleLayers}/{totalLayers} · z{layers[visibleLayers - 1]?.z.toFixed(2)}mm
+          {visibleLayers}/{layers.length} · z{layers[visibleLayers - 1]?.z.toFixed(2) ?? '?'}mm
         </span>
         <button
           onClick={() => setShowTravels(v => !v)}

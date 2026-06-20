@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback } from 'react'
 import clsx from 'clsx'
+import { formatBytes } from '../lib/format'
 
 interface Props {
   onFile: (file: File) => void
@@ -76,12 +77,6 @@ export function FileUpload({ onFile, file }: Props) {
       )}
     </div>
   )
-}
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 function UploadIcon({ className }: { className?: string }) {
