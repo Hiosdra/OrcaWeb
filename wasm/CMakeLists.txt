@@ -34,6 +34,7 @@ target_link_options(slicer PRIVATE
   "-sEXPORTED_FUNCTIONS=[\
 '_orc_init',\
 '_orc_slice',\
+'_orc_obj_to_stl',\
 '_orc_free',\
 '_orc_decode_exception',\
 '_malloc',\
