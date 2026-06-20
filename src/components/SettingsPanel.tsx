@@ -287,7 +287,7 @@ export function SettingsPanel({
             <SelectField
               label="Fuzzy skin"
               value={config.fuzzy_skin ?? 'none'}
-              options={['none', 'outer', 'all'] as FuzzySkin[]}
+              options={['none', 'external', 'all'] as FuzzySkin[]}
               onChange={(v) => onChange({ fuzzy_skin: v as FuzzySkin })}
               className="mt-3"
             />

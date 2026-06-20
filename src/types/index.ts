@@ -66,7 +66,7 @@ export type SupportType = 'normal(auto)' | 'normal(manual)' | 'tree(auto)' | 'tr
 
 export type SeamPosition = 'aligned' | 'nearest' | 'back' | 'random'
 
-export type FuzzySkin = 'none' | 'outer' | 'all'
+export type FuzzySkin = 'none' | 'external' | 'all'
 
 export interface SlicePreset {
   name: string
