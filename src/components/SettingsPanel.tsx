@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import clsx from 'clsx'
-import type { OrcaConfig, InfillPattern, SeamPosition, SupportType } from '../types'
+import type { OrcaConfig, InfillPattern, SeamPosition, SupportType, FuzzySkin } from '../types'
 import { PRESETS, PRINTER_PRESETS, FILAMENT_PRESETS, parseOrcaProfileJson } from '../lib/profiles'
 
 interface Props {
@@ -284,6 +284,35 @@ export function SettingsPanel({
               options={['aligned', 'nearest', 'back', 'random'] as SeamPosition[]}
               onChange={(v) => onChange({ seam_position: v as SeamPosition })}
             />
+            <SelectField
+              label="Fuzzy skin"
+              value={config.fuzzy_skin ?? 'none'}
+              options={['none', 'outer', 'all'] as FuzzySkin[]}
+              onChange={(v) => onChange({ fuzzy_skin: v as FuzzySkin })}
+              className="mt-3"
+            />
+            {(config.fuzzy_skin ?? 'none') !== 'none' && (
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <NumberField
+                  label="Thickness"
+                  unit="mm"
+                  value={config.fuzzy_skin_thickness ?? 0.3}
+                  min={0.05}
+                  max={2}
+                  step={0.05}
+                  onChange={(v) => onChange({ fuzzy_skin_thickness: v })}
+                />
+                <NumberField
+                  label="Point dist"
+                  unit="mm"
+                  value={config.fuzzy_skin_point_dist ?? 0.8}
+                  min={0.1}
+                  max={5}
+                  step={0.1}
+                  onChange={(v) => onChange({ fuzzy_skin_point_dist: v })}
+                />
+              </div>
+            )}
             <ToggleField
               label="Ironing (top surface)"
               value={config.enable_ironing ?? false}

@@ -42,6 +42,8 @@ export interface OrcaConfig {
   // Process — other
   seam_position?: SeamPosition
   fuzzy_skin?: FuzzySkin
+  fuzzy_skin_thickness?: number
+  fuzzy_skin_point_dist?: number
   enable_ironing?: boolean
 
   // Machine
