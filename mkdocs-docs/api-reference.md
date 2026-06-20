@@ -247,7 +247,9 @@ interface OrcaConfig {
 
   // Surface
   seam_position?: SeamPosition
-  fuzzy_skin?: string
+  fuzzy_skin?: FuzzySkin           // 'none' | 'external' | 'all'
+  fuzzy_skin_thickness?: number    // mm, 0.05–2 (default 0.3)
+  fuzzy_skin_point_dist?: number   // mm, 0.1–5 (default 0.8)
   enable_ironing?: boolean
 }
 
@@ -260,6 +262,8 @@ type SupportType =
   | 'tree(auto)'   | 'tree(manual)'
 
 type SeamPosition = 'aligned' | 'nearest' | 'back' | 'random'
+
+type FuzzySkin = 'none' | 'external' | 'all'
 ```
 
 ---

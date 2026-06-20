@@ -19,6 +19,7 @@ Ostatnia aktualizacja: **2026-06-20** · wersja silnika: **OrcaSlicer v2.3.2** (
 | Podgląd 3D modelu (Three.js) | Model na wirtualnym stole drukarskim w skali mm, OrbitControls |
 | Siatka stołu — dynamiczny rozmiar | Rozmiar stołu pobierany z presetu drukarki lub profilu maszyny |
 | Kształt stołu (`bed_shape`) | Prostokątny lub okrągły (np. Bambu Lab P1S); wizualizacja w podglądzie 3D i G-code |
+| FuzzySkin (szorstkość powierzchni) | Tryby: none / external (tylko zewnętrzne ściany) / all; grubość 0.05–2 mm, rozstaw punktów 0.1–5 mm; libnoise skompilowane dla WASM (Perlin/Billow/RidgedMulti/Voronoi) — od PR #32 |
 | Zakładki Model / Settings / Slice | Płynna nawigacja, zakładki zablokowane do momentu wczytania pliku |
 | Panel ustawień | Wybór drukarki, filamentu, jakości |
 | Podgląd G-code (warstwa po warstwie) | Slider warstw, kolorowanie wg typu ruchu (perimeter/infill/support/travel), grube linie 3D, kursor warstwy — od PR #16 |
@@ -121,7 +122,6 @@ Ostatnia aktualizacja: **2026-06-20** · wersja silnika: **OrcaSlicer v2.3.2** (
 
 | Funkcja | Priorytet |
 |---------|-----------|
-| FuzzySkin (szorstkość powierzchni) | 🟢 — libnoise skompilowane dla WASM; Perlin/Billow/RidgedMulti/Voronoi aktywne |
 | Variable layer height | 🟡 średni |
 | Support enforcement / blocking | 🟡 średni |
 | Multi-material | 🟠 niski |
@@ -153,6 +153,7 @@ v0.3  ── ✅ Własny build WASM v2.3.2 (bez slicer.data)
 
 v0.4  ── ✅ Import OBJ (natywny parser OrcaSlicer w WASM, `orc_obj_to_stl`)
       ── ✅ bed_shape — okrągły stół (P1S) wizualizowany w podglądzie 3D i G-code
+      ── ✅ FuzzySkin UI — none/external/all, thickness + point_dist (PR #32)
       ── Multi-object plate
       ── Variable layer height UI
 ```

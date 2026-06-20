@@ -65,6 +65,9 @@ OrcaWeb maps OrcaSlicer profile fields to its internal `OrcaConfig`. Aliases fro
 | `seam_position` | `seam_position` | |
 | `enable_support` | `enable_support` | `"1"` → true |
 | `support_type` | `support_type` | |
+| `fuzzy_skin` | `fuzzy_skin` | `"none"` / `"external"` / `"all"` |
+| `fuzzy_skin_thickness` | `fuzzy_skin_thickness` | mm |
+| `fuzzy_skin_point_dist` | `fuzzy_skin_point_dist` | mm |
 | `enable_ironing` / `ironing` | `enable_ironing` | |
 | `filament_type` | `filament_type` | filament profiles |
 | `nozzle_temperature` / `temperature` | `nozzle_temperature` | °C |
