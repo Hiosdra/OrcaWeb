@@ -1,6 +1,6 @@
 name: Build WASM
 
-# Trigger manually or on a tag v*.*.* that signals a new OrcaSlicer target.
+# Trigger manually or on a tag wasm-v*.*.* that signals a new OrcaSlicer target.
 # The compiled artifacts are uploaded as a release asset on OrcaWeb and then
 # pulled into the deploy workflow.
 on:
@@ -11,7 +11,7 @@ on:
         default: 'v2.3.2'
         required: true
   push:
-    tags: ['v*.*.*']
+    tags: ['wasm-v*.*.*']
   # Run on PRs that touch the WASM build pipeline so compilation breakage is
   # caught before merge.  Path-filtered to avoid a ~3 h build on UI-only PRs.
   pull_request:
