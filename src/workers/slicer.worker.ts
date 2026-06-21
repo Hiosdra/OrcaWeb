@@ -129,7 +129,7 @@ function doObjToStl(obj: ArrayBuffer, filename: string) {
     const stlBuffer = stl.buffer as ArrayBuffer
     self.postMessage({ type: 'OBJ_STL_COMPLETE', stl: stlBuffer, filename }, [stlBuffer])
   } catch (err) {
-    send({ type: 'OBJ_STL_ERROR', message: err instanceof Error ? err.message : String(err) })
+    send({ type: 'OBJ_STL_ERROR', message: err instanceof Error ? err.message : String(err), filename })
   }
 }
 

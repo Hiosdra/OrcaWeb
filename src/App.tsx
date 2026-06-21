@@ -189,18 +189,18 @@ export default function App() {
         const id = pendingObjConversionsRef.current.get(msg.filename)
         if (id) {
           pendingObjConversionsRef.current.delete(msg.filename)
-          const stlFile = new File([msg.stl], msg.filename.replace(/\.obj$/i, '.stl'), { type: 'model/stl' })
+          const originalName = msg.filename.slice(id.length + 1)
+          const stlFile = new File([msg.stl], originalName.replace(/\.obj$/i, '.stl'), { type: 'model/stl' })
           updateQueue(q => q.map(i => i.id === id ? { ...i, stlFile, status: 'ready', name: stlFile.name } : i))
         }
         return
       }
 
       if (msg.type === 'OBJ_STL_ERROR') {
-        // Find any item still converting via OBJ (best-effort match)
-        const convertingId = [...pendingObjConversionsRef.current.values()][0]
-        if (convertingId) {
-          pendingObjConversionsRef.current.clear()
-          updateQueue(q => q.map(i => i.id === convertingId ? { ...i, status: 'error', error: `OBJ conversion failed: ${msg.message}` } : i))
+        const id = pendingObjConversionsRef.current.get(msg.filename)
+        if (id) {
+          pendingObjConversionsRef.current.delete(msg.filename)
+          updateQueue(q => q.map(i => i.id === id ? { ...i, status: 'error', error: `OBJ conversion failed: ${msg.message}` } : i))
         }
       }
     })
@@ -234,7 +234,7 @@ export default function App() {
             setConfigOverrides(profileConfig)
           }
           const stlFile = new File(
-            [stlBytes.buffer as ArrayBuffer],
+            [stlBytes.buffer.slice(stlBytes.byteOffset, stlBytes.byteOffset + stlBytes.byteLength) as ArrayBuffer],
             f.name.replace(/\.3mf$/i, '.stl'),
             { type: 'model/stl' },
           )
@@ -250,8 +250,9 @@ export default function App() {
           updateQueue(q => q.map(item => item.id === id ? { ...item, stlFile, status: 'ready', name: stlFile.name } : item))
         } else if (/\.obj$/i.test(f.name)) {
           const buf = await f.arrayBuffer()
-          pendingObjConversionsRef.current.set(f.name, id)
-          getWorker().postMessage({ type: 'OBJ_TO_STL', obj: buf, filename: f.name }, [buf])
+          const trackingKey = `${id}_${f.name}`
+          pendingObjConversionsRef.current.set(trackingKey, id)
+          getWorker().postMessage({ type: 'OBJ_TO_STL', obj: buf, filename: trackingKey }, [buf])
           // Stays 'converting' until OBJ_STL_COMPLETE
         } else {
           // STL — ready immediately

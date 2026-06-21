@@ -92,7 +92,7 @@ export type WorkerOutMessage =
   | { type: 'SLICE_MULTI_COMPLETE'; gcode: string }
   | { type: 'SLICE_MULTI_ERROR'; code: number; message: string }
   | { type: 'OBJ_STL_COMPLETE'; stl: ArrayBuffer; filename: string }
-  | { type: 'OBJ_STL_ERROR'; message: string }
+  | { type: 'OBJ_STL_ERROR'; message: string; filename: string }
 
 // --- G-code statistics ---
 

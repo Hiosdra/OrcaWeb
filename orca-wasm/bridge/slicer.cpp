@@ -336,35 +336,37 @@ int orc_slice_multi(
         return -1;
 
     const char* base = static_cast<const char*>(all_stl);
-    Slic3r::Model model;
-
-    // ── load each STL segment into the shared model ───────────────────────
-    for (int i = 0; i < n_files; i++) {
-        const int start = offsets[i * 2];
-        const int len   = offsets[i * 2 + 1];
-        if (start < 0 || len <= 0 || start + len > all_stl_len) {
-            record_error("invalid offset table");
-            return -1;
-        }
-        const std::string path = "/tmp/ow_multi_" + std::to_string(i) + ".stl";
-        {
-            FILE* f = std::fopen(path.c_str(), "wb");
-            if (!f) { record_error("cannot write temp STL"); return -3; }
-            std::fwrite(base + start, 1, static_cast<std::size_t>(len), f);
-            std::fclose(f);
-        }
-        const std::string name = "object_" + std::to_string(i);
-        const bool ok = Slic3r::load_stl(path.c_str(), &model, name.c_str());
-        std::remove(path.c_str());
-        if (!ok) {
-            record_error("STL load failed for file " + std::to_string(i));
-            return -4;
-        }
-    }
-
-    if (model.objects.empty()) { record_error("no objects loaded"); return -5; }
 
     try {
+        Slic3r::Model model;
+
+        // ── load each STL segment into the shared model ───────────────────────
+        for (int i = 0; i < n_files; i++) {
+            const int start = offsets[i * 2];
+            const int len   = offsets[i * 2 + 1];
+            if (start < 0 || len <= 0 || start + len > all_stl_len) {
+                record_error("invalid offset table");
+                return -1;
+            }
+            const std::string path = "/tmp/ow_multi_" + std::to_string(i) + ".stl";
+            {
+                FILE* f = std::fopen(path.c_str(), "wb");
+                if (!f) { record_error("cannot write temp STL"); return -3; }
+                std::fwrite(base + start, 1, static_cast<std::size_t>(len), f);
+                std::fclose(f);
+            }
+            const std::string name = "object_" + std::to_string(i);
+            const bool ok = Slic3r::load_stl(path.c_str(), &model, name.c_str());
+            std::remove(path.c_str());
+            if (!ok) {
+                record_error("STL load failed for file " + std::to_string(i));
+                return -4;
+            }
+        }
+
+        if (model.objects.empty()) { record_error("no objects loaded"); return -5; }
+
+
         // ── centre each mesh; give each one an instance ───────────────────
         for (auto* obj : model.objects) {
             obj->center_around_origin();
