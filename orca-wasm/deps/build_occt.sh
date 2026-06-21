@@ -47,16 +47,20 @@ fi
 echo "  [occt] configuring with Emscripten..."
 mkdir -p "${OCCT_SRC_DIR}/build-wasm"
 
-# Emscripten's standard library provides POSIX stubs sufficient for OCCT's
-# OSD layer to compile; actual thread creation is never called on the STEP
-# import / tessellation path so no -sPTHREADS is needed at link time.
-emcmake cmake \
+# Use the Emscripten CMake toolchain file directly instead of emcmake.
+# emcmake does not set CMAKE_SYSTEM_NAME=Emscripten, so OCCT's platform
+# detection sees "Linux" and builds shared libraries (.so) — which emscripten's
+# linker cannot resolve from its sysroot. The toolchain file sets
+# CMAKE_SYSTEM_NAME=Emscripten and forces BUILD_SHARED_LIBS=OFF globally.
+cmake \
   -S "${OCCT_SRC_DIR}" \
   -B "${OCCT_SRC_DIR}/build-wasm" \
   -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE="${EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="${OCCT_INSTALL_DIR}" \
   -DBUILD_SHARED_LIBS=OFF \
+  -DCMAKE_CROSSCOMPILING_EMULATOR="node" \
   \
   -DBUILD_MODULE_Draw=OFF \
   -DBUILD_MODULE_Visualization=OFF \
@@ -82,7 +86,7 @@ emcmake cmake \
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 echo "  [occt] building (first run ~30–60 min)..."
-emmake cmake --build "${OCCT_SRC_DIR}/build-wasm" -j"$(nproc 2>/dev/null || echo 4)"
+cmake --build "${OCCT_SRC_DIR}/build-wasm" -j"$(nproc 2>/dev/null || echo 4)"
 
 # ── Install ───────────────────────────────────────────────────────────────────
 echo "  [occt] installing to ${OCCT_INSTALL_DIR}..."
