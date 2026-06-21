@@ -267,5 +267,4 @@ File drop
 | Bundler | Vite 8 | Worker ES format, configurable base |
 | WASM | OrcaSlicer **v2.3.2** | Emscripten, single-threaded, self-built |
 | Worker | Web Worker (ES module) | Blob URL for dynamic import |
-| CLI | Commander + tsx | Node.js, same WASM API |
 | License | AGPL-3.0-or-later | Source link in UI footer per §13 |

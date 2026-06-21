@@ -52,23 +52,6 @@ Open [http://localhost:5173](http://localhost:5173).
 3. **Slice tab** — click **Slice model**; wait ~50–500 ms depending on model complexity
 4. When complete, a **Download G-code** button appears next to a live G-code preview
 
-## CLI
-
-For headless / batch slicing:
-
-```bash
-# Slice a file
-npm run cli -- slice model.stl -o output.gcode
-
-# List available presets
-npm run cli -- profiles
-
-# Download WASM (same as setup script)
-npm run cli -- setup
-```
-
-→ [Full CLI reference](cli.md)
-
 ## Importing OrcaSlicer profiles
 
 In the **Settings tab**, click **Import OrcaSlicer profile (.json)** and select any profile JSON from your desktop OrcaSlicer installation.
