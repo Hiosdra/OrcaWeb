@@ -95,13 +95,13 @@ function parseGcode(gcode: string): ParseResult {
         if (!layerMap.has(zKey)) layerMap.set(zKey, { features: new Map(), travels: [] })
         const ld = layerMap.get(zKey)!
 
-        // G-code: X/Y = bed plane, Z = height → Three.js: gcodeX→x, gcodeZ→y, gcodeY→z
+        // G-code coords match engine: X/Y = bed plane, Z = height — use directly (Z-up scene)
         if (isTravel) {
-          ld.travels.push(cx, cz, cy, nx, nz, ny)
+          ld.travels.push(cx, cy, cz, nx, ny, nz)
         } else {
           const ft = currentFeature || 'Extrusion'
           if (!ld.features.has(ft)) ld.features.set(ft, [])
-          ld.features.get(ft)!.push(cx, cz, cy, nx, nz, ny)
+          ld.features.get(ft)!.push(cx, cy, cz, nx, ny, nz)
           minX = Math.min(minX, cx, nx); maxX = Math.max(maxX, cx, nx)
           minY = Math.min(minY, cy, ny); maxY = Math.max(maxY, cy, ny)
         }
@@ -123,9 +123,9 @@ function parseGcode(gcode: string): ParseResult {
       const features: Feature[] = Array.from(data.features.entries()).map(([type, pts]) => {
         const arr = new Float32Array(pts.length)
         for (let i = 0; i < pts.length; i += 3) {
-          arr[i] = pts[i] - centerX
-          arr[i + 1] = pts[i + 1]
-          arr[i + 2] = pts[i + 2] - centerY
+          arr[i] = pts[i] - centerX      // X
+          arr[i + 1] = pts[i + 1] - centerY  // Y
+          arr[i + 2] = pts[i + 2]        // Z (height, no centering)
         }
         return { type, segments: arr }
       })
@@ -133,8 +133,8 @@ function parseGcode(gcode: string): ParseResult {
       const ta = new Float32Array(data.travels.length)
       for (let i = 0; i < data.travels.length; i += 3) {
         ta[i] = data.travels[i] - centerX
-        ta[i + 1] = data.travels[i + 1]
-        ta[i + 2] = data.travels[i + 2] - centerY
+        ta[i + 1] = data.travels[i + 1] - centerY
+        ta[i + 2] = data.travels[i + 2]
       }
 
       return { z, features, travels: ta }
@@ -177,6 +177,7 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
     scene.background = new THREE.Color(0x0f172a)
 
     const camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 10000)
+    camera.up.set(0, 0, 1)  // Z-up to match engine coordinate system
     const renderer = new THREE.WebGLRenderer({ antialias: true })
     renderer.setPixelRatio(window.devicePixelRatio)
     renderer.setSize(w, h)
@@ -189,18 +190,19 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
     const bedExtras: THREE.Object3D[] = []
     if (bedShape === 'circle') {
       const radius = Math.min(bedX, bedY) / 2
+      // CircleGeometry is in XY plane by default — correct for Z-up
       bedGeo = new THREE.CircleGeometry(radius, 64)
-      bedGeo.rotateX(-Math.PI / 2)
       scene.add(new THREE.Mesh(bedGeo, bedMat))
       const gridDiv = Math.max(4, Math.round((radius * 2) / 10))
       const grid = new THREE.GridHelper(radius * 2, gridDiv, 0x334155, 0x1e293b)
-      grid.position.y = 0.15
+      grid.rotateX(Math.PI / 2)  // rotate from XZ plane to XY plane (Z-up floor)
+      grid.position.z = 0.15
       scene.add(grid)
       bedExtras.push(grid)
       const borderPts: THREE.Vector3[] = []
       for (let i = 0; i <= 64; i++) {
         const a = (i / 64) * Math.PI * 2
-        borderPts.push(new THREE.Vector3(Math.cos(a) * radius, 0.2, Math.sin(a) * radius))
+        borderPts.push(new THREE.Vector3(Math.cos(a) * radius, Math.sin(a) * radius, 0.2))
       }
       const borderGeo = new THREE.BufferGeometry().setFromPoints(borderPts)
       const borderMat = new THREE.LineBasicMaterial({ color: 0x334155 })
@@ -209,18 +211,19 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
       bedExtras.push(border)
       layerPlaneGeo = new THREE.CircleGeometry(radius * 0.96, 64)
     } else {
+      // PlaneGeometry is in XY plane by default — correct for Z-up
       bedGeo = new THREE.PlaneGeometry(bedX, bedY)
-      bedGeo.rotateX(-Math.PI / 2)
       scene.add(new THREE.Mesh(bedGeo, bedMat))
       const gridDiv = Math.round(Math.max(bedX, bedY) / 10)
       const grid = new THREE.GridHelper(Math.max(bedX, bedY), gridDiv, 0x334155, 0x1e293b)
       grid.scale.set(bedX / Math.max(bedX, bedY), 1, bedY / Math.max(bedX, bedY))
-      grid.position.y = 0.15
+      grid.rotateX(Math.PI / 2)  // rotate from XZ plane to XY plane (Z-up floor)
+      grid.position.z = 0.15
       scene.add(grid)
       bedExtras.push(grid)
       layerPlaneGeo = new THREE.PlaneGeometry(bedX * 0.92, bedY * 0.92)
     }
-    layerPlaneGeo.rotateX(-Math.PI / 2)
+    // PlaneGeometry/CircleGeometry are already in XY plane — no rotation needed for Z-up
 
     // Layer cursor plane — semi-transparent plane tracking the current layer height
     const layerPlaneMat = new THREE.MeshBasicMaterial({
@@ -290,11 +293,11 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
       layerObjs.push({ extrusion, travel })
     }
 
-    // Camera fit — maxR pre-computed from bounding box during parsing
+    // Camera fit — Z-up: position camera above and to the side
     const maxZ = layers[layers.length - 1]?.z ?? 20
     const dist = Math.max(maxR * 2, maxZ) * 2.5
-    camera.position.set(dist * 0.6, dist * 0.7, dist * 0.9)
-    controls.target.set(0, maxZ / 2, 0)
+    camera.position.set(dist * 0.6, -dist, dist * 0.7)
+    controls.target.set(0, 0, maxZ / 2)
     controls.update()
 
     sceneRef.current = { layerObjs, lineMat, layerPlane }
@@ -353,7 +356,7 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
       if (travel) travel.visible = vis && showTravels
     })
     const currentZ = layers[visibleLayers - 1]?.z ?? 0
-    sc.layerPlane.position.y = currentZ + 0.3
+    sc.layerPlane.position.z = currentZ + 0.3
   }, [visibleLayers, showTravels, layers])
 
   // Feature legend (only when GCode has TYPE comments)
