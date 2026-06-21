@@ -52,6 +52,8 @@ static std::string g_last_error;
 // Defaults to centre of a 256×256 mm bed (same as the historical hardcoded value).
 static double g_bed_cx = 128.0;
 static double g_bed_cy = 128.0;
+// "rectangle" or "circle" — read from bed_shape in the config JSON.
+static std::string g_bed_shape = "rectangle";
 
 static void record_error(const char* msg) { g_last_error = msg ? msg : "unknown error"; }
 static void record_error(const std::string& s) { g_last_error = s; }
@@ -94,6 +96,9 @@ int orc_init(const char* json_data, int json_len) {
             };
             g_bed_cx = pick("bed_size_x", 256.0) / 2.0;
             g_bed_cy = pick("bed_size_y", 256.0) / 2.0;
+            g_bed_shape = (j.contains("bed_shape") && j["bed_shape"].is_string())
+                ? j["bed_shape"].get<std::string>()
+                : "rectangle";
         }
 
         // Start from OrcaSlicer's built-in defaults so all required fields exist.
@@ -374,15 +379,25 @@ int orc_slice_multi(
                 obj->add_instance();
         }
 
-        // ── auto-arrange on the bed (rectangular) ────────────────────────
-        // coord_t uses 1 µm resolution: 1 mm = 1,000,000 units
-        const double bed_w = g_bed_cx * 2.0;
-        const double bed_h = g_bed_cy * 2.0;
+        // ── auto-arrange on the bed ───────────────────────────────────────
+        // coord_t uses 1 µm resolution: 1 mm = 1,000,000 units.
+        // For circular beds the arrangement boundary is the largest axis-aligned
+        // square inscribed in the circle (half-side = radius / √2) so objects are
+        // never placed in the rectangle corners that fall outside the printable area.
+        const double half_w = (g_bed_shape == "circle")
+            ? g_bed_cx / std::sqrt(2.0)
+            : g_bed_cx;
+        const double half_h = (g_bed_shape == "circle")
+            ? g_bed_cy / std::sqrt(2.0)
+            : g_bed_cy;
         const Slic3r::BoundingBox bed(
-            Slic3r::Point(0, 0),
             Slic3r::Point(
-                static_cast<coord_t>(bed_w * 1e6),
-                static_cast<coord_t>(bed_h * 1e6)
+                static_cast<coord_t>((g_bed_cx - half_w) * 1e6),
+                static_cast<coord_t>((g_bed_cy - half_h) * 1e6)
+            ),
+            Slic3r::Point(
+                static_cast<coord_t>((g_bed_cx + half_w) * 1e6),
+                static_cast<coord_t>((g_bed_cy + half_h) * 1e6)
             )
         );
 

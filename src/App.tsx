@@ -64,6 +64,7 @@ export default function App() {
   const wasmStatusRef = useRef<WasmStatus>(getWasmStatus())
   const pendingFirstSliceRef = useRef<{ id: string; stl: ArrayBuffer; config: OrcaConfig } | null>(null)
   const pendingObjConversionsRef = useRef(new Map<string, string>())
+  const isSlicingPlateRef = useRef(false)
 
   const baseConfig = useMemo(
     () => buildConfig(selectedPrinter, selectedFilament, selectedPreset),
@@ -174,12 +175,14 @@ export default function App() {
       }
 
       if (msg.type === 'SLICE_MULTI_COMPLETE') {
+        isSlicingPlateRef.current = false
         setIsSlicingPlate(false)
         setPlateGcode(msg.gcode)
         return
       }
 
       if (msg.type === 'SLICE_MULTI_ERROR') {
+        isSlicingPlateRef.current = false
         setIsSlicingPlate(false)
         setPlateError(msg.message)
         return
@@ -192,6 +195,7 @@ export default function App() {
           const originalName = msg.filename.slice(id.length + 1)
           const stlFile = new File([msg.stl], originalName.replace(/\.obj$/i, '.stl'), { type: 'model/stl' })
           updateQueue(q => q.map(i => i.id === id ? { ...i, stlFile, status: 'ready', name: stlFile.name } : i))
+          if (!currentItemIdRef.current) startNextSlice()
         }
         return
       }
@@ -239,6 +243,7 @@ export default function App() {
             { type: 'model/stl' },
           )
           updateQueue(q => q.map(item => item.id === id ? { ...item, stlFile, status: 'ready', name: stlFile.name } : item))
+          if (!currentItemIdRef.current) startNextSlice()
         } else if (/\.(step|stp|iges|igs)$/i.test(f.name)) {
           const buf = await f.arrayBuffer()
           const stlBytes = await cadToStl(f.name, buf)
@@ -248,6 +253,7 @@ export default function App() {
             { type: 'model/stl' },
           )
           updateQueue(q => q.map(item => item.id === id ? { ...item, stlFile, status: 'ready', name: stlFile.name } : item))
+          if (!currentItemIdRef.current) startNextSlice()
         } else if (/\.obj$/i.test(f.name)) {
           const buf = await f.arrayBuffer()
           const trackingKey = `${id}_${f.name}`
@@ -257,6 +263,7 @@ export default function App() {
         } else {
           // STL — ready immediately
           updateQueue(q => q.map(item => item.id === id ? { ...item, stlFile: f, status: 'ready' } : item))
+          if (!currentItemIdRef.current) startNextSlice()
         }
       } catch (err) {
         updateQueue(q => q.map(item => item.id === id
@@ -264,7 +271,7 @@ export default function App() {
           : item))
       }
     }
-  }, [updateQueue])
+  }, [updateQueue, startNextSlice])
 
   const removeItem = useCallback((id: string) => {
     pendingObjConversionsRef.current.forEach((itemId, filename) => {
@@ -279,10 +286,11 @@ export default function App() {
   }, [startNextSlice])
 
   const handleSlicePlate = useCallback(async () => {
-    if (isSlicingPlate || wasmStatusRef.current !== 'ready') return
+    if (isSlicingPlateRef.current || wasmStatusRef.current !== 'ready') return
     const readyItems = queueRef.current.filter(i => i.status === 'ready' && i.stlFile != null)
     if (readyItems.length === 0) return
 
+    isSlicingPlateRef.current = true
     setIsSlicingPlate(true)
     setPlateError(null)
     setPlateGcode(null)
@@ -291,10 +299,11 @@ export default function App() {
       const stlBuffers = await Promise.all(readyItems.map(i => i.stlFile!.arrayBuffer()))
       getWorker().postMessage({ type: 'SLICE_MULTI', stls: stlBuffers, config: configRef.current! }, stlBuffers)
     } catch (err) {
+      isSlicingPlateRef.current = false
       setIsSlicingPlate(false)
       setPlateError(err instanceof Error ? err.message : String(err))
     }
-  }, [isSlicingPlate])
+  }, [])
 
   // ── Settings helpers ──────────────────────────────────────────────────────────
 
