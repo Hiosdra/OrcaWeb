@@ -29,6 +29,7 @@ jobs:
 
     env:
       ORCA_VERSION: ${{ github.event.inputs.orca_version || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v2.3.2' }}
+      OCCT_VERSION: "7.8.1"
       EMSDK: /opt/emsdk
 
     steps:
@@ -71,7 +72,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: orca-wasm/deps-install
-          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v15
+          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-occt-${{ env.OCCT_VERSION }}-v15
 
       # ── Boost ────────────────────────────────────────────────────────
       # Build Boost using b2 with the clang-emscripten toolset.  The standard

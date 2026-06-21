@@ -220,10 +220,11 @@ export default function App() {
       }
 
       if (msg.type === 'CAD_STL_ERROR') {
-        pendingCadConversionsRef.current.forEach((id, filename) => {
-          pendingCadConversionsRef.current.delete(filename)
+        const id = pendingCadConversionsRef.current.get(msg.filename)
+        if (id) {
+          pendingCadConversionsRef.current.delete(msg.filename)
           updateQueue(q => q.map(i => i.id === id ? { ...i, status: 'error', error: `CAD conversion failed: ${msg.message}` } : i))
-        })
+        }
       }
     })
 

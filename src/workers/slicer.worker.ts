@@ -183,7 +183,7 @@ function doCadToStl(cad: ArrayBuffer, filename: string) {
     const stlBuffer = stl.buffer as ArrayBuffer
     self.postMessage({ type: 'CAD_STL_COMPLETE', stl: stlBuffer, filename }, [stlBuffer])
   } catch (err) {
-    send({ type: 'CAD_STL_ERROR', message: err instanceof Error ? err.message : String(err) })
+    send({ type: 'CAD_STL_ERROR', message: err instanceof Error ? err.message : String(err), filename })
   }
 }
 

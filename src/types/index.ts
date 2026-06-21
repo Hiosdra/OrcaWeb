@@ -95,7 +95,7 @@ export type WorkerOutMessage =
   | { type: 'OBJ_STL_COMPLETE'; stl: ArrayBuffer; filename: string }
   | { type: 'OBJ_STL_ERROR'; message: string; filename: string }
   | { type: 'CAD_STL_COMPLETE'; stl: ArrayBuffer; filename: string }
-  | { type: 'CAD_STL_ERROR'; message: string }
+  | { type: 'CAD_STL_ERROR'; message: string; filename: string }
 
 // --- G-code statistics ---
 

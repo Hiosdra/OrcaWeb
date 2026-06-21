@@ -181,7 +181,7 @@ export function cadToStl(module: OrcaModule, cadData: Uint8Array, filename: stri
   try {
     const result = module._orc_cad_to_stl(cadData.length === 0 ? 0 : cadPtr, cadData.length, isIges, outPtrPtr, outLenPtr)
     if (result !== 0) {
-      throw new OrcaSliceError(result, cadErrorMessage(result))
+      throw new OrcaSliceError(result, wasmError(module, result))
     }
 
     const stlPtr = module.getValue(outPtrPtr, 'i32')
@@ -230,17 +230,5 @@ function wasmError(module: OrcaModule, code: number): string {
     case -8: return 'G-code export failed'
     case -9: return 'Unexpected C++ exception'
     default: return `Unknown error (code ${code})`
-  }
-}
-
-function cadErrorMessage(code: number): string {
-  switch (code) {
-    case -1: return 'CAD conversion called with invalid arguments (internal error)'
-    case -3: return 'Could not stage CAD file for conversion'
-    case -4: return 'CAD load failed (invalid or unsupported STEP/IGES file)'
-    case -5: return 'CAD file contains no geometry'
-    case -8: return 'STL export failed after CAD tessellation'
-    case -9: return 'Unexpected exception during CAD conversion'
-    default: return `CAD conversion error (code ${code})`
   }
 }
