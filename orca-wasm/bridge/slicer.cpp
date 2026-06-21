@@ -381,21 +381,21 @@ int orc_slice_multi(
         const Slic3r::BoundingBox bed(
             Slic3r::Point(0, 0),
             Slic3r::Point(
-                static_cast<Slic3r::coord_t>(bed_w * 1e6),
-                static_cast<Slic3r::coord_t>(bed_h * 1e6)
+                static_cast<coord_t>(bed_w * 1e6),
+                static_cast<coord_t>(bed_h * 1e6)
             )
         );
 
         Slic3r::ArrangeParams params;
-        params.min_obj_distance = static_cast<Slic3r::coord_t>(2.0 * 1e6); // 2 mm gap
+        params.min_obj_distance = static_cast<coord_t>(2.0 * 1e6); // 2 mm gap
         params.parallel         = false; // WASM is single-threaded
 
         // Objects that don't fit land at bed centre instead of throwing
         Slic3r::arrange_objects(model, bed, params,
             [](Slic3r::arrangement::ArrangePolygon& ap) {
                 ap.translation = Slic3r::Vec2crd(
-                    static_cast<Slic3r::coord_t>(g_bed_cx * 1e6),
-                    static_cast<Slic3r::coord_t>(g_bed_cy * 1e6)
+                    static_cast<coord_t>(g_bed_cx * 1e6),
+                    static_cast<coord_t>(g_bed_cy * 1e6)
                 );
             });
 
