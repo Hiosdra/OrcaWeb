@@ -228,6 +228,7 @@ export default function App() {
     })
 
     return remove
+  }, [updateQueue, startNextSlice])
 
   // ── File ingestion ────────────────────────────────────────────────────────────
 
