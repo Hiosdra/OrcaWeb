@@ -35,7 +35,6 @@ The target end-state is a fully working OrcaSlicer CLI running on the WASM engin
 - **React 19 + TypeScript + Vite + Tailwind CSS v4** — frontend in `src/` (temporary PoC)
 - **Web Worker** (`src/workers/slicer.worker.ts`) — runs OrcaSlicer WASM off the main thread
 - **WASM engine** — OrcaSlicer compiled via Emscripten; artifacts in `public/wasm/`; this is the core deliverable
-- **CLI** — Node.js wrapper in `cli/`
 - **WASM build pipeline** — `orca-wasm/` contains the Emscripten build, CMake config, shims, and patch script (`orca-wasm/patches/apply.py`)
 
 Detailed architecture: [`docs/06-architecture.md`](docs/06-architecture.md)
@@ -59,7 +58,7 @@ Key pieces:
 ## Commit style
 
 Conventional commits: `feat`, `fix`, `chore`, `docs`, `refactor`.  
-Scope examples: `(wasm)`, `(ui)`, `(ci)`, `(cli)`.
+Scope examples: `(wasm)`, `(ui)`, `(ci)`.
 
 ## Releasing
 

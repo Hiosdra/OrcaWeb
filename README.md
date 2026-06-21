@@ -10,7 +10,6 @@ OrcaSlicer compiled to WebAssembly. Slice STL files directly in the browser — 
 - 3D model preview + G-code layer visualiser side-by-side
 - Import OrcaSlicer profiles (.json) from your desktop installation
 - Built-in presets: Bambu Lab P1S/X1C, Prusa MK4, Ender 3, Voron 2.4
-- Node.js CLI for batch/headless slicing
 
 ## Quick start (local dev)
 
@@ -75,13 +74,6 @@ Or trigger the `Build WASM` GitHub Actions workflow manually to produce a
 
 See [`orca-wasm/README.md`](orca-wasm/README.md) for the full build guide.
 
-## CLI
-
-```bash
-npm run cli -- slice model.stl -o output.gcode
-npm run cli -- profiles
-```
-
 ## Stack
 
 | | |
@@ -96,4 +88,4 @@ npm run cli -- profiles
 ## Licence
 
 OrcaSlicer source is © 2022 SoftFever and contributors, AGPL-3.0.  
-OrcaWeb UI, CLI, bridge, and build infrastructure are MIT.
+OrcaWeb UI, bridge, and build infrastructure are MIT.

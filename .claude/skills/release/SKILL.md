@@ -90,5 +90,3 @@ git push origin "v{new_version}"
 - WASM engine version bumps (`wersja silnika` in status.md, `WASM_TAG` in
   `.github/workflows/`, `scripts/download-wasm.mjs`) — those are separate and
   require triggering `build-wasm.yml` manually with the new OrcaSlicer tag.
-- `cli/package.json` version — update this separately if the CLI is also being
-  released.

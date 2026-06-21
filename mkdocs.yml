@@ -47,7 +47,6 @@ nav:
   - Architecture: architecture.md
   - API Reference: api-reference.md
   - Profiles: profiles.md
-  - CLI: cli.md
   - Building WASM: wasm-build.md
 
 markdown_extensions:
