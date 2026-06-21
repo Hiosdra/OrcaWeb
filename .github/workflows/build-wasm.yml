@@ -32,7 +32,7 @@ jobs:
       EMSDK: /opt/emsdk
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # ── Emscripten ──────────────────────────────────────────────────
       - name: Install Emscripten
