@@ -1,5 +1,11 @@
 # Architecture
 
+## Project vision
+
+The main product of this repository is the **WASM slicer engine** — OrcaSlicer compiled to WebAssembly with full feature parity (fuzzy skin, infill, supports, all slicer parameters). The goal is a fully working OrcaSlicer that runs without a native binary, usable as a CLI or embedded in any environment that can execute WASM.
+
+The React web UI is a temporary proof-of-concept to demonstrate the engine. It is not the end goal and is not the primary focus of development effort.
+
 ## System diagram
 
 ```

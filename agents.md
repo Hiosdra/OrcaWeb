@@ -22,11 +22,19 @@ npm run dev                      # Vite dev server at http://localhost:5173
 
 WASM artifacts (`public/wasm/`) are gitignored — run the download script after a fresh clone.
 
+## Project vision
+
+**The main product is the WASM slicer engine — a fully working OrcaSlicer compiled to WebAssembly.**
+
+The React frontend (`src/`) is a temporary PoC to demonstrate the engine. It is not the end goal. Design decisions, dependency choices, and feature work should prioritise making the WASM engine complete and correct — all slicer features working (fuzzy skin, supports, infill, etc.) — over the web UI.
+
+The target end-state is a fully working OrcaSlicer CLI running on the WASM engine.
+
 ## Architecture
 
-- **React 19 + TypeScript + Vite + Tailwind CSS v4** — frontend in `src/`
+- **React 19 + TypeScript + Vite + Tailwind CSS v4** — frontend in `src/` (temporary PoC)
 - **Web Worker** (`src/workers/slicer.worker.ts`) — runs OrcaSlicer WASM off the main thread
-- **WASM engine** — OrcaSlicer compiled via Emscripten; artifacts in `public/wasm/`
+- **WASM engine** — OrcaSlicer compiled via Emscripten; artifacts in `public/wasm/`; this is the core deliverable
 - **CLI** — Node.js wrapper in `cli/`
 - **WASM build pipeline** — `orca-wasm/` contains the Emscripten build, CMake config, shims, and patch script (`orca-wasm/patches/apply.py`)
 
