@@ -44,7 +44,7 @@ function buildBed(
     const segs = 64
     for (let i = 0; i <= segs; i++) {
       const a = (i / segs) * Math.PI * 2
-      points.push(new THREE.Vector3(Math.cos(a) * radius, Math.sin(a) * radius, 0))
+      points.push(new THREE.Vector3(Math.cos(a) * radius, Math.sin(a) * radius, 0.2))
     }
     const borderGeo = new THREE.BufferGeometry().setFromPoints(points)
     const borderMat = new THREE.LineBasicMaterial({ color: 0xb0bec5 })

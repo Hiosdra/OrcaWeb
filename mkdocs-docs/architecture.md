@@ -177,15 +177,17 @@ Change `ORCA_VERSION` in `build-wasm.yml` and re-run CI. Only changes to the sig
 
 ## Coordinate systems
 
+Both viewers use a **Z-up** scene to match the slicer engine — G-code axes map directly to Three.js axes with no permutation.
+
 | | G-code | Three.js | In app |
 |---|---|---|---|
 | Horizontal 1 | X | X | X |
-| Horizontal 2 | Y | Z | Z |
-| Vertical | Z | Y | Y (up) |
+| Horizontal 2 | Y | Y | Y |
+| Vertical | Z | Z | Z (up) |
 
-**ModelViewer** positions the STL with its bottom face at Y=0, centered on X/Z.
+**ModelViewer** positions the STL with its bottom face at Z=0, centered on X/Y.
 
-**GcodeViewer** parses G1 extrusion moves and G0/G1 travel moves, computes centroid of all X/Y toolpath points, subtracts it, maps: `gcodeX → x`, `gcodeY → z`, `gcodeZ → y`. Reads OrcaSlicer `;TYPE:` comments to colour extrusion segments by feature type; falls back to a blue→orange height gradient. Rendered with `LineSegments2` + `LineMaterial` for real screen-space line width.
+**GcodeViewer** parses G1 extrusion moves and G0/G1 travel moves, computes centroid of all X/Y toolpath points, subtracts it, and uses G-code axes directly (`gcodeX → x`, `gcodeY → y`, `gcodeZ → z`). Reads OrcaSlicer `;TYPE:` comments to colour extrusion segments by feature type; falls back to a blue→orange height gradient. Rendered with `LineSegments2` + `LineMaterial` for real screen-space line width.
 
 ## Data flow
 

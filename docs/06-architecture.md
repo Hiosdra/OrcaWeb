@@ -155,9 +155,9 @@ File (drop) ──▶ file state ──▶ ModelViewer (Three.js STLLoader)
 ### Wyrównanie układów współrzędnych
 ```
 G-code:      X/Y = płaszczyzna stołu, Z = wysokość
-Three.js:    Y = góra (up)
-Mapowanie:   gcodeX → three.X, gcodeY → three.Z, gcodeZ → three.Y
-Centrowanie: odejmij centroid(gcodeX, gcodeY) aby model był przy origin
+Three.js:    Z = góra (up) — scena Z-up dopasowana do silnika
+Mapowanie:   gcodeX → three.X, gcodeY → three.Y, gcodeZ → three.Z (bezpośrednio, bez permutacji)
+Centrowanie: odejmij centroid(gcodeX, gcodeY) aby model był przy origin; Z (wysokość) nie centrowane
 ```
 
 ## Profile
