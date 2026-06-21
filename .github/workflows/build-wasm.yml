@@ -307,11 +307,10 @@ jobs:
           [[ -f "${STAMP}" ]] && echo "[occt] stamp exists — skip" && exit 0
 
           echo "[occt] downloading OCCT ${OCCT_VERSION}…"
-          mkdir -p /tmp/occt
+          mkdir -p /tmp/occt/occt-src
           curl -fL --retry 3 \
             "https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/${OCCT_TAG}.tar.gz" \
-            | tar xz -C /tmp/occt
-          mv "/tmp/occt/OCCT-${OCCT_TAG}" /tmp/occt/occt-src
+            | tar xz -C /tmp/occt/occt-src --strip-components=1
 
           echo "[occt] configuring with Emscripten…"
           emcmake cmake \
