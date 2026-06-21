@@ -1,11 +1,12 @@
 /**
  * OrcaWeb WASM bridge — clean-room implementation.
  *
- * Exports three C-linkage symbols consumed by the JavaScript runtime:
- *   orc_init(json, len)              → 0 = ok
- *   orc_slice(stl, stlLen, outPtr, outLen) → 0 = ok
+ * Exports C-linkage symbols consumed by the JavaScript runtime:
+ *   orc_init(json, len)                              → 0 = ok
+ *   orc_slice(stl, stlLen, outPtr, outLen)           → 0 = ok
+ *   orc_slice_multi(all, allLen, offsets, n, out, outLen) → 0 = ok
  *   orc_free(ptr)
- *   orc_decode_exception(ptr)        → null-terminated UTF-8 string
+ *   orc_decode_exception(ptr)                        → null-terminated UTF-8 string
  *
  * Error codes for orc_slice / orc_init:
  *   -1  invalid / uninitialized state
@@ -31,6 +32,7 @@
 // OrcaSlicer core
 #include "libslic3r/libslic3r.h"
 #include "libslic3r/Model.hpp"
+#include "libslic3r/ModelArrange.hpp"
 #include "libslic3r/Print.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Format/STL.hpp"
@@ -311,6 +313,132 @@ int orc_obj_to_stl(const char* obj_data, int obj_len,
     std::remove("/tmp/ow_in.obj");
     std::remove("/tmp/ow_out.stl");
     return status;
+}
+
+/**
+ * Slice multiple STL files arranged on a single plate.
+ *
+ * all_stl   concatenation of all STL file bytes
+ * offsets   int32 pairs [start0, len0, start1, len1, …] — one per file
+ * n_files   number of files (= offsets length / 2)
+ *
+ * Error codes: same convention as orc_slice.
+ */
+EMSCRIPTEN_KEEPALIVE
+int orc_slice_multi(
+    const void* all_stl, int all_stl_len,
+    const int* offsets, int n_files,
+    char** out_gcode, int* out_len)
+{
+    g_last_error.clear();
+    if (!g_initialized) { record_error("call orc_init first"); return -1; }
+    if (!all_stl || all_stl_len <= 0 || !offsets || n_files <= 0 || !out_gcode || !out_len)
+        return -1;
+
+    const char* base = static_cast<const char*>(all_stl);
+    Slic3r::Model model;
+
+    // ── load each STL segment into the shared model ───────────────────────
+    for (int i = 0; i < n_files; i++) {
+        const int start = offsets[i * 2];
+        const int len   = offsets[i * 2 + 1];
+        if (start < 0 || len <= 0 || start + len > all_stl_len) {
+            record_error("invalid offset table");
+            return -1;
+        }
+        const std::string path = "/tmp/ow_multi_" + std::to_string(i) + ".stl";
+        {
+            FILE* f = std::fopen(path.c_str(), "wb");
+            if (!f) { record_error("cannot write temp STL"); return -3; }
+            std::fwrite(base + start, 1, static_cast<std::size_t>(len), f);
+            std::fclose(f);
+        }
+        const std::string name = "object_" + std::to_string(i);
+        const bool ok = Slic3r::load_stl(path.c_str(), &model, name.c_str());
+        std::remove(path.c_str());
+        if (!ok) {
+            record_error("STL load failed for file " + std::to_string(i));
+            return -4;
+        }
+    }
+
+    if (model.objects.empty()) { record_error("no objects loaded"); return -5; }
+
+    try {
+        // ── centre each mesh; give each one an instance ───────────────────
+        for (auto* obj : model.objects) {
+            obj->center_around_origin();
+            if (obj->instances.empty())
+                obj->add_instance();
+        }
+
+        // ── auto-arrange on the bed (rectangular) ────────────────────────
+        // coord_t uses 1 µm resolution: 1 mm = 1,000,000 units
+        const double bed_w = g_bed_cx * 2.0;
+        const double bed_h = g_bed_cy * 2.0;
+        const Slic3r::BoundingBox bed(
+            Slic3r::Point(0, 0),
+            Slic3r::Point(
+                static_cast<Slic3r::coord_t>(bed_w * 1e6),
+                static_cast<Slic3r::coord_t>(bed_h * 1e6)
+            )
+        );
+
+        Slic3r::ArrangeParams params;
+        params.min_obj_distance = static_cast<Slic3r::coord_t>(2.0 * 1e6); // 2 mm gap
+        params.parallel         = false; // WASM is single-threaded
+
+        // Objects that don't fit land at bed centre instead of throwing
+        Slic3r::arrange_objects(model, bed, params,
+            [](Slic3r::arrangement::ArrangePolygon& ap) {
+                ap.translation = Slic3r::Vec2crd(
+                    static_cast<Slic3r::coord_t>(g_bed_cx * 1e6),
+                    static_cast<Slic3r::coord_t>(g_bed_cy * 1e6)
+                );
+            });
+
+        // ── configure & slice ─────────────────────────────────────────────
+        Slic3r::Print print;
+        print.apply(model, g_config);
+
+        {
+            Slic3r::StringObjectException err = print.validate();
+            if (!err.string.empty()) { record_error(err.string); return -6; }
+        }
+
+        try {
+            print.process();
+        } catch (const Slic3r::SlicingError& e) {
+            record_error(e.what());
+            return -7;
+        }
+
+        {
+            Slic3r::GCode gcode_gen;
+            gcode_gen.do_export(&print, "/tmp/ow_out.gcode", nullptr, nullptr);
+        }
+
+        FILE* gf = std::fopen("/tmp/ow_out.gcode", "rb");
+        if (!gf) { record_error("gcode export produced no output"); return -8; }
+
+        std::fseek(gf, 0, SEEK_END);
+        long sz = std::ftell(gf);
+        std::rewind(gf);
+
+        char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz) + 1));
+        if (!buf) { std::fclose(gf); record_error("out of memory"); return -9; }
+        std::fread(buf, 1, static_cast<std::size_t>(sz), gf);
+        std::fclose(gf);
+        buf[sz] = '\0';
+
+        *out_gcode = buf;
+        *out_len   = static_cast<int>(sz);
+        return 0;
+
+    } catch (const std::exception& e) {
+        record_error(e.what());
+        return -9;
+    }
 }
 
 /** Free a buffer returned by orc_slice or orc_obj_to_stl. */

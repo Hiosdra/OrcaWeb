@@ -52,7 +52,40 @@ Slice an STL file and write G-code to a newly allocated buffer.
 | `-3` | G-code generation failed |
 | `-4` | Unhandled C++ exception |
 
-**After reading** the output buffer, free it with `_free(out_ptr)`.
+**After reading** the output buffer, free it with `_orc_free(out_ptr)`.
+
+---
+
+### `_orc_slice_multi`
+
+```c
+int _orc_slice_multi(
+  const uint8_t* all_stl,  int all_stl_len,
+  const int32_t* offsets,  int n_files,
+  uint8_t**      out_ptr,
+  int*           out_len
+);
+```
+
+Arrange multiple STL files on one plate and slice them to a single G-code file.  
+Requires `_orc_init` to have been called first (same as `_orc_slice`).
+
+**Parameters**
+
+- `all_stl` — concatenation of all STL file bytes on the WASM heap
+- `all_stl_len` — total byte length of the concatenated buffer
+- `offsets` — array of `n_files * 2` int32 values: `[start0, len0, start1, len1, …]`
+- `n_files` — number of STL files
+- `out_ptr` — written with the address of the output G-code buffer
+- `out_len` — written with the byte length of the output buffer
+
+**Returns**
+
+Same error code convention as `_orc_slice`.
+
+**Arrangement** uses OrcaSlicer's `arrange_objects()` (libnest2d + NLopt, single-threaded) with a 2 mm minimum gap. Objects that cannot fit on the bed are placed at bed centre rather than triggering an error.
+
+**After reading** the output buffer, free it with `_orc_free(out_ptr)`.
 
 ---
 
@@ -99,7 +132,7 @@ Convert an OBJ file to binary STL using OrcaSlicer's native parser. Does **not**
 void _orc_free(void* ptr);
 ```
 
-Free a buffer allocated by `_orc_slice` or `_orc_obj_to_stl`.
+Free a buffer allocated by `_orc_slice`, `_orc_slice_multi`, or `_orc_obj_to_stl`.
 
 ---
 
@@ -144,6 +177,11 @@ interface OrcaModule {
     objPtr: number, objLen: number,
     outPtrPtr: number, outLenPtr: number,
   ): number
+  _orc_slice_multi(
+    dataPtr: number, dataLen: number,
+    offsetsPtr: number, nFiles: number,
+    outPtrPtr: number, outLenPtr: number,
+  ): number
   _orc_free(ptr: number): void
   setValue(ptr: number, value: number, type: string): void
   getValue(ptr: number, type: string): number
@@ -171,10 +209,18 @@ Communication between the main thread and the Web Worker.
   config: OrcaConfig
 }
 
+// Arrange N STL files on one plate and slice together
+{
+  type: 'SLICE_MULTI'
+  stls: ArrayBuffer[]  // all transferred (zero-copy)
+  config: OrcaConfig
+}
+
 // Convert an OBJ file to binary STL
 {
   type: 'OBJ_TO_STL'
   obj: ArrayBuffer   // transferred (zero-copy)
+  filename: string   // echoed back in OBJ_STL_COMPLETE for tracking
 }
 ```
 
@@ -196,8 +242,14 @@ Communication between the main thread and the Web Worker.
 // Slicing failed
 { type: 'SLICE_ERROR'; code: number; message: string }
 
+// Plate slicing finished
+{ type: 'SLICE_MULTI_COMPLETE'; gcode: string }
+
+// Plate slicing failed
+{ type: 'SLICE_MULTI_ERROR'; code: number; message: string }
+
 // OBJ → STL conversion finished
-{ type: 'OBJ_STL_COMPLETE'; stl: ArrayBuffer }
+{ type: 'OBJ_STL_COMPLETE'; stl: ArrayBuffer; filename: string }
 
 // OBJ → STL conversion failed
 { type: 'OBJ_STL_ERROR'; message: string }

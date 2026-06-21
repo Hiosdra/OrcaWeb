@@ -14,8 +14,9 @@
 │   │  ├── FileUpload     drag & drop STL/3MF/STEP/OBJ│    │
 │   │  ├── ModelViewer    Three.js, real mm scale    │    │
 │   │  ├── SettingsPanel  presets + profile import   │    │
-│   │  ├── SlicePanel     slice button + download    │    │
-│   │  └── GcodeViewer    toolpaths, layer slider    │    │
+│   │  ├── GcodeViewer    toolpaths, layer slider    │    │
+│   │  └── (slice UI inline: SliceHeader, QueueItem- │    │
+│   │       Card, PlateResultCard, ConfigSummary)    │    │
 │   │                                                │    │
 │   │  worker-singleton.ts (module-level singleton)  │    │
 │   └──────────────────┬─────────────────────────────┘    │
@@ -25,6 +26,7 @@
 │   │  └── wasm-loader.ts                            │    │
 │   │      ├── _orc_init(configJson)                 │    │
 │   │      ├── _orc_slice(stl) → gcode string        │    │
+│   │      ├── _orc_slice_multi(stls) → gcode string │    │
 │   │      └── _orc_obj_to_stl(obj) → stl bytes      │    │
 │   └──────────────────┬─────────────────────────────┘    │
 │                      │ fetch                             │
@@ -200,24 +202,31 @@ File drop
 
   │ config = buildConfig(printer, filament, preset) + overrides
   │
-handleSlice()
+  ├─ Sequential mode (one G-code per file)
+  │  handleSliceAll() → startNextSlice() for each ready item
+  │      │
+  │      └─► worker.postMessage(SLICE, stl, config)
+  │               │
+  │          SLICE_COMPLETE { gcode }  →  item.status = 'done'
+  │          startNextSlice() continues queue
   │
-  ├─ wasmStatus='ready' ──► worker.postMessage(SLICE, stl, config)
-  │
-  └─ wasmStatus='loading' ─► pendingSliceRef (queued)
-                                  │
-                          WASM_LOADED fires
-                                  │
-                           worker.postMessage(SLICE, ...)
-                                  │
-                            SLICE_COMPLETE { gcode }
-                                  │
-                     sliceStatus = { phase:'done', gcode }
-                                  │
-              ┌───────────────────┴──────────────────────┐
-              ▼                                           ▼
-        ModelViewer                               GcodeViewer
-     (STL, white bg)                          (toolpaths, dark bg)
+  └─ Plate mode (all files → one G-code)
+     handleSlicePlate() → reads all ready stlFiles
+         │
+         └─► worker.postMessage(SLICE_MULTI, stls[], config)
+                  │
+             [worker] concatenate + build int32 offset table
+                  │
+             _orc_slice_multi() → arrange_objects() + slice
+                  │
+             SLICE_MULTI_COMPLETE { gcode }
+                  │
+         plateGcode → PlateResultCard (eye / download)
+                  │
+          ┌───────┴────────┐
+          ▼                ▼
+    ModelViewer       GcodeViewer
+ (STL, white bg)  (toolpaths, dark bg)
 ```
 
 ## Build & deploy

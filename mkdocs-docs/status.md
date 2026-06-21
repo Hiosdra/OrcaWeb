@@ -12,7 +12,7 @@ Ostatnia aktualizacja: **2026-06-20** · wersja silnika: **OrcaSlicer v2.3.2** (
 
 | Funkcja | Uwagi |
 |---------|-------|
-| Drag & drop pliku STL | ASCII i binary STL |
+| Drag & drop pliku STL | ASCII i binary STL; wiele plików naraz — kolejka sekwencyjna, każdy G-code do pobrania osobno |
 | Import pliku 3MF | Ekstrakcja siatki + profili OrcaSlicera z metadanych archiwum |
 | Import OBJ | Konwersja OBJ → STL przez natywny parser OrcaSlicer (`objparser.cpp` + `OBJ.cpp`) skompilowany w WASM — bez dodatkowych zależności; obsługuje trójkąty, quady, multi-obiekt |
 | Import STEP / IGES | Konwersja CAD → STL przez `occt-import-js` (OCCT 7.7 skompilowany do WASM); lazy-load ~8 MB przy pierwszym użyciu |
@@ -20,6 +20,8 @@ Ostatnia aktualizacja: **2026-06-20** · wersja silnika: **OrcaSlicer v2.3.2** (
 | Siatka stołu — dynamiczny rozmiar | Rozmiar stołu pobierany z presetu drukarki lub profilu maszyny |
 | Kształt stołu (`bed_shape`) | Prostokątny lub okrągły (np. Bambu Lab P1S); wizualizacja w podglądzie 3D i G-code |
 | FuzzySkin (szorstkość powierzchni) | Tryby: none / external (tylko zewnętrzne ściany) / all; grubość 0.05–2 mm, rozstaw punktów 0.1–5 mm; libnoise skompilowane dla WASM (Perlin/Billow/RidgedMulti/Voronoi) — od PR #32 |
+| Multi-plik — kolejka sekwencyjna | Drag & drop wielu plików → każdy slice osobno, własny G-code do pobrania |
+| Multi-plik — jeden stół (One plate) | Przycisk „One plate (N)" → wszystkie STL auto-ułożone przez `arrange_objects()` (libnest2d), jeden G-code |
 | Zakładki Model / Settings / Slice | Płynna nawigacja, zakładki zablokowane do momentu wczytania pliku |
 | Panel ustawień | Wybór drukarki, filamentu, jakości |
 | Podgląd G-code (warstwa po warstwie) | Slider warstw, kolorowanie wg typu ruchu (perimeter/infill/support/travel), grube linie 3D, kursor warstwy — od PR #16 |
@@ -36,6 +38,7 @@ Ostatnia aktualizacja: **2026-06-20** · wersja silnika: **OrcaSlicer v2.3.2** (
 | Slicowanie STL → G-code | W Web Workerze, nie blokuje UI |
 | Własny build OrcaSlicer **v2.3.2** | Zbudowany przez `orca-wasm/` + Emscripten; artefakty w release `wasm-v2.3.2` |
 | `orc_obj_to_stl` | Nowy eksport WASM: konwersja OBJ → binary STL bez potrzeby `orc_init`; wynik zwracany jako `ArrayBuffer` do workera |
+| `orc_slice_multi` | Wiele STL → jeden G-code: auto-arrange przez `arrange_objects()` (libnest2d + NLopt); wynik identyczny jak `orc_slice` |
 | Brak `slicer.data` | Headless flat-config slicer nie czyta `orca/resources` → plik danych zredukowany **200 MB → 0** |
 | Singleton Worker | Jeden Worker przez cały czas sesji |
 | Obsługa błędów | Kody błędów `-1`…`-9`, czytelne komunikaty |
@@ -112,12 +115,6 @@ Ostatnia aktualizacja: **2026-06-20** · wersja silnika: **OrcaSlicer v2.3.2** (
 
 ## ❌ Nie zaimplementowane
 
-### Formaty plików
-
-| Funkcja | Priorytet |
-|---------|-----------|
-| Multi-plik (wiele STL naraz) | 🟡 średni |
-
 ### Zaawansowane funkcje slicowania
 
 | Funkcja | Priorytet |
@@ -125,7 +122,6 @@ Ostatnia aktualizacja: **2026-06-20** · wersja silnika: **OrcaSlicer v2.3.2** (
 | Variable layer height | 🟡 średni |
 | Support enforcement / blocking | 🟡 średni |
 | Multi-material | 🟠 niski |
-| Multi-object na jednym stole | 🟡 średni |
 | Auto-arrange | 🟡 średni |
 
 ---
@@ -154,7 +150,7 @@ v0.3  ── ✅ Własny build WASM v2.3.2 (bez slicer.data)
 v0.4  ── ✅ Import OBJ (natywny parser OrcaSlicer w WASM, `orc_obj_to_stl`)
       ── ✅ bed_shape — okrągły stół (P1S) wizualizowany w podglądzie 3D i G-code
       ── ✅ FuzzySkin UI — none/external/all, thickness + point_dist (PR #32)
-      ── Multi-object plate
+      ── ✅ Multi-object plate — „One plate (N)" auto-arrange przez `orc_slice_multi`
       ── Variable layer height UI
 ```
 
@@ -164,9 +160,9 @@ v0.4  ── ✅ Import OBJ (natywny parser OrcaSlicer w WASM, `orc_obj_to_stl`)
 
 ```
 src/
-├── App.tsx                ✅ pełna logika UI, tabs, WASM orchestration, 3MF loading
+├── App.tsx                ✅ kolejka wieloplikowa + tryb "one plate"; WASM orchestration, 3MF loading
 ├── components/
-│   ├── FileUpload.tsx     ✅ drag & drop, STL + 3MF + OBJ + STEP/IGES
+│   ├── FileUpload.tsx     ✅ drag & drop multi-file, STL + 3MF + OBJ + STEP/IGES, kolejka sekwencyjna
 │   ├── ModelViewer.tsx    ✅ Three.js, STLLoader, dynamiczny rozmiar stołu, okrągły stół (bed_shape)
 │   ├── GcodeViewer.tsx    ✅ toolpaths, layer slider, feature-type colors, travel moves, grube linie 3D, okrągły stół
 │   ├── SettingsPanel.tsx  ✅ presety, import profili — passthrough wszystkich pól OrcaSlicera
@@ -175,14 +171,14 @@ src/
 │   ├── profiles.ts        ✅ presety z rozmiarami + kształtem stołu, 30+ pól + passthrough wszystkich pozostałych
 │   ├── parse3mf.ts        ✅ 3MF → binary STL + OrcaConfig
 │   ├── step-converter.ts  ✅ STEP/IGES → binary STL (occt-import-js, lazy WASM)
-│   ├── wasm-loader.ts     ✅ orc_init / orc_slice / orc_obj_to_stl / error codes
+│   ├── wasm-loader.ts     ✅ orc_init / orc_slice / orc_slice_multi / orc_obj_to_stl / error codes
 │   └── worker-singleton.ts ✅ singleton, preload WASM
 ├── workers/
-│   └── slicer.worker.ts   ✅ WASM load + SLICE + OBJ_TO_STL
+│   └── slicer.worker.ts   ✅ WASM load + SLICE + SLICE_MULTI + OBJ_TO_STL
 └── types/index.ts         ✅ OrcaConfig, GcodeStats, WorkerMessages, SliceStatus
 
 orca-wasm/                 ✅ aktywny pipeline buildowy
-├── bridge/slicer.cpp      ✅ orc_init / orc_slice / orc_obj_to_stl bridge
+├── bridge/slicer.cpp      ✅ orc_init / orc_slice / orc_slice_multi / orc_obj_to_stl bridge
 ├── wasm/                  ✅ CMakeLists, link flags, shims
 ├── wasm/shims/tbb/        ✅ sekwencyjne stuby TBB
 ├── overrides/             ✅ C++ stuby (OCCT/OpenVDB/OpenCV/Draco)

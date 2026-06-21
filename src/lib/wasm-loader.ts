@@ -62,7 +62,7 @@ export function sliceStl(
   module._free(configPtr)
 
   if (initResult !== 0) {
-    throw new OrcaSliceError(initResult, `orc_init failed with code ${initResult}`)
+    throw new OrcaSliceError(initResult, wasmError(module, initResult))
   }
 
   // Write STL data to WASM heap
@@ -79,14 +79,14 @@ export function sliceStl(
   if (sliceResult !== 0) {
     module._free(outPtrPtr)
     module._free(outLenPtr)
-    throw new OrcaSliceError(sliceResult, sliceErrorMessage(sliceResult))
+    throw new OrcaSliceError(sliceResult, wasmError(module, sliceResult))
   }
 
   const gcodePtr = module.getValue(outPtrPtr, 'i32')
   const gcodeLen = module.getValue(outLenPtr, 'i32')
   const gcode = module.UTF8ToString(gcodePtr, gcodeLen)
 
-  module._free(gcodePtr)
+  module._orc_free(gcodePtr)
   module._free(outPtrPtr)
   module._free(outLenPtr)
 
@@ -103,7 +103,7 @@ export function objToStl(module: OrcaModule, objData: Uint8Array): Uint8Array {
   try {
     const result = module._orc_obj_to_stl(objPtr, objData.length, outPtrPtr, outLenPtr)
     if (result !== 0) {
-      throw new OrcaSliceError(result, objErrorMessage(result))
+      throw new OrcaSliceError(result, wasmError(module, result))
     }
 
     const stlPtr = module.getValue(outPtrPtr, 'i32')
@@ -120,6 +120,55 @@ export function objToStl(module: OrcaModule, objData: Uint8Array): Uint8Array {
   }
 }
 
+export function sliceMultiStl(
+  module: OrcaModule,
+  data: Uint8Array,
+  offsets: Int32Array,
+  nFiles: number,
+  configJson: string,
+): string {
+  const encoder = new TextEncoder()
+  const configBytes = encoder.encode(configJson)
+
+  const configPtr = module._malloc(configBytes.length)
+  module.HEAPU8.set(configBytes, configPtr)
+  const initResult = module._orc_init(configPtr, configBytes.length)
+  module._free(configPtr)
+  if (initResult !== 0) throw new OrcaSliceError(initResult, wasmError(module, initResult))
+
+  const dataPtr = module._malloc(data.length)
+  module.HEAPU8.set(data, dataPtr)
+
+  // Write int32 offset pairs to WASM heap using setValue so endianness is always correct
+  const offsetsPtr = module._malloc(offsets.length * 4)
+  for (let i = 0; i < offsets.length; i++) {
+    module.setValue(offsetsPtr + i * 4, offsets[i], 'i32')
+  }
+
+  const outPtrPtr = module._malloc(4)
+  const outLenPtr = module._malloc(4)
+
+  const result = module._orc_slice_multi(dataPtr, data.length, offsetsPtr, nFiles, outPtrPtr, outLenPtr)
+  module._free(dataPtr)
+  module._free(offsetsPtr)
+
+  if (result !== 0) {
+    module._free(outPtrPtr)
+    module._free(outLenPtr)
+    throw new OrcaSliceError(result, wasmError(module, result))
+  }
+
+  const gcodePtr = module.getValue(outPtrPtr, 'i32')
+  const gcodeLen = module.getValue(outLenPtr, 'i32')
+  const gcode = module.UTF8ToString(gcodePtr, gcodeLen)
+
+  module._orc_free(gcodePtr)
+  module._free(outPtrPtr)
+  module._free(outLenPtr)
+
+  return gcode
+}
+
 export class OrcaSliceError extends Error {
   constructor(
     public readonly code: number,
@@ -130,23 +179,27 @@ export class OrcaSliceError extends Error {
   }
 }
 
-function sliceErrorMessage(code: number): string {
+// Read the last error string stored by the C++ bridge via orc_decode_exception.
+// Falls back to a code-based description when the C string is empty.
+function wasmError(module: OrcaModule, code: number): string {
+  try {
+    const ptr = module._orc_decode_exception(0)
+    if (ptr) {
+      const msg = module.UTF8ToString(ptr)
+      if (msg) return msg
+    }
+  } catch { /* fall through to code-based fallback */ }
+  // Matches the error codes documented in orca-wasm/bridge/slicer.cpp
   switch (code) {
-    case -1: return 'Failed to load STL file (invalid or corrupt geometry)'
-    case -2: return 'No printable objects found on the plate'
-    case -3: return 'G-code generation failed'
-    case -4: return 'Internal OrcaSlicer exception'
-    default: return `Unknown slice error (code ${code})`
-  }
-}
-
-function objErrorMessage(code: number): string {
-  switch (code) {
-    case -1: return 'OBJ conversion called with invalid arguments (internal error)'
-    case -3: return 'Could not stage OBJ file for conversion'
-    case -4: return 'OBJ load failed (invalid or unsupported format)'
-    case -5: return 'OBJ file contains no geometry'
-    case -8: return 'STL export failed after OBJ conversion'
-    default: return `OBJ conversion error (code ${code})`
+    case -1: return 'Invalid or uninitialized state'
+    case -2: return 'Config JSON parse failure'
+    case -3: return 'Failed to write STL to MEMFS'
+    case -4: return 'STL load failed (invalid or corrupt geometry)'
+    case -5: return 'Model contains no objects'
+    case -6: return 'Print validation failed'
+    case -7: return 'Slicing error'
+    case -8: return 'G-code export failed'
+    case -9: return 'Unexpected C++ exception'
+    default: return `Unknown error (code ${code})`
   }
 }

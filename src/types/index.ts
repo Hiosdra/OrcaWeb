@@ -80,6 +80,7 @@ export interface SlicePreset {
 export type WorkerInMessage =
   | { type: 'LOAD_WASM'; url: string }
   | { type: 'SLICE'; stl: ArrayBuffer; config: OrcaConfig }
+  | { type: 'SLICE_MULTI'; stls: ArrayBuffer[]; config: OrcaConfig }
   | { type: 'OBJ_TO_STL'; obj: ArrayBuffer; filename: string }
 
 export type WorkerOutMessage =
@@ -88,6 +89,8 @@ export type WorkerOutMessage =
   | { type: 'WASM_ERROR'; message: string }
   | { type: 'SLICE_COMPLETE'; gcode: string }
   | { type: 'SLICE_ERROR'; code: number; message: string }
+  | { type: 'SLICE_MULTI_COMPLETE'; gcode: string }
+  | { type: 'SLICE_MULTI_ERROR'; code: number; message: string }
   | { type: 'OBJ_STL_COMPLETE'; stl: ArrayBuffer; filename: string }
   | { type: 'OBJ_STL_ERROR'; message: string }
 
@@ -137,8 +140,16 @@ export interface OrcaModule {
     outputPtrPtr: number,
     outputLenPtr: number,
   ): number
+  _orc_slice_multi(
+    dataPtr: number,
+    dataLen: number,
+    offsetsPtr: number,
+    nFiles: number,
+    outputPtrPtr: number,
+    outputLenPtr: number,
+  ): number
   _orc_free(ptr: number): void
-  _orc_decode_exception(ptr: number): string
+  _orc_decode_exception(ptr: number): number
   setValue(ptr: number, value: number, type: string): void
   getValue(ptr: number, type: string): number
   HEAPU8: Uint8Array
