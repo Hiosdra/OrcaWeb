@@ -1,11 +1,12 @@
 import type { OrcaModule, WorkerInMessage, WorkerOutMessage } from '../types'
-import { sliceStl, objToStl, OrcaSliceError } from '../lib/wasm-loader'
+import { sliceStl, sliceMultiStl, objToStl, OrcaSliceError } from '../lib/wasm-loader'
 
 let orcaModule: OrcaModule | null = null
 let loadingWasm = false
 // Slice request that arrived before WASM was ready — last-wins (UI disables
 // the Slice button while loading, so only one request can queue in practice)
 let pendingSlice: { stl: ArrayBuffer; config: Record<string, unknown> } | null = null
+let pendingPlate: { stls: ArrayBuffer[]; config: Record<string, unknown> } | null = null
 const pendingObjConvertQueue: { obj: ArrayBuffer; filename: string }[] = []
 
 function send(msg: WorkerOutMessage) {
@@ -81,6 +82,11 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         pendingSlice = null
         doSlice(stl, config)
       }
+      if (pendingPlate) {
+        const { stls, config } = pendingPlate
+        pendingPlate = null
+        doSliceMulti(stls, config)
+      }
     } catch (err) {
       loadingWasm = false
       send({
@@ -99,6 +105,14 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
     doSlice(msg.stl, msg.config as Record<string, unknown>)
   }
 
+  if (msg.type === 'SLICE_MULTI') {
+    if (!orcaModule) {
+      pendingPlate = { stls: msg.stls, config: msg.config as Record<string, unknown> }
+      return
+    }
+    doSliceMulti(msg.stls, msg.config as Record<string, unknown>)
+  }
+
   if (msg.type === 'OBJ_TO_STL') {
     if (!orcaModule) {
       pendingObjConvertQueue.push({ obj: msg.obj, filename: msg.filename })
@@ -115,7 +129,37 @@ function doObjToStl(obj: ArrayBuffer, filename: string) {
     const stlBuffer = stl.buffer as ArrayBuffer
     self.postMessage({ type: 'OBJ_STL_COMPLETE', stl: stlBuffer, filename }, [stlBuffer])
   } catch (err) {
-    send({ type: 'OBJ_STL_ERROR', message: err instanceof Error ? err.message : String(err) })
+    send({ type: 'OBJ_STL_ERROR', message: err instanceof Error ? err.message : String(err), filename })
+  }
+}
+
+function doSliceMulti(stls: ArrayBuffer[], config: Record<string, unknown>) {
+  if (!orcaModule) return
+  try {
+    const { _passthrough, ...rest } = config as Record<string, unknown> & { _passthrough?: Record<string, string> }
+    const flat = _passthrough ? { ...rest, ..._passthrough } : rest
+    const configJson = JSON.stringify(flat)
+
+    // Concatenate all STL buffers and build int32 offset table
+    const totalLen = stls.reduce((sum, s) => sum + s.byteLength, 0)
+    const combined = new Uint8Array(totalLen)
+    const offsets = new Int32Array(stls.length * 2)
+    let pos = 0
+    for (let i = 0; i < stls.length; i++) {
+      combined.set(new Uint8Array(stls[i]), pos)
+      offsets[i * 2]     = pos
+      offsets[i * 2 + 1] = stls[i].byteLength
+      pos += stls[i].byteLength
+    }
+
+    const gcode = sliceMultiStl(orcaModule, combined, offsets, stls.length, configJson)
+    send({ type: 'SLICE_MULTI_COMPLETE', gcode })
+  } catch (err) {
+    if (err instanceof OrcaSliceError) {
+      send({ type: 'SLICE_MULTI_ERROR', code: err.code, message: err.message })
+    } else {
+      send({ type: 'SLICE_MULTI_ERROR', code: -1, message: String(err) })
+    }
   }
 }
 

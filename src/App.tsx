@@ -3,12 +3,12 @@ import clsx from 'clsx'
 import { FileUpload } from './components/FileUpload'
 import { ModelViewer } from './components/ModelViewer'
 import { SettingsPanel } from './components/SettingsPanel'
-import { SlicePanel } from './components/SlicePanel'
 import { GcodeViewer } from './components/GcodeViewer'
-import type { OrcaConfig, SliceStatus, WorkerOutMessage } from './types'
+import type { OrcaConfig, WorkerOutMessage } from './types'
 import { buildConfig } from './lib/profiles'
 import { parse3mf } from './lib/parse3mf'
 import { cadToStl } from './lib/step-converter'
+import { formatBytes } from './lib/format'
 import {
   getWorker,
   addWorkerListener,
@@ -16,6 +16,23 @@ import {
   getWasmError,
   type WasmStatus,
 } from './lib/worker-singleton'
+
+// ── Queue item ────────────────────────────────────────────────────────────────
+
+type ItemStatus = 'converting' | 'ready' | 'slicing' | 'done' | 'error'
+
+interface QueueItem {
+  id: string
+  name: string
+  originalSize: number
+  stlFile: File | null
+  status: ItemStatus
+  gcode?: string
+  gcodeFilename?: string
+  error?: string
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
 
 type Tab = 'upload' | 'settings' | 'slice'
 
@@ -25,20 +42,29 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'slice', label: 'Slice' },
 ]
 
+// ── App ───────────────────────────────────────────────────────────────────────
+
 export default function App() {
-  const [file, setFile] = useState<File | null>(null)
+  const [queue, setQueue] = useState<QueueItem[]>([])
   const [activeTab, setActiveTab] = useState<Tab>('upload')
 
   const [selectedPreset, setSelectedPreset] = useState('standard')
   const [selectedPrinter, setSelectedPrinter] = useState('Generic 0.4')
   const [selectedFilament, setSelectedFilament] = useState('PLA')
   const [configOverrides, setConfigOverrides] = useState<Partial<OrcaConfig>>({})
-  const [sliceStatus, setSliceStatus] = useState<SliceStatus>({ phase: 'idle' })
   const [wasmStatus, setWasmStatus] = useState<WasmStatus>(getWasmStatus)
+  const [plateGcode, setPlateGcode] = useState<string | null>(null)
+  const [isSlicingPlate, setIsSlicingPlate] = useState(false)
+  const [plateError, setPlateError] = useState<string | null>(null)
 
-  // Pending slice: holds STL + config while WASM loads
-  const pendingSliceRef = useRef<{ stl: ArrayBuffer; config: OrcaConfig } | null>(null)
-  const fileRef = useRef<File | null>(null)
+  // Refs — stable across renders, used inside effect closures
+  const queueRef = useRef<QueueItem[]>([])
+  const currentItemIdRef = useRef<string | null>(null)
+  const configRef = useRef<OrcaConfig | null>(null)
+  const wasmStatusRef = useRef<WasmStatus>(getWasmStatus())
+  const pendingFirstSliceRef = useRef<{ id: string; stl: ArrayBuffer; config: OrcaConfig } | null>(null)
+  const pendingObjConversionsRef = useRef(new Map<string, string>())
+  const isSlicingPlateRef = useRef(false)
 
   const baseConfig = useMemo(
     () => buildConfig(selectedPrinter, selectedFilament, selectedPreset),
@@ -49,153 +75,258 @@ export default function App() {
     [baseConfig, configOverrides],
   )
 
+  useEffect(() => { configRef.current = config }, [config])
+  useEffect(() => { wasmStatusRef.current = wasmStatus }, [wasmStatus])
+
   const bedX = config.bed_size_x ?? 256
   const bedY = config.bed_size_y ?? 256
   const bedShape = config.bed_shape ?? 'rectangle'
 
-  useEffect(() => { fileRef.current = file }, [file])
+  // Keep queueRef in sync and return next state (used inside effects/closures)
+  const updateQueue = useCallback((updater: (q: QueueItem[]) => QueueItem[]) => {
+    setQueue(prev => {
+      const next = updater(prev)
+      queueRef.current = next
+      return next
+    })
+  }, [])
 
-  // Subscribe to singleton worker events — no worker creation here
+  // ── Slicing ──────────────────────────────────────────────────────────────────
+
+  const startNextSlice = useCallback(async () => {
+    const next = queueRef.current.find(i => i.status === 'ready')
+    if (!next || !next.stlFile) return
+
+    currentItemIdRef.current = next.id
+    updateQueue(q => q.map(i => i.id === next.id ? { ...i, status: 'slicing' } : i))
+
+    let stlBuffer: ArrayBuffer
+    try {
+      stlBuffer = await next.stlFile.arrayBuffer()
+    } catch {
+      updateQueue(q => q.map(i => i.id === next.id ? { ...i, status: 'error', error: 'Failed to read file' } : i))
+      currentItemIdRef.current = null
+      return
+    }
+
+    const cfg = configRef.current!
+    if (wasmStatusRef.current === 'ready') {
+      getWorker().postMessage({ type: 'SLICE', stl: stlBuffer, config: cfg }, [stlBuffer])
+    } else if (wasmStatusRef.current === 'loading') {
+      pendingFirstSliceRef.current = { id: next.id, stl: stlBuffer, config: cfg }
+      // Worker will fire WASM_LOADED; the listener sends the pending slice then
+    } else {
+      updateQueue(q => q.map(i => i.id === next.id ? { ...i, status: 'error', error: `Slicer engine failed to load: ${getWasmError()}` } : i))
+      currentItemIdRef.current = null
+    }
+  }, [updateQueue])
+
+  // ── Worker listener ───────────────────────────────────────────────────────────
+
   useEffect(() => {
-    // Ensure worker+WASM are started (idempotent)
     getWorker()
 
     const remove = addWorkerListener((msg: WorkerOutMessage) => {
       if (msg.type === 'WASM_LOADED') {
         setWasmStatus('ready')
-        if (pendingSliceRef.current) {
-          const pending = pendingSliceRef.current
-          pendingSliceRef.current = null
-          setSliceStatus({ phase: 'slicing' })
-          getWorker().postMessage(
-            { type: 'SLICE', stl: pending.stl, config: pending.config },
-            [pending.stl],
-          )
+        wasmStatusRef.current = 'ready'
+        const pending = pendingFirstSliceRef.current
+        if (pending) {
+          pendingFirstSliceRef.current = null
+          getWorker().postMessage({ type: 'SLICE', stl: pending.stl, config: pending.config }, [pending.stl])
         }
-      } else if (msg.type === 'WASM_ERROR') {
-        setWasmStatus('error')
-        pendingSliceRef.current = null
-        setSliceStatus({
-          phase: 'error',
-          message: `Failed to load slicer engine: ${msg.message}. Make sure WASM artifacts are in public/wasm/ (run: node scripts/download-wasm.mjs)`,
-        })
         return
-      } else if (msg.type === 'SLICE_COMPLETE') {
-        const filename = fileRef.current?.name.replace(/\.stl$/i, '.gcode') ?? 'output.gcode'
-        setSliceStatus({ phase: 'done', gcode: msg.gcode, filename })
-      } else if (msg.type === 'SLICE_ERROR') {
-        setSliceStatus({ phase: 'error', message: msg.message })
-      } else if (msg.type === 'OBJ_STL_COMPLETE') {
-        const stlFile = new File(
-          [msg.stl],
-          msg.filename.replace(/\.obj$/i, '.stl'),
-          { type: 'model/stl' },
-        )
-        setFile(stlFile)
-        setConfigOverrides({})
-        setSliceStatus({ phase: 'idle' })
-        setActiveTab('settings')
-      } else if (msg.type === 'OBJ_STL_ERROR') {
-        setSliceStatus({
-          phase: 'error',
-          message: `Failed to convert OBJ: ${msg.message}`,
-        })
+      }
+
+      if (msg.type === 'WASM_ERROR') {
+        setWasmStatus('error')
+        wasmStatusRef.current = 'error'
+        const pending = pendingFirstSliceRef.current
+        if (pending) {
+          pendingFirstSliceRef.current = null
+          updateQueue(q => q.map(i => i.id === pending.id ? { ...i, status: 'error', error: `Engine failed to load: ${msg.message}` } : i))
+          currentItemIdRef.current = null
+        }
+        return
+      }
+
+      if (msg.type === 'SLICE_COMPLETE') {
+        const id = currentItemIdRef.current
+        currentItemIdRef.current = null
+        if (id) {
+          const item = queueRef.current.find(i => i.id === id)
+          const gcodeFilename = item?.name.replace(/\.(stl|3mf|obj|step|stp|iges|igs)$/i, '.gcode') ?? 'output.gcode'
+          updateQueue(q => q.map(i => i.id === id ? { ...i, status: 'done', gcode: msg.gcode, gcodeFilename } : i))
+        }
+        // Slice next item in queue
+        startNextSlice()
+        return
+      }
+
+      if (msg.type === 'SLICE_ERROR') {
+        const id = currentItemIdRef.current
+        currentItemIdRef.current = null
+        if (id) {
+          updateQueue(q => q.map(i => i.id === id ? { ...i, status: 'error', error: msg.message } : i))
+        }
+        // Continue with next item even after error
+        startNextSlice()
+        return
+      }
+
+      if (msg.type === 'SLICE_MULTI_COMPLETE') {
+        isSlicingPlateRef.current = false
+        setIsSlicingPlate(false)
+        setPlateGcode(msg.gcode)
+        return
+      }
+
+      if (msg.type === 'SLICE_MULTI_ERROR') {
+        isSlicingPlateRef.current = false
+        setIsSlicingPlate(false)
+        setPlateError(msg.message)
+        return
+      }
+
+      if (msg.type === 'OBJ_STL_COMPLETE') {
+        const id = pendingObjConversionsRef.current.get(msg.filename)
+        if (id) {
+          pendingObjConversionsRef.current.delete(msg.filename)
+          const originalName = msg.filename.slice(id.length + 1)
+          const stlFile = new File([msg.stl], originalName.replace(/\.obj$/i, '.stl'), { type: 'model/stl' })
+          updateQueue(q => q.map(i => i.id === id ? { ...i, stlFile, status: 'ready', name: stlFile.name } : i))
+          if (!currentItemIdRef.current) startNextSlice()
+        }
+        return
+      }
+
+      if (msg.type === 'OBJ_STL_ERROR') {
+        const id = pendingObjConversionsRef.current.get(msg.filename)
+        if (id) {
+          pendingObjConversionsRef.current.delete(msg.filename)
+          updateQueue(q => q.map(i => i.id === id ? { ...i, status: 'error', error: `OBJ conversion failed: ${msg.message}` } : i))
+        }
       }
     })
 
-    return remove // just remove listener, don't kill the worker
-  }, [])
-
-  const handleFileSelect = useCallback(async (f: File) => {
-    setSliceStatus({ phase: 'idle' })
-    if (/\.3mf$/i.test(f.name)) {
-      try {
-        const buf = await f.arrayBuffer()
-        const { stlBytes, config: profileConfig } = parse3mf(buf)
-        // Replace overrides with 3MF settings — don't merge with previous file's stale values
-        if (Object.keys(profileConfig).length > 0) {
-          setConfigOverrides(profileConfig)
-        }
-        // Wrap extracted STL bytes as a synthetic File so ModelViewer can read it
-        const stlFile = new File([stlBytes.buffer as ArrayBuffer], f.name.replace(/\.3mf$/i, '.stl'), {
-          type: 'model/stl',
-        })
-        setFile(stlFile)
-      } catch (err) {
-        setSliceStatus({
-          phase: 'error',
-          message: `Failed to parse 3MF: ${err instanceof Error ? err.message : String(err)}`,
-        })
-        return
-      }
-    } else if (/\.(step|stp|iges|igs)$/i.test(f.name)) {
-      try {
-        setSliceStatus({ phase: 'loading-wasm' })
-        const buf = await f.arrayBuffer()
-        const stlBytes = await cadToStl(f.name, buf)
-        const stlFile = new File(
-          [stlBytes],
-          f.name.replace(/\.(step|stp|iges|igs)$/i, '.stl'),
-          { type: 'model/stl' },
-        )
-        setFile(stlFile)
-        setConfigOverrides({})
-        setSliceStatus({ phase: 'idle' })
-      } catch (err) {
-        setSliceStatus({
-          phase: 'error',
-          message: `Failed to convert STEP/IGES: ${err instanceof Error ? err.message : String(err)}`,
-        })
-        return
-      }
-    } else if (/\.obj$/i.test(f.name)) {
-      setSliceStatus({ phase: 'loading-wasm' })
-      const buf = await f.arrayBuffer()
-      getWorker().postMessage({ type: 'OBJ_TO_STL', obj: buf, filename: f.name }, [buf])
-      return // state update happens in the OBJ_STL_COMPLETE listener
-    } else {
-      setFile(f)
-      // Clear any 3MF-extracted overrides so they don't bleed into plain STL slices
-      setConfigOverrides({})
-    }
-    setActiveTab('settings')
+    return remove
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // ── File ingestion ────────────────────────────────────────────────────────────
+
+  const handleFilesSelect = useCallback(async (newFiles: File[]) => {
+    const newItems: QueueItem[] = newFiles.map(f => ({
+      id: crypto.randomUUID(),
+      name: f.name,
+      originalSize: f.size,
+      stlFile: null,
+      status: 'converting' as const,
+    }))
+
+    updateQueue(q => [...q, ...newItems])
+
+    for (let i = 0; i < newFiles.length; i++) {
+      const f = newFiles[i]
+      const { id } = newItems[i]
+
+      try {
+        if (/\.3mf$/i.test(f.name)) {
+          const buf = await f.arrayBuffer()
+          const { stlBytes, config: profileConfig } = parse3mf(buf)
+          if (Object.keys(profileConfig).length > 0) {
+            setConfigOverrides(profileConfig)
+          }
+          const stlFile = new File(
+            [stlBytes.buffer.slice(stlBytes.byteOffset, stlBytes.byteOffset + stlBytes.byteLength) as ArrayBuffer],
+            f.name.replace(/\.3mf$/i, '.stl'),
+            { type: 'model/stl' },
+          )
+          updateQueue(q => q.map(item => item.id === id ? { ...item, stlFile, status: 'ready', name: stlFile.name } : item))
+          if (!currentItemIdRef.current) startNextSlice()
+        } else if (/\.(step|stp|iges|igs)$/i.test(f.name)) {
+          const buf = await f.arrayBuffer()
+          const stlBytes = await cadToStl(f.name, buf)
+          const stlFile = new File(
+            [stlBytes],
+            f.name.replace(/\.(step|stp|iges|igs)$/i, '.stl'),
+            { type: 'model/stl' },
+          )
+          updateQueue(q => q.map(item => item.id === id ? { ...item, stlFile, status: 'ready', name: stlFile.name } : item))
+          if (!currentItemIdRef.current) startNextSlice()
+        } else if (/\.obj$/i.test(f.name)) {
+          const buf = await f.arrayBuffer()
+          const trackingKey = `${id}_${f.name}`
+          pendingObjConversionsRef.current.set(trackingKey, id)
+          getWorker().postMessage({ type: 'OBJ_TO_STL', obj: buf, filename: trackingKey }, [buf])
+          // Stays 'converting' until OBJ_STL_COMPLETE
+        } else {
+          // STL — ready immediately
+          updateQueue(q => q.map(item => item.id === id ? { ...item, stlFile: f, status: 'ready' } : item))
+          if (!currentItemIdRef.current) startNextSlice()
+        }
+      } catch (err) {
+        updateQueue(q => q.map(item => item.id === id
+          ? { ...item, status: 'error', error: err instanceof Error ? err.message : String(err) }
+          : item))
+      }
+    }
+  }, [updateQueue, startNextSlice])
+
+  const removeItem = useCallback((id: string) => {
+    pendingObjConversionsRef.current.forEach((itemId, filename) => {
+      if (itemId === id) pendingObjConversionsRef.current.delete(filename)
+    })
+    updateQueue(q => q.filter(i => i.id !== id))
+  }, [updateQueue])
+
+  const handleSliceAll = useCallback(async () => {
+    if (currentItemIdRef.current) return  // already slicing
+    await startNextSlice()
+  }, [startNextSlice])
+
+  const handleSlicePlate = useCallback(async () => {
+    if (isSlicingPlateRef.current || wasmStatusRef.current !== 'ready') return
+    const readyItems = queueRef.current.filter(i => i.status === 'ready' && i.stlFile != null)
+    if (readyItems.length === 0) return
+
+    isSlicingPlateRef.current = true
+    setIsSlicingPlate(true)
+    setPlateError(null)
+    setPlateGcode(null)
+
+    try {
+      const stlBuffers = await Promise.all(readyItems.map(i => i.stlFile!.arrayBuffer()))
+      getWorker().postMessage({ type: 'SLICE_MULTI', stls: stlBuffers, config: configRef.current! }, stlBuffers)
+    } catch (err) {
+      isSlicingPlateRef.current = false
+      setIsSlicingPlate(false)
+      setPlateError(err instanceof Error ? err.message : String(err))
+    }
+  }, [])
+
+  // ── Settings helpers ──────────────────────────────────────────────────────────
 
   const handlePresetChange = (name: string) => {
     setSelectedPreset(name)
     setConfigOverrides({})
   }
 
-  const handleSlice = useCallback(async () => {
-    if (!file) return
-    let stlBuffer: ArrayBuffer
-    try {
-      stlBuffer = await file.arrayBuffer()
-    } catch (err) {
-      setSliceStatus({
-        phase: 'error',
-        message: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`,
-      })
-      return
-    }
+  // ── Derived state ─────────────────────────────────────────────────────────────
 
-    if (wasmStatus === 'ready') {
-      setSliceStatus({ phase: 'slicing' })
-      getWorker().postMessage(
-        { type: 'SLICE', stl: stlBuffer, config },
-        [stlBuffer],
-      )
-    } else if (wasmStatus === 'loading') {
-      setSliceStatus({ phase: 'loading-wasm' })
-      pendingSliceRef.current = { stl: stlBuffer, config }
-    } else if (wasmStatus === 'error') {
-      setSliceStatus({
-        phase: 'error',
-        message: `Slicer engine failed to load: ${getWasmError()}`,
-      })
-    }
-  }, [file, wasmStatus, config])
+  const readyForPlate = queue.filter(i => i.status === 'ready' && i.stlFile != null).length
+
+  const previewFile = useMemo(
+    () => queue.find(i => i.stlFile != null)?.stlFile ?? null,
+    [queue],
+  )
+  const hasAnyReady = queue.some(i => i.stlFile != null)
+  const readyCount = queue.filter(i => i.status === 'ready').length
+  const doneCount = queue.filter(i => i.status === 'done').length
+  const isSlicing = queue.some(i => i.status === 'slicing')
+  const isConverting = queue.some(i => i.status === 'converting')
+
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-orca-50 flex flex-col">
@@ -231,7 +362,7 @@ export default function App() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              disabled={tab.id !== 'upload' && !file}
+              disabled={tab.id !== 'upload' && !hasAnyReady}
               className={clsx(
                 'flex-1 py-2 rounded-lg text-sm font-medium transition-all',
                 activeTab === tab.id
@@ -244,20 +375,58 @@ export default function App() {
           ))}
         </nav>
 
+        {/* ── Upload tab ── */}
         {activeTab === 'upload' && (
           <div className="space-y-4">
-            <FileUpload file={file} onFile={handleFileSelect} />
-            {sliceStatus.phase === 'error' && !file && (
-              <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-                {sliceStatus.message}
+            <FileUpload loadedCount={queue.length} onFiles={handleFilesSelect} />
+
+            {queue.length > 0 && (
+              <div className="space-y-2">
+                {queue.map(item => (
+                  <div
+                    key={item.id}
+                    className="flex items-center gap-3 px-4 py-3 bg-white rounded-xl border border-slate-200"
+                  >
+                    <div className="w-8 h-8 shrink-0 flex items-center justify-center rounded-lg bg-slate-50">
+                      {item.status === 'converting' ? (
+                        <SpinnerIcon className="w-4 h-4 text-amber-500 animate-spin" />
+                      ) : item.status === 'error' ? (
+                        <ErrorDotIcon className="w-4 h-4 text-red-400" />
+                      ) : (
+                        <ModelIconSm className="w-4 h-4 text-orca-500" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{item.name}</p>
+                      {item.status === 'converting' && (
+                        <p className="text-xs text-amber-600">Converting…</p>
+                      )}
+                      {item.status === 'error' && (
+                        <p className="text-xs text-red-500 truncate">{item.error}</p>
+                      )}
+                      {(item.status === 'ready' || item.status === 'done') && item.originalSize > 0 && (
+                        <p className="text-xs text-slate-400">{formatBytes(item.originalSize)}</p>
+                      )}
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeItem(item.id) }}
+                      title="Remove"
+                      className="text-slate-300 hover:text-red-400 transition-colors p-1"
+                    >
+                      <XIcon className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
-            {file && (
-              <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white" style={{ height: 360 }}>
-                <ModelViewer file={file} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+
+            {previewFile && (
+              <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white" style={{ height: 300 }}>
+                <ModelViewer file={previewFile} bedX={bedX} bedY={bedY} bedShape={bedShape} />
               </div>
             )}
-            {file && (
+
+            {hasAnyReady && (
               <button
                 onClick={() => setActiveTab('settings')}
                 className="w-full py-3 rounded-xl bg-orca-500 hover:bg-orca-600 text-white font-semibold transition-colors"
@@ -265,17 +434,24 @@ export default function App() {
                 Continue to settings →
               </button>
             )}
+
+            {isConverting && !hasAnyReady && (
+              <p className="text-sm text-center text-slate-400">Converting files…</p>
+            )}
           </div>
         )}
 
-        {activeTab === 'settings' && file && (
+        {/* ── Settings tab ── */}
+        {activeTab === 'settings' && hasAnyReady && (
           <div className="grid sm:grid-cols-[1fr_1.4fr] gap-6">
-            <div
-              className="rounded-2xl overflow-hidden border border-slate-200 bg-white order-last sm:order-first"
-              style={{ height: 320 }}
-            >
-              <ModelViewer file={file} bedX={bedX} bedY={bedY} bedShape={bedShape} />
-            </div>
+            {previewFile && (
+              <div
+                className="rounded-2xl overflow-hidden border border-slate-200 bg-white order-last sm:order-first"
+                style={{ height: 320 }}
+              >
+                <ModelViewer file={previewFile} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+              </div>
+            )}
             <div className="bg-white rounded-2xl border border-slate-200 p-5 overflow-y-auto">
               <SettingsPanel
                 config={config}
@@ -297,37 +473,48 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === 'slice' && file && (
-          <div className={sliceStatus.phase === 'done' ? 'space-y-4' : 'max-w-md mx-auto space-y-4'}>
-            {sliceStatus.phase === 'done' ? (
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white" style={{ height: 420 }}>
-                  <div className="px-4 pt-3 pb-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">Model</div>
-                  <div style={{ height: 380 }}>
-                    <ModelViewer file={file} bedX={bedX} bedY={bedY} bedShape={bedShape} />
-                  </div>
-                </div>
-                <div className="rounded-2xl overflow-hidden border border-slate-800" style={{ height: 420 }}>
-                  <div className="px-4 pt-3 pb-1 text-xs font-semibold text-slate-400 uppercase tracking-wider bg-slate-900">G-code</div>
-                  <div style={{ height: 380 }}>
-                    <GcodeViewer gcode={sliceStatus.gcode} bedX={bedX} bedY={bedY} bedShape={bedShape} />
-                  </div>
-                </div>
-              </div>
-            ) : null}
-            <div className={sliceStatus.phase === 'done' ? 'grid sm:grid-cols-2 gap-4' : ''}>
-              <div className="bg-white rounded-2xl border border-slate-200 p-5">
-                <h2 className="font-semibold text-slate-800 mb-4">Slice summary</h2>
-                <ConfigSummary config={config} filename={file.name} />
-              </div>
-              <div className="bg-white rounded-2xl border border-slate-200 p-5">
-                <SlicePanel
-                  status={sliceStatus}
-                  wasmStatus={wasmStatus}
-                  onSlice={handleSlice}
-                  disabled={!file}
+        {/* ── Slice tab ── */}
+        {activeTab === 'slice' && queue.length > 0 && (
+          <div className="space-y-4">
+            <SliceHeader
+              readyCount={readyCount}
+              doneCount={doneCount}
+              totalCount={queue.length}
+              isSlicing={isSlicing}
+              wasmStatus={wasmStatus}
+              onSliceAll={handleSliceAll}
+              queue={queue}
+              readyForPlate={readyForPlate}
+              isSlicingPlate={isSlicingPlate}
+              onSlicePlate={handleSlicePlate}
+            />
+
+            {(plateGcode || isSlicingPlate || plateError) && (
+              <PlateResultCard
+                gcode={plateGcode}
+                isSlicing={isSlicingPlate}
+                error={plateError}
+                bedX={bedX}
+                bedY={bedY}
+                bedShape={bedShape}
+              />
+            )}
+
+            <div className="space-y-3">
+              {queue.map(item => (
+                <QueueItemCard
+                  key={item.id}
+                  item={item}
+                  bedX={bedX}
+                  bedY={bedY}
+                  bedShape={bedShape}
                 />
-              </div>
+              ))}
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 p-5">
+              <h2 className="font-semibold text-slate-800 mb-4">Slice settings</h2>
+              <ConfigSummary config={config} fileCount={queue.length} />
             </div>
           </div>
         )}
@@ -357,32 +544,332 @@ export default function App() {
   )
 }
 
-function WasmStatusBadge({ status }: { status: WasmStatus }) {
-  if (status === 'ready') return null // clean UI when ready
-  if (status === 'idle') return null
+// ── Slice header ──────────────────────────────────────────────────────────────
 
+function SliceHeader({
+  readyCount,
+  doneCount,
+  totalCount,
+  isSlicing,
+  wasmStatus,
+  onSliceAll,
+  queue,
+  readyForPlate,
+  isSlicingPlate,
+  onSlicePlate,
+}: {
+  readyCount: number
+  doneCount: number
+  totalCount: number
+  isSlicing: boolean
+  wasmStatus: WasmStatus
+  onSliceAll: () => void
+  queue: QueueItem[]
+  readyForPlate: number
+  isSlicingPlate: boolean
+  onSlicePlate: () => void
+}) {
+  const busyCount = queue.filter(i => i.status === 'slicing').length
+  const slicedCount = doneCount + busyCount
+  const allDone = totalCount > 0 && doneCount + queue.filter(i => i.status === 'error').length === totalCount
+  const canSlice = (readyCount > 0 || isSlicing) && !allDone
+  const canPlate = readyForPlate >= 2 && !isSlicingPlate && wasmStatus === 'ready'
+
+  const sliceLabel = isSlicing
+    ? `Slicing… (${slicedCount}/${totalCount})`
+    : readyCount > 0
+    ? `Slice${readyCount > 1 ? ' All' : ''} (${readyCount} file${readyCount !== 1 ? 's' : ''})`
+    : allDone
+    ? 'All files sliced'
+    : 'Slice'
+
+  return (
+    <div className="flex flex-wrap gap-3 items-center">
+      <button
+        onClick={onSliceAll}
+        disabled={!canSlice || isSlicing}
+        className={clsx(
+          'flex items-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm transition-all shadow-sm',
+          isSlicing
+            ? 'bg-orca-400 text-white cursor-wait'
+            : canSlice
+            ? 'bg-orca-500 hover:bg-orca-600 text-white'
+            : 'bg-slate-200 text-slate-400 cursor-not-allowed',
+        )}
+      >
+        {isSlicing ? <SpinnerIcon className="w-4 h-4 animate-spin" /> : <SliceIcon className="w-4 h-4" />}
+        {sliceLabel}
+      </button>
+
+      {readyForPlate >= 2 && (
+        <button
+          onClick={onSlicePlate}
+          disabled={!canPlate}
+          title="Arrange all files on one plate and slice together"
+          className={clsx(
+            'flex items-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm transition-all shadow-sm border',
+            isSlicingPlate
+              ? 'bg-orca-50 border-orca-300 text-orca-500 cursor-wait'
+              : canPlate
+              ? 'bg-white border-orca-300 text-orca-600 hover:bg-orca-50'
+              : 'bg-slate-50 border-slate-200 text-slate-400 cursor-not-allowed',
+          )}
+        >
+          {isSlicingPlate ? <SpinnerIcon className="w-4 h-4 animate-spin" /> : <PlateIcon className="w-4 h-4" />}
+          {isSlicingPlate ? 'Slicing plate…' : `One plate (${readyForPlate})`}
+        </button>
+      )}
+
+      {doneCount > 1 && (
+        <button
+          onClick={() => downloadAll(queue)}
+          className="flex items-center gap-2 px-4 py-3 rounded-xl font-semibold text-sm bg-green-600 hover:bg-green-700 text-white transition-colors"
+        >
+          <DownloadIcon className="w-4 h-4" />
+          Download All ({doneCount})
+        </button>
+      )}
+
+      {wasmStatus === 'loading' && readyCount === 0 && !isSlicing && (
+        <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+          Loading slicer engine…
+        </span>
+      )}
+
+      <p className="ml-auto text-xs text-slate-400 hidden sm:block">
+        All processing runs locally — your files never leave your device.
+      </p>
+    </div>
+  )
+}
+
+// ── Queue item card ───────────────────────────────────────────────────────────
+
+function QueueItemCard({
+  item,
+  bedX,
+  bedY,
+  bedShape,
+}: {
+  item: QueueItem
+  bedX: number
+  bedY: number
+  bedShape: 'rectangle' | 'circle'
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const printTime = item.gcode ? extractPrintTime(item.gcode) : undefined
+
+  return (
+    <div
+      className={clsx(
+        'bg-white rounded-2xl border transition-colors overflow-hidden',
+        item.status === 'done' ? 'border-green-200' : item.status === 'error' ? 'border-red-200' : 'border-slate-200',
+      )}
+    >
+      <div className="flex items-center gap-3 px-4 py-3">
+        {/* Status indicator */}
+        <div className="w-8 h-8 shrink-0 flex items-center justify-center rounded-lg">
+          {item.status === 'converting' && <SpinnerIcon className="w-5 h-5 text-amber-500 animate-spin" />}
+          {item.status === 'ready' && <ClockIcon className="w-5 h-5 text-slate-400" />}
+          {item.status === 'slicing' && <SpinnerIcon className="w-5 h-5 text-orca-500 animate-spin" />}
+          {item.status === 'done' && <CheckCircleIcon className="w-5 h-5 text-green-500" />}
+          {item.status === 'error' && <ErrorCircleIcon className="w-5 h-5 text-red-400" />}
+        </div>
+
+        {/* Name + status text */}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-slate-800 truncate">{item.name}</p>
+          <p className={clsx('text-xs', {
+            'text-amber-600': item.status === 'converting',
+            'text-slate-400': item.status === 'ready',
+            'text-orca-600': item.status === 'slicing',
+            'text-green-600': item.status === 'done',
+            'text-red-500': item.status === 'error',
+          })}>
+            {item.status === 'converting' && 'Converting…'}
+            {item.status === 'ready' && 'Ready to slice'}
+            {item.status === 'slicing' && <SlicingLabel />}
+            {item.status === 'done' && (printTime ? `Done · ${printTime}` : 'Done')}
+            {item.status === 'error' && (item.error ?? 'Error')}
+          </p>
+        </div>
+
+        {/* Actions */}
+        {item.status === 'done' && item.gcode && item.gcodeFilename && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setExpanded(e => !e)}
+              title="Preview G-code"
+              className="text-slate-300 hover:text-slate-600 transition-colors p-1"
+            >
+              <EyeIcon className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => downloadGcode(item.gcode!, item.gcodeFilename!)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors"
+            >
+              <DownloadIcon className="w-3.5 h-3.5" />
+              Download
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Expanded G-code viewer */}
+      {expanded && item.stlFile && item.gcode && (
+        <div className="border-t border-slate-100">
+          <div className="grid sm:grid-cols-2" style={{ height: 300 }}>
+            <div className="border-r border-slate-100">
+              <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Model</div>
+              <div style={{ height: 270 }}>
+                <ModelViewer file={item.stlFile} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+              </div>
+            </div>
+            <div className="bg-slate-900">
+              <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">G-code</div>
+              <div style={{ height: 270 }}>
+                <GcodeViewer gcode={item.gcode} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Plate result card ─────────────────────────────────────────────────────────
+
+function PlateResultCard({
+  gcode,
+  isSlicing,
+  error,
+  bedX,
+  bedY,
+  bedShape,
+}: {
+  gcode: string | null
+  isSlicing: boolean
+  error: string | null
+  bedX: number
+  bedY: number
+  bedShape: 'rectangle' | 'circle'
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const printTime = gcode ? extractPrintTime(gcode) : undefined
+
+  return (
+    <div
+      className={clsx(
+        'bg-white rounded-2xl border overflow-hidden',
+        isSlicing ? 'border-orca-200' : error ? 'border-red-200' : 'border-green-200',
+      )}
+    >
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="w-8 h-8 shrink-0 flex items-center justify-center rounded-lg bg-slate-50">
+          {isSlicing && <SpinnerIcon className="w-5 h-5 text-orca-500 animate-spin" />}
+          {!isSlicing && error && <ErrorCircleIcon className="w-5 h-5 text-red-400" />}
+          {!isSlicing && gcode && <CheckCircleIcon className="w-5 h-5 text-green-500" />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-slate-800">
+            Plate G-code
+          </p>
+          <p className={clsx('text-xs', {
+            'text-orca-600': isSlicing,
+            'text-red-500': !!error,
+            'text-green-600': !!gcode && !error,
+          })}>
+            {isSlicing && <SlicingLabel />}
+            {!isSlicing && error && error}
+            {!isSlicing && gcode && (printTime ? `Done · ${printTime}` : 'Done')}
+          </p>
+        </div>
+        {gcode && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setExpanded(e => !e)}
+              title="Preview G-code"
+              className="text-slate-300 hover:text-slate-600 transition-colors p-1"
+            >
+              <EyeIcon className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => downloadGcode(gcode, 'plate.gcode')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors"
+            >
+              <DownloadIcon className="w-3.5 h-3.5" />
+              Download
+            </button>
+          </div>
+        )}
+      </div>
+
+      {expanded && gcode && (
+        <div className="border-t border-slate-100 bg-slate-900" style={{ height: 300 }}>
+          <GcodeViewer gcode={gcode} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function extractPrintTime(gcode: string): string | undefined {
+  return gcode.match(/;\s*estimated printing time[^=]*=\s*(.+)/i)?.[1]?.trim()
+}
+
+function downloadGcode(gcode: string, filename: string) {
+  const blob = new Blob([gcode], { type: 'text/plain' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+function downloadAll(queue: QueueItem[]) {
+  const done = queue.filter(i => i.status === 'done' && i.gcode && i.gcodeFilename)
+  done.forEach((item, idx) => {
+    setTimeout(() => downloadGcode(item.gcode!, item.gcodeFilename!), idx * 100)
+  })
+}
+
+function SlicingLabel() {
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    const start = Date.now()
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 250)
+    return () => clearInterval(id)
+  }, [])
+  return <>Slicing… ({elapsed}s)</>
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function WasmStatusBadge({ status }: { status: WasmStatus }) {
+  if (status === 'ready' || status === 'idle') return null
   return (
     <div
       className={clsx(
         'flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full',
         status === 'loading' && 'bg-amber-50 text-amber-700',
-        status === 'error'   && 'bg-red-50 text-red-600',
+        status === 'error' && 'bg-red-50 text-red-600',
       )}
     >
       {status === 'loading' && (
         <>
-          <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-          </svg>
+          <SpinnerIcon className="w-3 h-3 animate-spin" />
           Loading engine…
         </>
       )}
       {status === 'error' && (
         <>
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-          </svg>
+          <ErrorDotIcon className="w-3 h-3" />
           Engine error
         </>
       )}
@@ -390,9 +877,9 @@ function WasmStatusBadge({ status }: { status: WasmStatus }) {
   )
 }
 
-function ConfigSummary({ config, filename }: { config: OrcaConfig; filename: string }) {
+function ConfigSummary({ config, fileCount }: { config: OrcaConfig; fileCount: number }) {
   const rows: [string, string][] = [
-    ['File', filename],
+    ['Files', `${fileCount} file${fileCount !== 1 ? 's' : ''}`],
     ['Printer', config.printer_model ?? 'Generic'],
     ['Material', config.filament_type ?? 'PLA'],
     ['Layer height', `${config.layer_height ?? 0.2} mm`],
@@ -413,6 +900,8 @@ function ConfigSummary({ config, filename }: { config: OrcaConfig; filename: str
   )
 }
 
+// ── Icons ─────────────────────────────────────────────────────────────────────
+
 function OrcaLogo({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 32 32" fill="none">
@@ -427,6 +916,99 @@ function GithubIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor">
       <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+    </svg>
+  )
+}
+
+function SpinnerIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+    </svg>
+  )
+}
+
+function PlateIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <rect x="3" y="3" width="8" height="8" rx="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="13" y="3" width="8" height="8" rx="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="3" y="13" width="8" height="8" rx="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M17 13v8m-4-4h8" />
+    </svg>
+  )
+}
+
+function SliceIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+    </svg>
+  )
+}
+
+function DownloadIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+    </svg>
+  )
+}
+
+function XIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  )
+}
+
+function ModelIconSm({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+    </svg>
+  )
+}
+
+function CheckCircleIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  )
+}
+
+function ErrorCircleIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+    </svg>
+  )
+}
+
+function ErrorDotIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+    </svg>
+  )
+}
+
+function ClockIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  )
+}
+
+function EyeIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
     </svg>
   )
 }
