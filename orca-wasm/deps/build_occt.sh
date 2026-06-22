@@ -44,15 +44,54 @@ if [[ ! -d "${OCCT_SRC_DIR}" ]]; then
   mv "${ORCA_WASM_DIR}/deps/OCCT-${OCCT_TAG}" "${OCCT_SRC_DIR}"
 fi
 
-# ── Configure ─────────────────────────────────────────────────────────────────
-echo "  [occt] configuring with Emscripten..."
-mkdir -p "${OCCT_SRC_DIR}/build-wasm"
+# ── Patch OCCT cmake for Emscripten cross-compilation ─────────────────────────
+# OCCT 7.8.x has no native Emscripten support. Its Linux cmake branch may
+# force BUILD_SHARED_LIBS=ON regardless of command-line flags, and it tries
+# to build ExpToCasExe (a host code-generator) via Emscripten — which fails
+# because its .so link deps cannot be resolved from the Emscripten sysroot.
+# The patches below:
+#   1. Guard ExpToCasExe behind CMAKE_CROSSCOMPILING so it is skipped;
+#      OCCT ships pre-generated Express schema .cxx files, so the tool is
+#      not needed during a standard build.
+#   2. Prevent any set(BUILD_SHARED_LIBS ON ... FORCE) from overriding our
+#      -DBUILD_SHARED_LIBS=OFF when cross-compiling.
+echo "  [occt] applying Emscripten cross-compilation patches..."
+python3 - "${OCCT_SRC_DIR}" <<'PYEOF'
+import re, pathlib, sys
 
-# Use the Emscripten CMake toolchain file directly instead of emcmake.
-# emcmake does not set CMAKE_SYSTEM_NAME=Emscripten, so OCCT's platform
-# detection sees "Linux" and builds shared libraries (.so) — which emscripten's
-# linker cannot resolve from its sysroot. The toolchain file sets
-# CMAKE_SYSTEM_NAME=Emscripten and forces BUILD_SHARED_LIBS=OFF globally.
+root = pathlib.Path(sys.argv[1])
+changes = 0
+
+def patch_file(p, patterns):
+    global changes
+    try:
+        text = p.read_text(errors='replace')
+        orig = text
+        for pat, repl in patterns:
+            text = re.sub(pat, repl, text, flags=re.MULTILINE | re.DOTALL)
+        if text != orig:
+            p.write_text(text)
+            print(f"  patched: {p.relative_to(root)}")
+            changes += 1
+    except Exception as e:
+        print(f"  skip {p}: {e}", file=sys.stderr)
+
+all_cmake = list(root.rglob('CMakeLists.txt')) + list(root.rglob('*.cmake'))
+
+for f in all_cmake:
+    patch_file(f, [
+        (
+            r'(?<!endif \()\b(add_subdirectory\s*\(\s*(?:"[^"]*"|\'[^\']*\'|[^)]*?)[Ee]xp[Tt]o[Cc]as[Ee]xe[^)]*\))',
+            r'if (NOT CMAKE_CROSSCOMPILING)\n  \1\nendif ()',
+        ),
+        (
+            r'(set\s*\(\s*BUILD_SHARED_LIBS\s+ON\b[^)]*FORCE[^)]*\))',
+            r'if (NOT CMAKE_CROSSCOMPILING)\n  \1\nendif ()',
+        ),
+    ])
+
+print(f"[occt-patch] {changes} file(s) modified")
+PYEOF
 cmake \
   -S "${OCCT_SRC_DIR}" \
   -B "${OCCT_SRC_DIR}/build-wasm" \
