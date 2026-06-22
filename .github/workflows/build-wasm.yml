@@ -25,10 +25,11 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 180  # deps ~60 min + main build ~60 min
+    timeout-minutes: 240  # deps ~100 min (incl. OCCT ~45 min) + main build ~60 min
 
     env:
       ORCA_VERSION: ${{ github.event.inputs.orca_version || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v2.3.2' }}
+      OCCT_VERSION: "7.8.1"
       EMSDK: /opt/emsdk
 
     steps:
@@ -71,7 +72,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: orca-wasm/deps-install
-          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-v14
+          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-occt-${{ env.OCCT_VERSION }}-v15
 
       # ── Boost ────────────────────────────────────────────────────────
       # Build Boost using b2 with the clang-emscripten toolset.  The standard
@@ -294,6 +295,64 @@ jobs:
           ls "${INSTALL}/lib/liblibnoise_static.a" && echo "  lib OK"
           touch "${STAMP}"
 
+      # ── OCCT 7.8.1 (STEP / IGES CAD kernel) ─────────────────────────────────
+      # Builds the minimal STEP+IGES+tessellation subset of OCCT for WASM.
+      # ~30-60 min first build; subsequent runs skip via stamp file.
+      - name: Build WASM deps — OCCT
+        run: |
+          source /opt/emsdk/emsdk_env.sh
+          OCCT_VERSION="7.8.1"
+          OCCT_TAG="V${OCCT_VERSION//./_}"
+          INSTALL="$(pwd)/orca-wasm/deps-install"
+          STAMP="${INSTALL}/.occt_built_${OCCT_TAG}"
+          [[ -f "${STAMP}" ]] && echo "[occt] stamp exists — skip" && exit 0
+
+          echo "[occt] downloading OCCT ${OCCT_VERSION}…"
+          mkdir -p /tmp/occt/occt-src
+          curl -fL --retry 3 \
+            "https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/${OCCT_TAG}.tar.gz" \
+            | tar xz -C /tmp/occt/occt-src --strip-components=1
+
+          echo "[occt] configuring with Emscripten…"
+          emcmake cmake \
+            -S /tmp/occt/occt-src \
+            -B /tmp/occt/build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${INSTALL}" \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_MODULE_Draw=OFF \
+            -DBUILD_MODULE_Visualization=OFF \
+            -DBUILD_MODULE_FoundationClasses=ON \
+            -DBUILD_MODULE_ModelingData=ON \
+            -DBUILD_MODULE_ModelingAlgorithms=ON \
+            -DBUILD_MODULE_DataExchange=ON \
+            -DBUILD_MODULE_ApplicationFramework=ON \
+            -DUSE_FREETYPE=OFF \
+            -DUSE_OPENGL2=OFF \
+            -DUSE_TCL=OFF \
+            -DUSE_TK=OFF \
+            -DUSE_FFMPEG=OFF \
+            -DUSE_FREEIMAGE=OFF \
+            -DUSE_RAPIDJSON=OFF \
+            -DUSE_DRACO=OFF \
+            -DUSE_VTK=OFF \
+            -DUSE_TBB=OFF \
+            "-DCMAKE_CXX_FLAGS=-O2 -fexceptions -Wno-deprecated-anon-enum-enum-conversion -Wno-unknown-warning-option" \
+            "-DCMAKE_C_FLAGS=-O2"
+
+          echo "[occt] building (first run ~30–60 min)…"
+          emmake cmake --build /tmp/occt/build -j"$(nproc)"
+
+          echo "[occt] installing to ${INSTALL}…"
+          cmake --install /tmp/occt/build
+
+          echo "[occt] verifying install…"
+          ls "${INSTALL}/lib/cmake/opencascade/OpenCASCADEConfig.cmake" \
+            && echo "  cmake config OK"
+          ls "${INSTALL}/lib/libTKernel.a" && echo "  TKernel.a OK"
+          touch "${STAMP}"
+
       # ── Emscripten ports — ZLIB / libpng / libjpeg ───────────────────────
       # Build emscripten's bundled ports so FindZLIB/FindPNG/FindJPEG can
       # reference their headers and .a files from the sysroot.
@@ -335,7 +394,8 @@ jobs:
             -DSLIC3R_WASM=ON \
             -DSLIC3R_GUI=OFF \
             -DSLIC3R_STATIC=ON \
-            -DSLIC3R_OPENCASCADE=OFF \
+            -DSLIC3R_OPENCASCADE=ON \
+            -DOCCT_WASM_DIR="${DEP_INSTALL}" \
             -DSLIC3R_OPENGL_IMGUI=OFF \
             -DTBB_SHIM_DIR="${WORK}/orca-wasm/wasm/shims" \
             -DORCA_WEB_BRIDGE_DIR="${WORK}/orca-wasm/bridge" \
@@ -349,7 +409,7 @@ jobs:
             -DCGAL_DIR="${DEP_INSTALL}/lib/cmake/CGAL" \
             -DNLOPT_LIBRARY="${DEP_INSTALL}/lib/libnlopt.a" \
             -DNLOPT_INCLUDE_DIR="${DEP_INSTALL}/include" \
-            "-DCMAKE_CXX_FLAGS=-I${WORK}/orca-wasm/wasm/shims -fexceptions -DBOOST_HAS_PTHREADS=1 -DBOOST_LOG_NO_THREADS=1 -DSLIC3R_WASM=1 -DSLIC3R_NO_OCCT=1 -DSLIC3R_NO_OPENVDB=1 -DSLIC3R_NO_OPENCV=1" \
+            "-DCMAKE_CXX_FLAGS=-I${WORK}/orca-wasm/wasm/shims -fexceptions -DBOOST_HAS_PTHREADS=1 -DBOOST_LOG_NO_THREADS=1 -DSLIC3R_WASM=1 -DSLIC3R_NO_OPENVDB=1 -DSLIC3R_NO_OPENCV=1" \
             "-DCMAKE_C_FLAGS=-I${WORK}/orca-wasm/wasm/shims"
 
       # ── Build WASM module ────────────────────────────────────────────

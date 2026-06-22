@@ -169,6 +169,35 @@ export function sliceMultiStl(
   return gcode
 }
 
+export function cadToStl(module: OrcaModule, cadData: Uint8Array, filename: string): Uint8Array {
+  const isIges = /\.(iges|igs)$/i.test(filename) ? 1 : 0
+
+  const cadPtr = module._malloc(cadData.length)
+  module.HEAPU8.set(cadData, cadPtr)
+
+  const outPtrPtr = module._malloc(4)
+  const outLenPtr = module._malloc(4)
+
+  try {
+    const result = module._orc_cad_to_stl(cadData.length === 0 ? 0 : cadPtr, cadData.length, isIges, outPtrPtr, outLenPtr)
+    if (result !== 0) {
+      throw new OrcaSliceError(result, wasmError(module, result))
+    }
+
+    const stlPtr = module.getValue(outPtrPtr, 'i32')
+    const stlLen = module.getValue(outLenPtr, 'i32')
+    try {
+      return module.HEAPU8.slice(stlPtr, stlPtr + stlLen)
+    } finally {
+      module._orc_free(stlPtr)
+    }
+  } finally {
+    module._free(cadPtr)
+    module._free(outPtrPtr)
+    module._free(outLenPtr)
+  }
+}
+
 export class OrcaSliceError extends Error {
   constructor(
     public readonly code: number,

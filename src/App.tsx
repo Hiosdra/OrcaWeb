@@ -7,7 +7,6 @@ import { GcodeViewer } from './components/GcodeViewer'
 import type { OrcaConfig, WorkerOutMessage } from './types'
 import { buildConfig } from './lib/profiles'
 import { parse3mf } from './lib/parse3mf'
-import { cadToStl } from './lib/step-converter'
 import { formatBytes } from './lib/format'
 import {
   getWorker,
@@ -64,6 +63,7 @@ export default function App() {
   const wasmStatusRef = useRef<WasmStatus>(getWasmStatus())
   const pendingFirstSliceRef = useRef<{ id: string; stl: ArrayBuffer; config: OrcaConfig } | null>(null)
   const pendingObjConversionsRef = useRef(new Map<string, string>())
+  const pendingCadConversionsRef = useRef(new Map<string, string>())
   const isSlicingPlateRef = useRef(false)
 
   const baseConfig = useMemo(
@@ -207,11 +207,29 @@ export default function App() {
           updateQueue(q => q.map(i => i.id === id ? { ...i, status: 'error', error: `OBJ conversion failed: ${msg.message}` } : i))
         }
       }
+
+      if (msg.type === 'CAD_STL_COMPLETE') {
+        const id = pendingCadConversionsRef.current.get(msg.filename)
+        if (id) {
+          pendingCadConversionsRef.current.delete(msg.filename)
+          const originalName = msg.filename.slice(id.length + 1)
+          const stlFile = new File([msg.stl], originalName.replace(/\.(step|stp|iges|igs)$/i, '.stl'), { type: 'model/stl' })
+          updateQueue(q => q.map(i => i.id === id ? { ...i, stlFile, status: 'ready', name: stlFile.name } : i))
+          if (!currentItemIdRef.current) startNextSlice()
+        }
+      }
+
+      if (msg.type === 'CAD_STL_ERROR') {
+        const id = pendingCadConversionsRef.current.get(msg.filename)
+        if (id) {
+          pendingCadConversionsRef.current.delete(msg.filename)
+          updateQueue(q => q.map(i => i.id === id ? { ...i, status: 'error', error: `CAD conversion failed: ${msg.message}` } : i))
+        }
+      }
     })
 
     return remove
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [updateQueue, startNextSlice])
 
   // ── File ingestion ────────────────────────────────────────────────────────────
 
@@ -246,14 +264,10 @@ export default function App() {
           if (!currentItemIdRef.current) startNextSlice()
         } else if (/\.(step|stp|iges|igs)$/i.test(f.name)) {
           const buf = await f.arrayBuffer()
-          const stlBytes = await cadToStl(f.name, buf)
-          const stlFile = new File(
-            [stlBytes],
-            f.name.replace(/\.(step|stp|iges|igs)$/i, '.stl'),
-            { type: 'model/stl' },
-          )
-          updateQueue(q => q.map(item => item.id === id ? { ...item, stlFile, status: 'ready', name: stlFile.name } : item))
-          if (!currentItemIdRef.current) startNextSlice()
+          const trackingKey = `${id}_${f.name}`
+          pendingCadConversionsRef.current.set(trackingKey, id)
+          getWorker().postMessage({ type: 'CAD_TO_STL', cad: buf, filename: trackingKey }, [buf])
+          // Stays 'converting' until CAD_STL_COMPLETE
         } else if (/\.obj$/i.test(f.name)) {
           const buf = await f.arrayBuffer()
           const trackingKey = `${id}_${f.name}`
@@ -276,6 +290,9 @@ export default function App() {
   const removeItem = useCallback((id: string) => {
     pendingObjConversionsRef.current.forEach((itemId, filename) => {
       if (itemId === id) pendingObjConversionsRef.current.delete(filename)
+    })
+    pendingCadConversionsRef.current.forEach((itemId, filename) => {
+      if (itemId === id) pendingCadConversionsRef.current.delete(filename)
     })
     updateQueue(q => q.filter(i => i.id !== id))
   }, [updateQueue])

@@ -2,11 +2,13 @@
  * OrcaWeb WASM bridge — clean-room implementation.
  *
  * Exports C-linkage symbols consumed by the JavaScript runtime:
- *   orc_init(json, len)                              → 0 = ok
- *   orc_slice(stl, stlLen, outPtr, outLen)           → 0 = ok
+ *   orc_init(json, len)                                  → 0 = ok
+ *   orc_slice(stl, stlLen, outPtr, outLen)               → 0 = ok
  *   orc_slice_multi(all, allLen, offsets, n, out, outLen) → 0 = ok
+ *   orc_obj_to_stl(obj, objLen, outPtr, outLen)          → 0 = ok
+ *   orc_cad_to_stl(cad, cadLen, isIges, outPtr, outLen)  → 0 = ok
  *   orc_free(ptr)
- *   orc_decode_exception(ptr)                        → null-terminated UTF-8 string
+ *   orc_decode_exception(ptr)                            → null-terminated UTF-8 string
  *
  * Error codes for orc_slice / orc_init:
  *   -1  invalid / uninitialized state
@@ -37,6 +39,7 @@
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Format/STL.hpp"
 #include "libslic3r/Format/OBJ.hpp"
+#include "libslic3r/Format/STEP.hpp"
 #include "libslic3r/GCode.hpp"
 #include "libslic3r/Exception.hpp"
 
@@ -458,7 +461,113 @@ int orc_slice_multi(
     }
 }
 
-/** Free a buffer returned by orc_slice or orc_obj_to_stl. */
+/**
+ * Convert a STEP or IGES file to binary STL using OrcaSlicer's OCCT reader.
+ *
+ * Arguments:
+ *   cad_data / cad_len  — raw CAD file bytes
+ *   is_iges             — 0 = STEP, 1 = IGES
+ *   out_stl / out_len   — on success: malloc'd binary STL buffer + byte length
+ *                         Caller must free with orc_free().
+ *
+ * Error codes (same conventions as orc_obj_to_stl):
+ *   -1  invalid arguments
+ *   -3  could not write CAD data to MEMFS
+ *   -4  STEP/IGES load failed (bad file / unsupported feature)
+ *   -5  file contains no printable geometry
+ *   -8  STL export failed
+ *   -9  unexpected C++ exception
+ */
+EMSCRIPTEN_KEEPALIVE
+int orc_cad_to_stl(const char* cad_data, int cad_len, int is_iges,
+                   char** out_stl, int* out_len) {
+    g_last_error.clear();
+    if (!cad_data || cad_len <= 0 || !out_stl || !out_len) return -1;
+
+    const char* tmp_in  = is_iges ? "/tmp/ow_in.iges" : "/tmp/ow_in.step";
+    const char* tmp_out = "/tmp/ow_cad_out.stl";
+
+    {
+        FILE* f = std::fopen(tmp_in, "wb");
+        if (!f) { record_error("cannot open CAD temp file for writing"); return -3; }
+        std::size_t written = std::fwrite(cad_data, 1, static_cast<std::size_t>(cad_len), f);
+        std::fclose(f);
+        if (written != static_cast<std::size_t>(cad_len)) {
+            std::remove(tmp_in);
+            record_error("failed to write complete CAD data to MEMFS");
+            return -3;
+        }
+    }
+
+    int status = -9;
+    try {
+        Slic3r::Model model;
+        bool is_cancel = false;
+        if (!Slic3r::load_step(tmp_in, &model, is_cancel)) {
+            record_error(is_iges ? "IGES load failed" : "STEP load failed");
+            status = -4;
+        } else if (model.objects.empty()) {
+            record_error("CAD file contains no geometry");
+            status = -5;
+        } else {
+            Slic3r::TriangleMesh combined;
+            for (auto* obj : model.objects)
+                for (auto* vol : obj->volumes)
+                    combined.merge(vol->mesh());
+
+            if (combined.facets_count() == 0) {
+                record_error("CAD file contains no printable geometry");
+                status = -5;
+            } else if (!Slic3r::store_stl(tmp_out, &combined, true)) {
+                record_error("STL export of CAD geometry failed");
+                status = -8;
+            } else {
+                FILE* sf = std::fopen(tmp_out, "rb");
+                if (!sf) {
+                    record_error("STL export produced no output");
+                    status = -8;
+                } else {
+                    std::fseek(sf, 0, SEEK_END);
+                    long sz = std::ftell(sf);
+                    std::rewind(sf);
+                    if (sz <= 0) {
+                        std::fclose(sf);
+                        record_error("STL export produced empty output");
+                        status = -8;
+                    } else {
+                        char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz)));
+                        if (!buf) {
+                            std::fclose(sf);
+                            record_error("out of memory");
+                            status = -9;
+                        } else {
+                            std::size_t nread = std::fread(buf, 1, static_cast<std::size_t>(sz), sf);
+                            std::fclose(sf);
+                            if (nread != static_cast<std::size_t>(sz)) {
+                                std::free(buf);
+                                record_error("STL read incomplete");
+                                status = -8;
+                            } else {
+                                *out_stl = buf;
+                                *out_len = static_cast<int>(sz);
+                                status = 0;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        record_error(e.what());
+        status = -9;
+    }
+
+    std::remove(tmp_in);
+    std::remove(tmp_out);
+    return status;
+}
+
+/** Free a buffer returned by orc_slice, orc_slice_multi, orc_obj_to_stl, or orc_cad_to_stl. */
 EMSCRIPTEN_KEEPALIVE
 void orc_free(void* ptr) {
     std::free(ptr);
