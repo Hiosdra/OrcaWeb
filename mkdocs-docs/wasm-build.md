@@ -17,8 +17,8 @@ The build produces two files (published to GitHub Release `wasm-v2.3.2`):
 
 | File | Size | Description |
 |------|------|-------------|
-| `slicer.wasm` | ~7.5 MB | Compiled OrcaSlicer v2.3.2 core |
-| `slicer.js` | ~1.5 MB | Emscripten glue code (CommonJS IIFE) |
+| `slicer.wasm` | ~29 MB | Compiled OrcaSlicer v2.3.2 core + OCCT (STEP engine) |
+| `slicer.js` | ~210 KB | Emscripten glue code (CommonJS IIFE) |
 
 There is no `slicer.data` — the headless flat-config slicer never reads `orca/resources` at runtime, so the 200 MB preload file was eliminated entirely.
 

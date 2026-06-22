@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - **Node.js 18+** — [nodejs.org](https://nodejs.org)
-- ~**20 MB** free disk space for WASM artifacts
+- ~**30 MB** free disk space for WASM artifacts
 
 ## Installation
 
@@ -32,8 +32,8 @@ This fetches two files into `public/wasm/`:
 
 | File | Size | Description |
 |------|------|-------------|
-| `slicer.js` | ~1.5 MB | Emscripten glue code |
-| `slicer.wasm` | ~16 MB | Compiled OrcaSlicer v2.3.2 + OCCT (STEP engine) |
+| `slicer.js` | ~210 KB | Emscripten glue code |
+| `slicer.wasm` | ~29 MB | Compiled OrcaSlicer v2.3.2 + OCCT (STEP engine) |
 
 Source: OrcaWeb GitHub Release [`wasm-v2.3.2`](https://github.com/Hiosdra/OrcaWeb/releases/tag/wasm-v2.3.2) (self-built via `orca-wasm/` pipeline).
 

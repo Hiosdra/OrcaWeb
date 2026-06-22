@@ -39,9 +39,9 @@ The React web UI is a temporary proof-of-concept to demonstrate the engine. It i
 │                      │ fetch                             │
 │   ┌──────────────────▼─────────────────────────────┐    │
 │   │  GitHub Releases: wasm-v2.3.2                  │    │
-│   │  ├── slicer.js    ~1.5 MB   Emscripten glue     │    │
-│   │  └── slicer.wasm  ~16 MB   OrcaSlicer v2.3.2   │    │
-│   │                   (incl. OCCT STEP/IGES engine) │    │
+│   │  ├── slicer.js    ~210 KB  Emscripten glue     │    │
+│   │  └── slicer.wasm  ~29 MB   OrcaSlicer v2.3.2   │    │
+│   │                   (incl. OCCT STEP engine)      │    │
 │   └────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -60,15 +60,15 @@ sequenceDiagram
     M->>S: preloadWasm()
     S->>W: new Worker(slicer.worker.ts)
     S->>W: postMessage(LOAD_WASM, url)
-    W->>R: fetch slicer.js  (~1.5 MB)
-    W->>R: fetch slicer.wasm (~7.5 MB) [parallel]
+    W->>R: fetch slicer.js  (~210 KB)
+    W->>R: fetch slicer.wasm (~29 MB) [parallel]
     W->>W: blob URL trick (add ES default export)
     W->>W: import(blobUrl) → factory({ wasmBinary })
     W->>S: postMessage(WASM_LOADED)
     S-->>M: listener → wasmStatus = 'ready'
 ```
 
-Total cold load: ~18 MB (down from ~152 MB with the old v2.3.1 + slicer.data engine). The increase over the original ~9 MB comes from OCCT being compiled directly into `slicer.wasm` — no separate download, no extra WASM file, no third-party dependency.
+Total cold load: ~29 MB (down from ~152 MB with the old v2.3.1 + slicer.data engine). The increase over the original ~9 MB comes from OCCT being compiled directly into `slicer.wasm` — no separate download, no extra WASM file, no third-party dependency.
 
 ## Blob URL trick
 
@@ -166,13 +166,13 @@ These replace OrcaSlicer `.cpp` (and some `.hpp`) files whose implementation dep
 | `Shape/TextShape.cpp` | 3D text extrusion | **FreeType** + **OCCT** | Empty no-op |
 
 !!! note "STEP support — in-engine OCCT"
-    OCCT (Open CASCADE Technology 7.8.1) is compiled directly into `slicer.wasm` via `deps/build_occt.sh`. The engine exposes `_orc_cad_to_stl()` which reads a STEP file from MEMFS via OrcaSlicer's `load_step()`, tessellates the BRep geometry, and returns binary STL bytes.
+    OCCT (Open CASCADE Technology 7.8.1) is compiled directly into `slicer.wasm` via `deps/build_occt.sh`. The engine exposes `_orc_cad_to_stl()` which reads a STEP file from MEMFS via OrcaSlicer's `Model::read_from_step()` (which runs `Step::load()` + `Step::mesh()` under the hood), tessellates the BRep geometry, and returns binary STL bytes.
 
     - **Browser**: `CAD_TO_STL` message is sent to the slicer worker; the worker calls `_orc_cad_to_stl()` and replies with `CAD_STL_COMPLETE { stl }`.
 
     No separate OCCT WASM download or third-party library is required.
 
-    **IGES is not supported** — OrcaSlicer's `load_step()` uses `STEPCAFControl_Reader` (STEP only), so `.iges`/`.igs` are not accepted by the UI.
+    **IGES is not supported** — OrcaSlicer's STEP reader (`STEPCAFControl_Reader`) does not read IGES, so `.iges`/`.igs` are not accepted by the UI.
 
 ### libnoise
 
@@ -266,7 +266,7 @@ File drop
     ```bash
     # GitHub Actions → Build WASM → Run workflow
     # Or: git tag v2.3.2-ow1 && git push --tags
-    # Produces: slicer.js (~1.5 MB) + slicer.wasm (~7.5 MB)
+    # Produces: slicer.js (~210 KB) + slicer.wasm (~29 MB)
     # Published as GitHub Release wasm-v2.3.2
     ```
 

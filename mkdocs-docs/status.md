@@ -15,7 +15,7 @@ Ostatnia aktualizacja: **2026-06-20** · wersja silnika: **OrcaSlicer v2.3.2** (
 | Drag & drop pliku STL | ASCII i binary STL; wiele plików naraz — kolejka sekwencyjna, każdy G-code do pobrania osobno |
 | Import pliku 3MF | Ekstrakcja siatki + profili OrcaSlicera z metadanych archiwum |
 | Import OBJ | Konwersja OBJ → STL przez natywny parser OrcaSlicer (`objparser.cpp` + `OBJ.cpp`) skompilowany w WASM — bez dodatkowych zależności; obsługuje trójkąty, quady, multi-obiekt |
-| Import STEP / IGES | Konwersja CAD → STL przez `occt-import-js` (OCCT 7.7 skompilowany do WASM); lazy-load ~8 MB przy pierwszym użyciu |
+| Import STEP | Konwersja STEP → STL przez OCCT 7.8.1 wkompilowane bezpośrednio w `slicer.wasm` (`Model::read_from_step`); bez osobnego pobierania. IGES nieobsługiwane (czytnik STEP OrcaSlicera nie obsługuje IGES) |
 | Podgląd 3D modelu (Three.js) | Model na wirtualnym stole drukarskim w skali mm, OrbitControls |
 | Siatka stołu — dynamiczny rozmiar | Rozmiar stołu pobierany z presetu drukarki lub profilu maszyny |
 | Kształt stołu (`bed_shape`) | Prostokątny lub okrągły (np. Bambu Lab P1S); wizualizacja w podglądzie 3D i G-code |
@@ -81,7 +81,7 @@ Ostatnia aktualizacja: **2026-06-20** · wersja silnika: **OrcaSlicer v2.3.2** (
 |--------|--------|
 | GitHub Actions CI (deploy.yml) | ✅ buduje i deployuje na każdy push do `master` |
 | Serwowanie WASM z tej samej origin | ✅ brak CORS — pliki w `gh-pages/app/wasm/` |
-| Release WASM `wasm-v2.3.2` | ✅ `slicer.js` + `slicer.wasm` (~9 MB łącznie) |
+| Release WASM `wasm-v2.3.2` | ✅ `slicer.js` + `slicer.wasm` (~29 MB łącznie, z OCCT STEP) |
 | Deploy resilience | ✅ fallback na poprzedni `gh-pages` gdy release nie istnieje |
 | CI build na PRach (ścieżki orca-wasm/) | ✅ każdy PR dotykający silnika uruchamia ~12 min build |
 | Strona promująca (landing) | ✅ `hiosdra.github.io/OrcaWeb/` |
@@ -145,7 +145,7 @@ v0.3  ── ✅ Własny build WASM v2.3.2 (bez slicer.data)
       ── ✅ Licznik czasu slicowania (PR #15)
       ── ✅ Kolorowanie G-code wg typu ruchu, travel moves, grube linie 3D (PR #16)
       ── ✅ PWA / Service Worker — pre-cache WASM przy pierwszej wizycie
-      ── ✅ Import STEP / IGES (occt-import-js, PR #19)
+      ── ✅ Import STEP (OCCT 7.8.1 wkompilowane w silnik, `Model::read_from_step`; zastępuje occt-import-js z PR #19)
 
 v0.4  ── ✅ Import OBJ (natywny parser OrcaSlicer w WASM, `orc_obj_to_stl`)
       ── ✅ bed_shape — okrągły stół (P1S) wizualizowany w podglądzie 3D i G-code
@@ -162,7 +162,7 @@ v0.4  ── ✅ Import OBJ (natywny parser OrcaSlicer w WASM, `orc_obj_to_stl`)
 src/
 ├── App.tsx                ✅ kolejka wieloplikowa + tryb "one plate"; WASM orchestration, 3MF loading
 ├── components/
-│   ├── FileUpload.tsx     ✅ drag & drop multi-file, STL + 3MF + OBJ + STEP/IGES, kolejka sekwencyjna
+│   ├── FileUpload.tsx     ✅ drag & drop multi-file, STL + 3MF + OBJ + STEP, kolejka sekwencyjna
 │   ├── ModelViewer.tsx    ✅ Three.js, STLLoader, dynamiczny rozmiar stołu, okrągły stół (bed_shape)
 │   ├── GcodeViewer.tsx    ✅ toolpaths, layer slider, feature-type colors, travel moves, grube linie 3D, okrągły stół
 │   ├── SettingsPanel.tsx  ✅ presety, import profili — passthrough wszystkich pól OrcaSlicera
@@ -170,8 +170,7 @@ src/
 ├── lib/
 │   ├── profiles.ts        ✅ presety z rozmiarami + kształtem stołu, 30+ pól + passthrough wszystkich pozostałych
 │   ├── parse3mf.ts        ✅ 3MF → binary STL + OrcaConfig
-│   ├── step-converter.ts  ✅ STEP/IGES → binary STL (occt-import-js, lazy WASM)
-│   ├── wasm-loader.ts     ✅ orc_init / orc_slice / orc_slice_multi / orc_obj_to_stl / error codes
+│   ├── wasm-loader.ts     ✅ orc_init / orc_slice / orc_slice_multi / orc_obj_to_stl / orc_cad_to_stl (STEP) / error codes
 │   └── worker-singleton.ts ✅ singleton, preload WASM
 ├── workers/
 │   └── slicer.worker.ts   ✅ WASM load + SLICE + SLICE_MULTI + OBJ_TO_STL
