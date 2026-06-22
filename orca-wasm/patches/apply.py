@@ -159,6 +159,19 @@ patch("src/libslic3r/CMakeLists.txt", [
     # handles both native and WASM installs via OCCT_WASM_DIR.
     # (The two guard patterns that previously wrapped find_package and OCCT_LIBS
     # with if(NOT SLIC3R_WASM) have been removed.)
+    #
+    # OCCT 7.8 consolidated the STEP DataExchange toolkits — TKXDESTEP, TKSTEP,
+    # TKSTEP209, TKSTEPAttr and TKSTEPBase were all merged into a single
+    # TKDESTEP. OrcaSlicer v2.3.2's OCCT_LIBS still lists the old 7.7 names, so
+    # against our OCCT 7.8.1 the link fails with "unable to find library
+    # -lTKSTEP" (these are not imported targets, so they fall back to bare -l).
+    # Collapse the five obsolete entries to TKDESTEP (an imported target that
+    # pulls its transitive deps by full path).
+    (
+        r'TKXDESTEP\s+TKSTEP\s+TKSTEP209\s+TKSTEPAttr\s+TKSTEPBase',
+        r'TKDESTEP',
+        1,
+    ),
     # Wrap OpenCV link
     (
         r'(opencv_world)',

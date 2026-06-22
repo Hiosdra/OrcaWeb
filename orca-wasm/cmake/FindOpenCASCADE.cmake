@@ -80,10 +80,7 @@ if(OpenCASCADE_FOUND)
     TKOffset
     TKMesh
     TKXSBase
-    TKSTEP
-    TKSTEP209
-    TKSTEPAttr
-    TKSTEPBase
+    TKDESTEP
     TKLCAF
     TKXCAF
   )
