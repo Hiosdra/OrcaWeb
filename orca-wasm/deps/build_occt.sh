@@ -50,8 +50,14 @@ mkdir -p "${OCCT_SRC_DIR}/build-wasm"
 # Use the Emscripten CMake toolchain file directly instead of emcmake.
 # emcmake does not set CMAKE_SYSTEM_NAME=Emscripten, so OCCT's platform
 # detection sees "Linux" and builds shared libraries (.so) — which emscripten's
-# linker cannot resolve from its sysroot. The toolchain file sets
-# CMAKE_SYSTEM_NAME=Emscripten and forces BUILD_SHARED_LIBS=OFF globally.
+# linker cannot resolve from its sysroot.
+#
+# OCCT does NOT honour the standard BUILD_SHARED_LIBS flag — it selects the
+# library type via its own cache variable BUILD_LIBRARY_TYPE (default "Shared").
+# We must set BUILD_LIBRARY_TYPE=Static, otherwise OCCT builds .so files and the
+# link of build tools like ExpToCasExe fails with "shared library dependency not
+# found in library path: libTKernel.so". BUILD_SHARED_LIBS=OFF is kept for any
+# non-OCCT add_library() calls.
 cmake \
   -S "${OCCT_SRC_DIR}" \
   -B "${OCCT_SRC_DIR}/build-wasm" \
@@ -59,6 +65,7 @@ cmake \
   -DCMAKE_TOOLCHAIN_FILE="${EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="${OCCT_INSTALL_DIR}" \
+  -DBUILD_LIBRARY_TYPE=Static \
   -DBUILD_SHARED_LIBS=OFF \
   -DCMAKE_CROSSCOMPILING_EMULATOR="node" \
   \

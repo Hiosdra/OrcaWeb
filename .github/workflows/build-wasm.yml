@@ -320,6 +320,7 @@ jobs:
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="${INSTALL}" \
+            -DBUILD_LIBRARY_TYPE=Static \
             -DBUILD_SHARED_LIBS=OFF \
             -DBUILD_MODULE_Draw=OFF \
             -DBUILD_MODULE_Visualization=OFF \
