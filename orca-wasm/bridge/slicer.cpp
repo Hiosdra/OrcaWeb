@@ -504,11 +504,27 @@ int orc_cad_to_stl(const char* cad_data, int cad_len,
     int status = -9;
     try {
         Slic3r::Model model;
-        bool is_cancel = false;
-        if (!Slic3r::load_step(tmp_in, &model, is_cancel)) {
-            record_error("STEP load failed");
-            status = -4;
-        } else if (model.objects.empty()) {
+        try {
+            // OrcaSlicer has no free load_step(); read_from_step is the real
+            // entry point (it runs Step::load + Step::mesh under the hood and
+            // throws Slic3r::RuntimeError on load/mesh failure).
+            model = Slic3r::Model::read_from_step(
+                tmp_in,
+                Slic3r::LoadStrategy::AddDefaultInstances,
+                nullptr,   // ImportStepProgressFn — progress callback
+                nullptr,   // StepIsUtf8Fn — encoding probe
+                nullptr,   // per-shape mesh callback
+                0.003,     // linear deflection  (OrcaSlicer default)
+                0.5,       // angular deflection (OrcaSlicer default)
+                false);    // split compound
+        } catch (const std::exception& e) {
+            record_error(std::string("STEP load failed: ") + e.what());
+            std::remove(tmp_in);
+            std::remove(tmp_out);
+            return -4;
+        }
+
+        if (model.objects.empty()) {
             record_error("STEP file contains no geometry");
             status = -5;
         } else {
