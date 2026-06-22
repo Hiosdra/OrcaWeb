@@ -314,13 +314,22 @@ jobs:
             | tar xz -C /tmp/occt/occt-src --strip-components=1
 
           echo "[occt] configuring with Emscripten…"
-          emcmake cmake \
+          # Use the toolchain file directly instead of emcmake.
+          # emcmake does NOT set CMAKE_SYSTEM_NAME=Emscripten, so OCCT's
+          # platform-detection code sees "Linux" and overrides BUILD_SHARED_LIBS
+          # to ON, producing .so files that Emscripten's linker cannot resolve
+          # when linking OCCT's internal tools (e.g. ExpToCasExe).
+          # The toolchain file sets CMAKE_SYSTEM_NAME=Emscripten which causes
+          # OCCT to respect BUILD_SHARED_LIBS=OFF and produce .a static libs.
+          cmake \
             -S /tmp/occt/occt-src \
             -B /tmp/occt/build \
             -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="${EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="${INSTALL}" \
             -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_CROSSCOMPILING_EMULATOR="node" \
             -DBUILD_MODULE_Draw=OFF \
             -DBUILD_MODULE_Visualization=OFF \
             -DBUILD_MODULE_FoundationClasses=ON \
@@ -342,7 +351,7 @@ jobs:
             "-DCMAKE_C_FLAGS=-O2"
 
           echo "[occt] building (first run ~30–60 min)…"
-          emmake cmake --build /tmp/occt/build -j"$(nproc)"
+          cmake --build /tmp/occt/build -j"$(nproc)"
 
           echo "[occt] installing to ${INSTALL}…"
           cmake --install /tmp/occt/build
