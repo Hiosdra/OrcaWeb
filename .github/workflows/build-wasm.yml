@@ -313,6 +313,22 @@ jobs:
             "https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/${OCCT_TAG}.tar.gz" \
             | tar xz -C /tmp/occt/occt-src --strip-components=1
 
+          echo "[occt] excluding ExpToCasExe host tool…"
+          # ExpToCasExe is a developer-only code generator (regenerates STEP
+          # EXPRESS schema sources, which OCCT already ships pre-generated).
+          # Under Emscripten its versioned executable output (ExpToCasExe.js-7.8.1)
+          # breaks OCCT's install rule, which looks for "ExpToCasExe.wasm".
+          # We don't need it, so drop it from BUILD_TOOLKITS before configure.
+          python3 - <<'PYEOF'
+          import pathlib
+          p = pathlib.Path('/tmp/occt/occt-src/CMakeLists.txt')
+          t = p.read_text()
+          anchor = 'set (BUILD_TOOLKITS ${RAW_BUILD_TOOLKITS})'
+          assert anchor in t, 'OCCT BUILD_TOOLKITS anchor not found — OCCT layout changed'
+          p.write_text(t.replace(anchor, anchor + '\nlist (REMOVE_ITEM BUILD_TOOLKITS ExpToCasExe)', 1))
+          print('[occt-patch] excluded ExpToCasExe from BUILD_TOOLKITS')
+          PYEOF
+
           echo "[occt] configuring with Emscripten…"
           # OCCT ignores the standard BUILD_SHARED_LIBS flag — it selects the
           # library type from its own BUILD_LIBRARY_TYPE cache variable, which

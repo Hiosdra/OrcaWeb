@@ -44,6 +44,22 @@ if [[ ! -d "${OCCT_SRC_DIR}" ]]; then
   mv "${ORCA_WASM_DIR}/deps/OCCT-${OCCT_TAG}" "${OCCT_SRC_DIR}"
 fi
 
+# ── Exclude ExpToCasExe host tool ─────────────────────────────────────────────
+# ExpToCasExe is a developer-only code generator (regenerates STEP EXPRESS schema
+# sources, which OCCT already ships pre-generated). Under Emscripten its versioned
+# executable output (ExpToCasExe.js-7.8.1) breaks OCCT's install rule, which looks
+# for "ExpToCasExe.wasm". Drop it from BUILD_TOOLKITS before configure.
+echo "  [occt] excluding ExpToCasExe host tool..."
+python3 - "${OCCT_SRC_DIR}/CMakeLists.txt" <<'PYEOF'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+anchor = 'set (BUILD_TOOLKITS ${RAW_BUILD_TOOLKITS})'
+assert anchor in t, 'OCCT BUILD_TOOLKITS anchor not found — OCCT layout changed'
+p.write_text(t.replace(anchor, anchor + '\nlist (REMOVE_ITEM BUILD_TOOLKITS ExpToCasExe)', 1))
+print('  [occt-patch] excluded ExpToCasExe from BUILD_TOOLKITS')
+PYEOF
+
 # ── Configure ─────────────────────────────────────────────────────────────────
 # OCCT ignores the standard BUILD_SHARED_LIBS flag — it selects the library type
 # from its own BUILD_LIBRARY_TYPE cache variable, which defaults to "Shared" and
