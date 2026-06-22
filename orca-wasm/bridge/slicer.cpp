@@ -6,7 +6,7 @@
  *   orc_slice(stl, stlLen, outPtr, outLen)               → 0 = ok
  *   orc_slice_multi(all, allLen, offsets, n, out, outLen) → 0 = ok
  *   orc_obj_to_stl(obj, objLen, outPtr, outLen)          → 0 = ok
- *   orc_cad_to_stl(cad, cadLen, isIges, outPtr, outLen)  → 0 = ok
+ *   orc_cad_to_stl(cad, cadLen, outPtr, outLen)          → 0 = ok (STEP)
  *   orc_free(ptr)
  *   orc_decode_exception(ptr)                            → null-terminated UTF-8 string
  *
@@ -462,29 +462,31 @@ int orc_slice_multi(
 }
 
 /**
- * Convert a STEP or IGES file to binary STL using OrcaSlicer's OCCT reader.
+ * Convert a STEP file to binary STL using OrcaSlicer's OCCT reader.
+ *
+ * Only STEP is supported: OrcaSlicer's load_step() uses STEPCAFControl_Reader,
+ * which does not read IGES.  (.iges/.igs are not routed here by the frontend.)
  *
  * Arguments:
- *   cad_data / cad_len  — raw CAD file bytes
- *   is_iges             — 0 = STEP, 1 = IGES
+ *   cad_data / cad_len  — raw STEP file bytes
  *   out_stl / out_len   — on success: malloc'd binary STL buffer + byte length
  *                         Caller must free with orc_free().
  *
  * Error codes (same conventions as orc_obj_to_stl):
  *   -1  invalid arguments
- *   -3  could not write CAD data to MEMFS
- *   -4  STEP/IGES load failed (bad file / unsupported feature)
+ *   -3  could not write STEP data to MEMFS
+ *   -4  STEP load failed (bad file / unsupported feature)
  *   -5  file contains no printable geometry
  *   -8  STL export failed
  *   -9  unexpected C++ exception
  */
 EMSCRIPTEN_KEEPALIVE
-int orc_cad_to_stl(const char* cad_data, int cad_len, int is_iges,
+int orc_cad_to_stl(const char* cad_data, int cad_len,
                    char** out_stl, int* out_len) {
     g_last_error.clear();
     if (!cad_data || cad_len <= 0 || !out_stl || !out_len) return -1;
 
-    const char* tmp_in  = is_iges ? "/tmp/ow_in.iges" : "/tmp/ow_in.step";
+    const char* tmp_in  = "/tmp/ow_in.step";
     const char* tmp_out = "/tmp/ow_cad_out.stl";
 
     {
@@ -504,10 +506,10 @@ int orc_cad_to_stl(const char* cad_data, int cad_len, int is_iges,
         Slic3r::Model model;
         bool is_cancel = false;
         if (!Slic3r::load_step(tmp_in, &model, is_cancel)) {
-            record_error(is_iges ? "IGES load failed" : "STEP load failed");
+            record_error("STEP load failed");
             status = -4;
         } else if (model.objects.empty()) {
-            record_error("CAD file contains no geometry");
+            record_error("STEP file contains no geometry");
             status = -5;
         } else {
             Slic3r::TriangleMesh combined;

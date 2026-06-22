@@ -154,7 +154,6 @@ export interface OrcaModule {
   _orc_cad_to_stl(
     cadPtr: number,
     cadLen: number,
-    isIges: number,
     outputPtrPtr: number,
     outputLenPtr: number,
   ): number

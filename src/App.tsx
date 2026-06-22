@@ -155,7 +155,7 @@ export default function App() {
         currentItemIdRef.current = null
         if (id) {
           const item = queueRef.current.find(i => i.id === id)
-          const gcodeFilename = item?.name.replace(/\.(stl|3mf|obj|step|stp|iges|igs)$/i, '.gcode') ?? 'output.gcode'
+          const gcodeFilename = item?.name.replace(/\.(stl|3mf|obj|step|stp)$/i, '.gcode') ?? 'output.gcode'
           updateQueue(q => q.map(i => i.id === id ? { ...i, status: 'done', gcode: msg.gcode, gcodeFilename } : i))
         }
         // Slice next item in queue
@@ -213,7 +213,7 @@ export default function App() {
         if (id) {
           pendingCadConversionsRef.current.delete(msg.filename)
           const originalName = msg.filename.slice(id.length + 1)
-          const stlFile = new File([msg.stl], originalName.replace(/\.(step|stp|iges|igs)$/i, '.stl'), { type: 'model/stl' })
+          const stlFile = new File([msg.stl], originalName.replace(/\.(step|stp)$/i, '.stl'), { type: 'model/stl' })
           updateQueue(q => q.map(i => i.id === id ? { ...i, stlFile, status: 'ready', name: stlFile.name } : i))
           if (!currentItemIdRef.current) startNextSlice()
         }
@@ -262,7 +262,7 @@ export default function App() {
           )
           updateQueue(q => q.map(item => item.id === id ? { ...item, stlFile, status: 'ready', name: stlFile.name } : item))
           if (!currentItemIdRef.current) startNextSlice()
-        } else if (/\.(step|stp|iges|igs)$/i.test(f.name)) {
+        } else if (/\.(step|stp)$/i.test(f.name)) {
           const buf = await f.arrayBuffer()
           const trackingKey = `${id}_${f.name}`
           pendingCadConversionsRef.current.set(trackingKey, id)

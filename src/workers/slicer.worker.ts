@@ -179,7 +179,7 @@ function doSliceMulti(stls: ArrayBuffer[], config: Record<string, unknown>) {
 function doCadToStl(cad: ArrayBuffer, filename: string) {
   if (!orcaModule) return
   try {
-    const stl = cadToStl(orcaModule, new Uint8Array(cad), filename)
+    const stl = cadToStl(orcaModule, new Uint8Array(cad))
     const stlBuffer = stl.buffer as ArrayBuffer
     self.postMessage({ type: 'CAD_STL_COMPLETE', stl: stlBuffer, filename }, [stlBuffer])
   } catch (err) {

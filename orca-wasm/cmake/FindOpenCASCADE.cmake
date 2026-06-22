@@ -55,8 +55,9 @@ else()
 endif()
 
 # ── Define OCCT_LIBS — the toolkit list libslic3r links against ───────────────
-# This is the union of all toolkits required by Format/STEP.cpp (STEP + IGES
-# import) and the BRep meshing layer.  Matches what occt-import-js bundles.
+# The toolkits required by Format/STEP.cpp (STEP import via STEPCAFControl_Reader)
+# and the BRep meshing layer.  IGES is not built/linked: OrcaSlicer's load_step()
+# is STEP-only, so the IGES toolkit would be dead weight.
 if(OpenCASCADE_FOUND)
   set(OCCT_LIBS
     TKernel
@@ -79,7 +80,6 @@ if(OpenCASCADE_FOUND)
     TKSTEP209
     TKSTEPAttr
     TKSTEPBase
-    TKIGES
     TKLCAF
     TKXCAF
   )

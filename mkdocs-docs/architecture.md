@@ -34,7 +34,7 @@ The React web UI is a temporary proof-of-concept to demonstrate the engine. It i
 │   │      ├── _orc_slice(stl) → gcode string        │    │
 │   │      ├── _orc_slice_multi(stls) → gcode string │    │
 │   │      ├── _orc_obj_to_stl(obj) → stl bytes      │    │
-│   │      └── _orc_cad_to_stl(step/iges) → stl      │    │
+│   │      └── _orc_cad_to_stl(step) → stl bytes     │    │
 │   └──────────────────┬─────────────────────────────┘    │
 │                      │ fetch                             │
 │   ┌──────────────────▼─────────────────────────────┐    │
@@ -159,18 +159,20 @@ These replace OrcaSlicer `.cpp` (and some `.hpp`) files whose implementation dep
 | Override file | Replaces | Missing library | What the stub does |
 |--------------|----------|-----------------|--------------------|
 | `Format/DRC.cpp` | Draco mesh import | **Draco** | Empty no-op |
-| `Format/svg.cpp` | SVG export | **OCCT** | Empty no-op |
+| `Format/svg.cpp` | SVG export | **OCCT** | Empty no-op (SVG export feature unused; not wired to the in-engine OCCT) |
 | `OpenVDBUtils.cpp` + `OpenVDBUtils.hpp` | VDB volume operations used by FDM infill | **OpenVDB** | Empty header; empty `.cpp` |
 | `SLA/Hollowing.cpp` | SLA model hollowing | **OpenVDB** | Empty no-op (SLA not used) |
 | `ObjColorUtils.cpp` + `ObjColorUtils.hpp` | OBJ colour calibration | **OpenCV** | Empty header; empty `.cpp` |
 | `Shape/TextShape.cpp` | 3D text extrusion | **FreeType** + **OCCT** | Empty no-op |
 
-!!! note "STEP/IGES support — in-engine OCCT"
-    OCCT (Open CASCADE Technology 7.8.1) is compiled directly into `slicer.wasm` via `deps/build_occt.sh`. The engine exposes `_orc_cad_to_stl()` which reads STEP or IGES from MEMFS, tessellates the BRep geometry, and returns binary STL bytes.
+!!! note "STEP support — in-engine OCCT"
+    OCCT (Open CASCADE Technology 7.8.1) is compiled directly into `slicer.wasm` via `deps/build_occt.sh`. The engine exposes `_orc_cad_to_stl()` which reads a STEP file from MEMFS via OrcaSlicer's `load_step()`, tessellates the BRep geometry, and returns binary STL bytes.
 
     - **Browser**: `CAD_TO_STL` message is sent to the slicer worker; the worker calls `_orc_cad_to_stl()` and replies with `CAD_STL_COMPLETE { stl }`.
 
     No separate OCCT WASM download or third-party library is required.
+
+    **IGES is not supported** — OrcaSlicer's `load_step()` uses `STEPCAFControl_Reader` (STEP only), so `.iges`/`.igs` are not accepted by the UI.
 
 ### libnoise
 
@@ -203,7 +205,7 @@ File drop
   │                       │
   │               ModelViewer (Three.js STLLoader)
   │
-  ├─ .step / .iges ─► worker.postMessage(CAD_TO_STL, cad bytes)
+  ├─ .step / .stp ──► worker.postMessage(CAD_TO_STL, cad bytes)
   │                       │
   │               [worker] _orc_cad_to_stl() [OCCT in-engine]
   │                       │

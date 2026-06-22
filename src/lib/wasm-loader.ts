@@ -169,12 +169,10 @@ export function sliceMultiStl(
   return gcode
 }
 
-export function cadToStl(module: OrcaModule, cadData: Uint8Array, filename: string): Uint8Array {
+export function cadToStl(module: OrcaModule, cadData: Uint8Array): Uint8Array {
   if (cadData.length === 0) {
     throw new Error('CAD data is empty')
   }
-
-  const isIges = /\.(iges|igs)$/i.test(filename) ? 1 : 0
 
   const cadPtr = module._malloc(cadData.length)
   module.HEAPU8.set(cadData, cadPtr)
@@ -183,7 +181,7 @@ export function cadToStl(module: OrcaModule, cadData: Uint8Array, filename: stri
   const outLenPtr = module._malloc(4)
 
   try {
-    const result = module._orc_cad_to_stl(cadPtr, cadData.length, isIges, outPtrPtr, outLenPtr)
+    const result = module._orc_cad_to_stl(cadPtr, cadData.length, outPtrPtr, outLenPtr)
     if (result !== 0) {
       throw new OrcaSliceError(result, wasmError(module, result))
     }
