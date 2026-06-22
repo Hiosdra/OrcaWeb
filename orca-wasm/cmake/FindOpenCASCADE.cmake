@@ -23,34 +23,38 @@ else()
 endif()
 
 # ── Find via CMake config (works for both WASM install and native package) ────
+# NB: the package name MUST be the CamelCase "OpenCASCADE" — OCCT installs its
+# config as OpenCASCADEConfig.cmake, and find_package is case-sensitive about the
+# config filename on Linux.  `opencascade` (lowercase) would look for
+# opencascadeConfig.cmake / opencascade-config.cmake and silently miss it.
+# The CONFIG keyword forces config mode, so this does NOT recurse into this
+# Find-module.  (The install directory stays lowercase: lib/cmake/opencascade.)
 if(_occt_prefix)
-  find_package(opencascade CONFIG
+  find_package(OpenCASCADE CONFIG
     PATHS "${_occt_prefix}/lib/cmake/opencascade"
     NO_DEFAULT_PATH
     QUIET)
 
-  if(opencascade_FOUND)
-    set(OpenCASCADE_FOUND TRUE)
+  if(OpenCASCADE_FOUND)
     # OCCT installs headers under $prefix/include/opencascade/
     set(OpenCASCADE_INCLUDE_DIR "${_occt_prefix}/include/opencascade")
-    message(STATUS "Found OCCT ${opencascade_VERSION} (WASM) at ${_occt_prefix}")
+    message(STATUS "Found OCCT ${OpenCASCADE_VERSION} (WASM) at ${_occt_prefix}")
   else()
     message(FATAL_ERROR
-      "OCCT_WASM_DIR is set to '${_occt_prefix}' but no opencascade CMake config "
+      "OCCT_WASM_DIR is set to '${_occt_prefix}' but no OpenCASCADE CMake config "
       "was found there.\n"
       "Run:  source deps/build_occt.sh")
   endif()
 else()
   # Native: let OrcaSlicer's own find logic handle it
-  find_package(opencascade CONFIG QUIET)
-  if(opencascade_FOUND)
-    set(OpenCASCADE_FOUND TRUE)
+  find_package(OpenCASCADE CONFIG QUIET)
+  if(OpenCASCADE_FOUND)
     if(NOT DEFINED OpenCASCADE_INCLUDE_DIR)
       # Modern OCCT config sets this via imported target properties; provide
       # a conventional variable as well for libslic3r's include_directories call.
       get_target_property(OpenCASCADE_INCLUDE_DIR TKernel INTERFACE_INCLUDE_DIRECTORIES)
     endif()
-    message(STATUS "Found OCCT ${opencascade_VERSION} (system/native)")
+    message(STATUS "Found OCCT ${OpenCASCADE_VERSION} (system/native)")
   endif()
 endif()
 
