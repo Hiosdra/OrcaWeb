@@ -44,54 +44,18 @@ if [[ ! -d "${OCCT_SRC_DIR}" ]]; then
   mv "${ORCA_WASM_DIR}/deps/OCCT-${OCCT_TAG}" "${OCCT_SRC_DIR}"
 fi
 
-# ── Patch OCCT cmake for Emscripten cross-compilation ─────────────────────────
-# OCCT 7.8.x has no native Emscripten support. Its Linux cmake branch may
-# force BUILD_SHARED_LIBS=ON regardless of command-line flags, and it tries
-# to build ExpToCasExe (a host code-generator) via Emscripten — which fails
-# because its .so link deps cannot be resolved from the Emscripten sysroot.
-# The patches below:
-#   1. Guard ExpToCasExe behind CMAKE_CROSSCOMPILING so it is skipped;
-#      OCCT ships pre-generated Express schema .cxx files, so the tool is
-#      not needed during a standard build.
-#   2. Prevent any set(BUILD_SHARED_LIBS ON ... FORCE) from overriding our
-#      -DBUILD_SHARED_LIBS=OFF when cross-compiling.
-echo "  [occt] applying Emscripten cross-compilation patches..."
-python3 - "${OCCT_SRC_DIR}" <<'PYEOF'
-import re, pathlib, sys
-
-root = pathlib.Path(sys.argv[1])
-changes = 0
-
-def patch_file(p, patterns):
-    global changes
-    try:
-        text = p.read_text(errors='replace')
-        orig = text
-        for pat, repl in patterns:
-            text = re.sub(pat, repl, text, flags=re.MULTILINE | re.DOTALL)
-        if text != orig:
-            p.write_text(text)
-            print(f"  patched: {p.relative_to(root)}")
-            changes += 1
-    except Exception as e:
-        print(f"  skip {p}: {e}", file=sys.stderr)
-
-all_cmake = list(root.rglob('CMakeLists.txt')) + list(root.rglob('*.cmake'))
-
-for f in all_cmake:
-    patch_file(f, [
-        (
-            r'(?<!endif \()\b(add_subdirectory\s*\(\s*(?:"[^"]*"|\'[^\']*\'|[^)]*?)[Ee]xp[Tt]o[Cc]as[Ee]xe[^)]*\))',
-            r'if (NOT CMAKE_CROSSCOMPILING)\n  \1\nendif ()',
-        ),
-        (
-            r'(set\s*\(\s*BUILD_SHARED_LIBS\s+ON\b[^)]*FORCE[^)]*\))',
-            r'if (NOT CMAKE_CROSSCOMPILING)\n  \1\nendif ()',
-        ),
-    ])
-
-print(f"[occt-patch] {changes} file(s) modified")
-PYEOF
+# ── Configure ─────────────────────────────────────────────────────────────────
+# OCCT ignores the standard BUILD_SHARED_LIBS flag — it selects the library type
+# from its own BUILD_LIBRARY_TYPE cache variable, which defaults to "Shared" and
+# then force-sets BUILD_SHARED_LIBS=ON (CMakeLists.txt:55, no platform guard).
+# Emscripten cannot resolve transitive .so dependencies from outside its sysroot,
+# so the link of OCCT's ExpToCasExe host tool fails with
+# "libTKExpress.so: dependency not found: libTKernel.so".  BUILD_LIBRARY_TYPE=Static
+# makes OCCT emit .a archives and is the only flag that actually controls this.
+# The toolchain file is used directly (not emcmake) for explicit
+# CMAKE_SYSTEM_NAME=Emscripten, and CMAKE_CROSSCOMPILING_EMULATOR=node lets cmake
+# run any in-build codegen tools via Node.
+echo "  [occt] configuring with Emscripten..."
 cmake \
   -S "${OCCT_SRC_DIR}" \
   -B "${OCCT_SRC_DIR}/build-wasm" \
@@ -99,6 +63,7 @@ cmake \
   -DCMAKE_TOOLCHAIN_FILE="${EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="${OCCT_INSTALL_DIR}" \
+  -DBUILD_LIBRARY_TYPE=Static \
   -DBUILD_SHARED_LIBS=OFF \
   -DCMAKE_CROSSCOMPILING_EMULATOR="node" \
   \
