@@ -170,6 +170,10 @@ export function sliceMultiStl(
 }
 
 export function cadToStl(module: OrcaModule, cadData: Uint8Array, filename: string): Uint8Array {
+  if (cadData.length === 0) {
+    throw new Error('CAD data is empty')
+  }
+
   const isIges = /\.(iges|igs)$/i.test(filename) ? 1 : 0
 
   const cadPtr = module._malloc(cadData.length)
@@ -179,7 +183,7 @@ export function cadToStl(module: OrcaModule, cadData: Uint8Array, filename: stri
   const outLenPtr = module._malloc(4)
 
   try {
-    const result = module._orc_cad_to_stl(cadData.length === 0 ? 0 : cadPtr, cadData.length, isIges, outPtrPtr, outLenPtr)
+    const result = module._orc_cad_to_stl(cadPtr, cadData.length, isIges, outPtrPtr, outLenPtr)
     if (result !== 0) {
       throw new OrcaSliceError(result, wasmError(module, result))
     }

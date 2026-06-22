@@ -9,6 +9,7 @@
 
 set -euo pipefail
 
+ORCA_WASM_DIR="${ORCA_WASM_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 OCCT_VERSION="${OCCT_VERSION:-7.8.1}"
 OCCT_TAG="V${OCCT_VERSION//./_}"
 OCCT_SRC_DIR="${ORCA_WASM_DIR}/deps/occt-${OCCT_VERSION}"
