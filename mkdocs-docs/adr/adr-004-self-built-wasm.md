@@ -1,4 +1,4 @@
-# ADR-004: Self-Built WASM from OrcaSlicer v2.3.2
+# ADR-004: Self-Built WASM from OrcaSlicer v2.4.0
 
 **Status:** Accepted  
 **Date:** 2026-06-13
@@ -13,13 +13,13 @@ While this was sufficient to prove the concept, it had significant drawbacks:
   choose exactly which features to include/exclude.
 - **External dependency** — if the external project became unmaintained or changed
   its release format, we would be stuck.
-- **Old version** — we wanted OrcaSlicer v2.3.2, not v2.3.1.
+- **Old version** — we wanted OrcaSlicer v2.4.0, not v2.3.1.
 - **Opaque artifact** — we couldn't verify what patches or flags were applied.
 
 ## Decision
 
-Build our own WASM pipeline in `orca-wasm/`, targeting OrcaSlicer v2.3.2, and
-ship the resulting artifacts as OrcaWeb GitHub Releases (`wasm-v2.3.2`).
+Build our own WASM pipeline in `orca-wasm/`, targeting OrcaSlicer v2.4.0, and
+ship the resulting artifacts as OrcaWeb GitHub Releases (`wasm-v2.4.0`).
 
 The build pipeline (`orca-wasm/`) consists of:
 
@@ -27,7 +27,7 @@ The build pipeline (`orca-wasm/`) consists of:
 2. **Dependencies** built once and cached in `orca-wasm/deps-install/`:
    Boost 1.83 (b2, emscripten toolset, single-threaded), GMP/MPFR/CGAL,
    Eigen/nlohmann/EXPAT/NLopt/cereal, emscripten ports (zlib/png/jpeg).
-3. **OrcaSlicer v2.3.2** checked out as a git submodule (`orca-wasm/orca/`).
+3. **OrcaSlicer v2.4.0** checked out as a git submodule (`orca-wasm/orca/`).
 4. **`orca-wasm/patches/apply.py`** — idempotent patch script applied before CMake.
 5. **CMake + ninja** with `SLIC3R_WASM=ON`.
 6. **Artifacts** packaged to `public/wasm/` and uploaded via `deploy.yml`.

@@ -15,10 +15,10 @@ import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const WASM_DIR = join(__dirname, '../public/wasm')
-// Our self-built OrcaSlicer v2.3.2 engine (built by build-wasm.yml, published
-// to the wasm-v2.3.2 release).  It has no slicer.data — the orca/resources
+// Our self-built OrcaSlicer v2.4.0 engine (built by build-wasm.yml, published
+// to the wasm-v2.4.0 release).  It has no slicer.data — the orca/resources
 // preload was dropped because headless slicing never reads it.
-const RELEASE_BASE = 'https://github.com/Hiosdra/OrcaWeb/releases/download/wasm-v2.3.2'
+const RELEASE_BASE = 'https://github.com/Hiosdra/OrcaWeb/releases/download/wasm-v2.4.0'
 
 const ARTIFACTS = [
   { name: 'slicer.js',   approxSize: 1_500_000 },

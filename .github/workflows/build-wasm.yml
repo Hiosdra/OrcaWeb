@@ -7,8 +7,8 @@ on:
   workflow_dispatch:
     inputs:
       orca_version:
-        description: 'OrcaSlicer tag to build (e.g. v2.3.2)'
-        default: 'v2.3.2'
+        description: 'OrcaSlicer tag to build (e.g. v2.4.0)'
+        default: 'v2.4.0'
         required: true
   push:
     tags: ['wasm-v*.*.*']
@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 240  # deps ~100 min (incl. OCCT ~45 min) + main build ~60 min
 
     env:
-      ORCA_VERSION: ${{ github.event.inputs.orca_version || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v2.3.2' }}
+      ORCA_VERSION: ${{ github.event.inputs.orca_version || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v2.4.0' }}
       OCCT_VERSION: "7.8.1"
       EMSDK: /opt/emsdk
 
@@ -459,7 +459,7 @@ jobs:
           ls -lh public/wasm/ 2>/dev/null || true
 
           # Fallback copy if POST_BUILD didn't run.  slicer.data only exists when
-          # a --preload-file bundle is used; the v2.3.2 engine has none, so it is
+          # a --preload-file bundle is used; the v2.4.0 engine has none, so it is
           # copied only if present.
           BUILDDIR="orca-wasm/build-wasm/wasm"
           if [[ ! -f public/wasm/slicer.js ]] && [[ -f "${BUILDDIR}/slicer.js" ]]; then

@@ -1,6 +1,6 @@
 # Building the WASM Engine
 
-This page explains how to compile OrcaSlicer v2.3.2 to WebAssembly using the `orca-wasm/` build pipeline. You only need this if you want to change the C++ engine itself. For normal development of the web UI or CLI, download the pre-built artifacts with `node scripts/download-wasm.mjs`.
+This page explains how to compile OrcaSlicer v2.4.0 to WebAssembly using the `orca-wasm/` build pipeline. You only need this if you want to change the C++ engine itself. For normal development of the web UI or CLI, download the pre-built artifacts with `node scripts/download-wasm.mjs`.
 
 ## When to build
 
@@ -13,11 +13,11 @@ This page explains how to compile OrcaSlicer v2.3.2 to WebAssembly using the `or
 
 ## Artifacts
 
-The build produces two files (published to GitHub Release `wasm-v2.3.2`):
+The build produces two files (published to GitHub Release `wasm-v2.4.0`):
 
 | File | Size | Description |
 |------|------|-------------|
-| `slicer.wasm` | ~29 MB | Compiled OrcaSlicer v2.3.2 core + OCCT (STEP engine) |
+| `slicer.wasm` | ~29 MB | Compiled OrcaSlicer v2.4.0 core + OCCT (STEP engine) |
 | `slicer.js` | ~210 KB | Emscripten glue code (CommonJS IIFE) |
 
 There is no `slicer.data` — the headless flat-config slicer never reads `orca/resources` at runtime, so the 200 MB preload file was eliminated entirely.
@@ -33,7 +33,7 @@ emsdk (Emscripten toolchain)
   │   ├── Eigen / nlohmann / EXPAT / NLopt / cereal
   │   └── Emscripten ports: zlib, libpng, libjpeg
   │
-  ├─ Checkout OrcaSlicer v2.3.2 (git submodule orca/orca/)
+  ├─ Checkout OrcaSlicer v2.4.0 (git submodule orca/orca/)
   │
   ├─ python3 orca-wasm/patches/apply.py   ← idempotent; patches the checkout
   │
@@ -51,8 +51,8 @@ Dependencies are cached between runs (GitHub Actions cache key based on dependen
 
     Two ways to trigger:
 
-    - **Manual dispatch:** go to **Actions → Build WASM → Run workflow**, enter the OrcaSlicer tag (e.g. `v2.3.2`), and run.
-    - **Tag push:** push a tag matching `wasm-v*.*.*` (e.g. `git tag wasm-v2.3.2-ow2 && git push --tags`). The workflow picks up the tag automatically.
+    - **Manual dispatch:** go to **Actions → Build WASM → Run workflow**, enter the OrcaSlicer tag (e.g. `v2.4.0`), and run.
+    - **Tag push:** push a tag matching `wasm-v*.*.*` (e.g. `git tag wasm-v2.4.0-ow2 && git push --tags`). The workflow picks up the tag automatically.
 
     Both paths:
 

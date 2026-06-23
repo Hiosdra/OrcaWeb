@@ -24,7 +24,7 @@ jobs:
       - run: npm ci
 
       # ── Download WASM artifacts ──────────────────────────────────────
-      # Primary: download slicer.js + slicer.wasm from the wasm-v2.3.2 release.
+      # Primary: download slicer.js + slicer.wasm from the wasm-v2.4.0 release.
       # Fallback: restore from the previously-deployed gh-pages tree so a push
       # that only touches UI/docs never fails just because the WASM release has
       # not been created yet (e.g. immediately after a PR merge before the
@@ -34,7 +34,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p public/wasm
-          WASM_TAG="wasm-v2.3.2"
+          WASM_TAG="wasm-v2.4.0"
           if gh release view "$WASM_TAG" --repo "$GITHUB_REPOSITORY" &>/dev/null; then
             gh release download "$WASM_TAG" \
               --repo "$GITHUB_REPOSITORY" \

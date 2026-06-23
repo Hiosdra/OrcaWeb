@@ -1,6 +1,6 @@
 # orca-wasm — OrcaSlicer WASM build
 
-Clean-room Emscripten build of [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer) v2.3.2 targeting the browser.
+Clean-room Emscripten build of [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer) v2.4.0 targeting the browser.
 
 → **[Full build guide in the docs](https://hiosdra.github.io/OrcaWeb/docs/wasm-build/)**
 
@@ -8,7 +8,7 @@ Clean-room Emscripten build of [OrcaSlicer](https://github.com/SoftFever/OrcaSli
 
 ```
 orca-wasm/
-├── orca/                  ← git submodule: SoftFever/OrcaSlicer@v2.3.2
+├── orca/                  ← git submodule: SoftFever/OrcaSlicer@v2.4.0
 ├── bridge/
 │   ├── slicer.cpp         ← C++ bridge (orc_init / orc_slice / orc_obj_to_stl)
 │   └── CMakeLists.txt
@@ -49,7 +49,7 @@ orca-wasm/
 
 | File | Size | Description |
 |------|------|-------------|
-| `slicer.wasm` | ~7.5 MB | Compiled OrcaSlicer v2.3.2 core |
+| `slicer.wasm` | ~7.5 MB | Compiled OrcaSlicer v2.4.0 core |
 | `slicer.js` | ~1.5 MB | Emscripten glue code (CommonJS IIFE) |
 
 No `slicer.data` — the headless flat-config slicer never reads `orca/resources` at runtime, so the 200 MB preload file was eliminated entirely.
@@ -68,8 +68,8 @@ No `slicer.data` — the headless flat-config slicer never reads `orca/resources
 ```bash
 # 1. Clone OrcaSlicer submodule
 git submodule update --init --depth 1 -- orca-wasm/orca
-git -C orca-wasm/orca fetch --tags --depth 1 origin v2.3.2
-git -C orca-wasm/orca checkout v2.3.2
+git -C orca-wasm/orca fetch --tags --depth 1 origin v2.4.0
+git -C orca-wasm/orca checkout v2.4.0
 
 # 2. Activate Emscripten
 source /path/to/emsdk/emsdk_env.sh
@@ -122,7 +122,7 @@ See the [Architecture docs](https://hiosdra.github.io/OrcaWeb/docs/architecture/
 
 `.github/workflows/build-wasm.yml` — triggered by:
 - **Manual dispatch:** Actions → Build WASM → Run workflow (specify OrcaSlicer tag)
-- **Tag push:** `git tag wasm-v2.3.2-ow1 && git push --tags`
+- **Tag push:** `git tag wasm-v2.4.0-ow1 && git push --tags`
 
 Steps:
 1. Installs Emscripten 3.1.74
@@ -130,9 +130,9 @@ Steps:
 3. Checks out OrcaSlicer at the requested tag
 4. Runs `patches/apply.py`
 5. Builds with `cmake + ninja`
-6. Publishes `slicer.js` + `slicer.wasm` to GitHub Release `wasm-v2.3.2`
+6. Publishes `slicer.js` + `slicer.wasm` to GitHub Release `wasm-v2.4.0`
 
-The main deploy workflow (`.github/workflows/deploy.yml`) downloads these artifacts from the `wasm-v2.3.2` release on this repo and embeds them in the GitHub Pages deployment under `app/wasm/`, served from the same origin as the app.
+The main deploy workflow (`.github/workflows/deploy.yml`) downloads these artifacts from the `wasm-v2.4.0` release on this repo and embeds them in the GitHub Pages deployment under `app/wasm/`, served from the same origin as the app.
 
 ## Licence
 

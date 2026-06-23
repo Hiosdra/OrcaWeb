@@ -162,15 +162,16 @@ patch("src/libslic3r/CMakeLists.txt", [
     #
     # OCCT 7.8 consolidated the STEP DataExchange toolkits — TKXDESTEP, TKSTEP,
     # TKSTEP209, TKSTEPAttr and TKSTEPBase were all merged into a single
-    # TKDESTEP. OrcaSlicer v2.3.2's OCCT_LIBS still lists the old 7.7 names, so
+    # TKDESTEP. Older OrcaSlicer OCCT_LIBS may still list the old 7.7 names, so
     # against our OCCT 7.8.1 the link fails with "unable to find library
     # -lTKSTEP" (these are not imported targets, so they fall back to bare -l).
     # Collapse the five obsolete entries to TKDESTEP (an imported target that
-    # pulls its transitive deps by full path).
+    # pulls its transitive deps by full path). expected=0 so this is a no-op if
+    # OrcaSlicer already uses TKDESTEP.
     (
         r'TKXDESTEP\s+TKSTEP\s+TKSTEP209\s+TKSTEPAttr\s+TKSTEPBase',
         r'TKDESTEP',
-        1,
+        0,
     ),
     # Wrap OpenCV link
     (
@@ -226,7 +227,7 @@ patch("src/libslic3r/CMakeLists.txt", [
 # =============================================================================
 patch("src/libslic3r/Feature/FuzzySkin/FuzzySkin.cpp", [
     # Handle "static thread_local" first to avoid producing "static static".
-    # (Current v2.3.2 uses bare thread_local, but guard against future changes.)
+    # (Guard against both bare and static thread_local variants.)
     (
         r'\bstatic\s+thread_local\b',
         r'static',

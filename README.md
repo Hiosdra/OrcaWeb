@@ -44,18 +44,18 @@ at runtime, so the 200 MB preload file was eliminated entirely (~9 MB total cold
 
 ### WASM loading
 
-In CI the WASM artifacts are downloaded from the `wasm-v2.3.2` GitHub Release and
+In CI the WASM artifacts are downloaded from the `wasm-v2.4.0` GitHub Release and
 embedded directly in the GitHub Pages deployment, so they are served from the
 **same origin** as the app — no CORS issues.
 
-### Self-contained WASM build (v2.3.2)
+### Self-contained WASM build (v2.4.0)
 
 `orca-wasm/` contains a clean-room Emscripten build pipeline targeting
-OrcaSlicer **v2.3.2** (the latest stable release as of this writing):
+OrcaSlicer **v2.4.0** (the latest stable release as of this writing):
 
 ```
 orca-wasm/
-├── orca/           ← git submodule: SoftFever/OrcaSlicer@v2.3.2
+├── orca/           ← git submodule: SoftFever/OrcaSlicer@v2.4.0
 ├── bridge/         ← C++ bridge: orc_init / orc_slice / orc_free
 ├── wasm/shims/     ← sequential TBB stubs (WASM is single-threaded)
 ├── patches/        ← Python patcher for WASM compatibility
@@ -70,7 +70,7 @@ cd orca-wasm && ./scripts/build.sh
 ```
 
 Or trigger the `Build WASM` GitHub Actions workflow manually to produce a
-`wasm-v2.3.2` release with the compiled artifacts.
+`wasm-v2.4.0` release with the compiled artifacts.
 
 See [`orca-wasm/README.md`](orca-wasm/README.md) for the full build guide.
 
@@ -81,7 +81,7 @@ See [`orca-wasm/README.md`](orca-wasm/README.md) for the full build guide.
 | UI | React 19, TypeScript, Tailwind CSS v4 |
 | 3D | Three.js (STLLoader, OrbitControls) |
 | Bundler | Vite 8 |
-| WASM | OrcaSlicer v2.3.2 via Emscripten (own build) |
+| WASM | OrcaSlicer v2.4.0 via Emscripten (own build) |
 | Docs | Material for MkDocs |
 | CI/CD | GitHub Actions → GitHub Pages |
 
