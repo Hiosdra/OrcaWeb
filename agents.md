@@ -38,7 +38,7 @@ The target end-state is a fully working OrcaSlicer CLI running on the WASM engin
 - **WASM build pipeline** — `orca-wasm/` contains the Emscripten build, CMake config, shims, and patch script (`orca-wasm/patches/apply.py`)
 
 Detailed architecture: [`mkdocs-docs/architecture.md`](mkdocs-docs/architecture.md)  
-Architecture decisions (ADRs): [`mkdocs-docs/adr/`](mkdocs-docs/adr/)
+Architecture decisions (ADRs): [`mkdocs-docs/adr/index.md`](mkdocs-docs/adr/index.md)
 
 ## WASM build
 
