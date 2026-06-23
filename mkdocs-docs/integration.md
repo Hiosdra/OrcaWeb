@@ -132,7 +132,7 @@ module._free(configPtr)
 if (initCode !== 0) throw new Error(`orc_init failed: ${initCode}`)
 
 const stlPtr = module._malloc(stl.length)
-module.HEAPU8.set(new Uint8Array(stl.buffer), stlPtr)
+module.HEAPU8.set(stl, stlPtr)  // Buffer extends Uint8Array — pass directly to avoid pool-offset bug
 const ptrPtr = module._malloc(4)
 const lenPtr = module._malloc(4)
 const rc = module._orc_slice(stlPtr, stl.length, ptrPtr, lenPtr)
@@ -436,23 +436,30 @@ For circular beds, the effective printable area used by the arranger is the insc
 ## Complete TypeScript example (browser, no framework)
 
 ```typescript
-// Load engine once
-async function loadEngine(wasmBase: string) {
-  const [jsText, wasmBinary] = await Promise.all([
-    fetch(`${wasmBase}/slicer.js`).then(r => r.text()),
-    fetch(`${wasmBase}/slicer.wasm`).then(r => r.arrayBuffer()),
-  ])
-  const blob = new Blob([`${jsText}\nexport default OrcaModule;`], { type: 'application/javascript' })
-  const url = URL.createObjectURL(blob)
-  try {
-    const { default: factory } = await import(url)
-    return factory({ wasmBinary })
-  } finally {
-    URL.revokeObjectURL(url)
+// Module-level cache — engine is fetched and compiled only once
+let _enginePromise: Promise<any> | null = null
+
+function loadEngine(wasmBase: string): Promise<any> {
+  if (!_enginePromise) {
+    _enginePromise = (async () => {
+      const [jsText, wasmBinary] = await Promise.all([
+        fetch(`${wasmBase}/slicer.js`).then(r => r.text()),
+        fetch(`${wasmBase}/slicer.wasm`).then(r => r.arrayBuffer()),
+      ])
+      const blob = new Blob([`${jsText}\nexport default OrcaModule;`], { type: 'application/javascript' })
+      const url = URL.createObjectURL(blob)
+      try {
+        const { default: factory } = await import(url)
+        return factory({ wasmBinary })
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+    })()
   }
+  return _enginePromise
 }
 
-// Slice a single file
+// Slice a single file (engine is reused across calls)
 async function sliceFile(stlBytes: Uint8Array, config: object): Promise<string> {
   const module = await loadEngine('/wasm')
 
