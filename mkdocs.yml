@@ -45,6 +45,7 @@ nav:
   - Getting Started: getting-started.md
   - User Guide: user-guide.md
   - Architecture: architecture.md
+  - Integration Guide: integration.md
   - API Reference: api-reference.md
   - Profiles: profiles.md
   - Building WASM: wasm-build.md
