@@ -42,7 +42,7 @@ making subsequent uses instant. Slicing a typical model takes 50–500 ms in WAS
 - **Positive:** Zero privacy concerns, works offline, no backend to maintain.
 - **Positive:** Open-source stack end-to-end.
 - **Negative:** First visit requires downloading `slicer.js` (~1.5 MB) + `slicer.wasm`
-  (~29 MB after our v2.3.2 build). PWA Service Worker pre-caches these on install.
+  (~29 MB after our v2.4.0 build). PWA Service Worker pre-caches these on install.
 - **Negative:** Very large STL files (>50 MB) may cause viewer jank on low-end devices.
 - **Constraint:** WASM is single-threaded (no SharedArrayBuffer required), so all
   parallel TBB algorithms must be replaced with sequential equivalents (see ADR-007).

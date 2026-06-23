@@ -59,7 +59,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         URL.revokeObjectURL(blobUrl)
       }
 
-      // The v2.3.2 engine has no slicer.data (the orca/resources preload was
+      // The v2.4.0 engine has no slicer.data (the orca/resources preload was
       // dropped — verified that headless slicing never reads /resources), so
       // there is nothing to fetch or reassemble here.
 

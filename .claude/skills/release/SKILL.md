@@ -33,7 +33,7 @@ Edit the `"version"` field in `package.json` from the old value to the new one.
 Line 5 of `mkdocs-docs/status.md` is the canonical release metadata line. It looks like:
 
 ```
-Ostatnia aktualizacja: **2026-06-13** · wersja silnika: **OrcaSlicer v2.3.2** (własny build, wdrożony na produkcji) · wersja aplikacji: **PR #12 merged**
+Ostatnia aktualizacja: **2026-06-23** · wersja silnika: **OrcaSlicer v2.4.0** (własny build, wdrożony na produkcji) · wersja aplikacji: **v0.5.0**
 ```
 
 Update exactly two values in that line:

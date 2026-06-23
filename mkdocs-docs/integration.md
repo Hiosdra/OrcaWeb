@@ -19,11 +19,11 @@ The engine is **stateless between slicing calls** except for the config set by `
 
 ## Obtaining the WASM artifacts
 
-The two required files are published to GitHub Releases as tag `wasm-v2.3.2`:
+The two required files are published to GitHub Releases as tag `wasm-v2.4.0`:
 
 | File | Size | Purpose |
 |---|---|---|
-| `slicer.wasm` | ~29 MB | Compiled engine (OrcaSlicer v2.3.2 + OCCT 7.8.1) |
+| `slicer.wasm` | ~29 MB | Compiled engine (OrcaSlicer v2.4.0 + OCCT 7.8.1) |
 | `slicer.js` | ~210 KB | Emscripten JS glue (CommonJS IIFE) |
 
 **Download via the provided script:**
