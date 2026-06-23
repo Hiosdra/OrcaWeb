@@ -52,7 +52,7 @@ self.addEventListener('message', async (e) => {
   const { type } = e.data
 
   if (type === 'LOAD') {
-    module = await loadOrcaModule('/wasm')
+    module = await loadOrcaModule()   // no argument — uses built-in WASM_BASE
     self.postMessage({ type: 'READY' })
     return
   }
@@ -78,7 +78,7 @@ const worker = new Worker(new URL('./slicer.worker.ts', import.meta.url), {
 
 worker.postMessage({ type: 'LOAD' })
 
-worker.onmessage = (e) => {
+worker.onmessage = async (e) => {
   if (e.data.type === 'READY') {
     console.log('Engine ready')
 

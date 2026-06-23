@@ -26,8 +26,7 @@ Initialise the slicer with a JSON configuration object. Must be called before `o
 | Code | Meaning |
 |---|---|
 | `0` | Success |
-| `-2` | JSON parse failure (not a valid JSON object) |
-| `-9` | Unexpected C++ exception |
+| `-2` | JSON parse failure or any C++ exception during initialisation |
 
 **Behaviour**
 
