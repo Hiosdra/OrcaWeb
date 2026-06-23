@@ -113,8 +113,8 @@ int orc_init(const char* json_data, int json_len) {
             if (sv.empty()) continue;
             try {
                 // set_deserialize_strict builds a ConfigSubstitutionContext with
-                // the Disable rule internally (v2.3.2 API); incompatible values
-                // throw and are skipped below.
+                // the Disable rule internally; incompatible values throw and are
+                // skipped below.
                 g_config.set_deserialize_strict(key, sv);
             } catch (...) {
                 // silently skip unknown / incompatible keys
@@ -179,7 +179,7 @@ int orc_slice(const void* stl_data, int stl_len,
         print.apply(model, g_config);
 
         {
-            // v2.3.2: Print::validate() returns a StringObjectException whose
+            // Print::validate() returns a StringObjectException whose
             // `string` member holds the error message ("" when valid).
             Slic3r::StringObjectException err = print.validate();
             if (!err.string.empty()) { record_error(err.string); return -6; }
