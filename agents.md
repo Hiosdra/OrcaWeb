@@ -4,13 +4,13 @@ AI coding agent instructions for this project.
 
 ## Documentation rule
 
-**Update `docs/` whenever you make a meaningful change.**
+**All documentation lives in `mkdocs-docs/` and is published via MkDocs.**
 
-- `docs/README.md` — index table with file, stage, and status; update status and add new entries when a new phase is completed
-- `docs/06-architecture.md` — update when the architecture, WASM API, file structure, or key dependencies change
-- Add a new numbered file (e.g. `docs/07-*.md`) when a new major phase of work begins
+- `mkdocs-docs/architecture.md` — update when the architecture, WASM API, file structure, or key dependencies change
+- `mkdocs-docs/status.md` — update the feature checklist and version when shipping a release
+- `mkdocs-docs/adr/` — add a new ADR when a significant architectural decision is made
 
-If you touch the WASM pipeline, CI workflow, shims, or UI — check whether any docs file needs updating before closing the task.
+If you touch the WASM pipeline, CI workflow, shims, or UI — check whether any `mkdocs-docs/` file needs updating before closing the task.
 
 ## Setup
 
@@ -37,7 +37,8 @@ The target end-state is a fully working OrcaSlicer CLI running on the WASM engin
 - **WASM engine** — OrcaSlicer compiled via Emscripten; artifacts in `public/wasm/`; this is the core deliverable
 - **WASM build pipeline** — `orca-wasm/` contains the Emscripten build, CMake config, shims, and patch script (`orca-wasm/patches/apply.py`)
 
-Detailed architecture: [`docs/06-architecture.md`](docs/06-architecture.md)
+Detailed architecture: [`mkdocs-docs/architecture.md`](mkdocs-docs/architecture.md)  
+Architecture decisions (ADRs): [`mkdocs-docs/adr/`](mkdocs-docs/adr/)
 
 ## WASM build
 
@@ -73,6 +74,6 @@ Use the `/release` skill to cut a new app version. It handles:
 
 ## PR checklist
 
-- [ ] `docs/` updated if architecture or a major feature changed
+- [ ] `mkdocs-docs/` updated if architecture or a major feature changed
 - [ ] Types pass (`npm run typecheck` or `tsc --noEmit`)
 - [ ] No console errors in the browser on the happy path
