@@ -39,6 +39,15 @@ set(GMP_LIBRARIES     "$ENV{GMP_WASM_LIB}"   CACHE PATH "")
 set(MPFR_INCLUDE_DIR  "$ENV{MPFR_WASM_INC}"  CACHE PATH "")
 set(MPFR_LIBRARIES    "$ENV{MPFR_WASM_LIB}"  CACHE PATH "")
 
+# ── OpenCASCADE (OCCT) — STEP/IGES import ────────────────────────────────────
+# OCCT_WASM_DIR is passed by build.sh after deps/build_occt.sh runs.
+# FindOpenCASCADE.cmake (in cmake/) handles both WASM and native installs.
+if(DEFINED OCCT_WASM_DIR)
+  set(OCCT_WASM_DIR "${OCCT_WASM_DIR}" CACHE PATH "OCCT install for WASM")
+endif()
+find_package(OpenCASCADE REQUIRED)
+message(STATUS "OCCT include: ${OpenCASCADE_INCLUDE_DIR}")
+
 # ── OrcaSlicer source paths ──────────────────────────────────────────────────
 set(ORCA_ROOT  "${CMAKE_CURRENT_SOURCE_DIR}/orca")
 set(ORCA_SRC   "${ORCA_ROOT}/src")

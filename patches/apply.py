@@ -141,63 +141,36 @@ patch("src/libslic3r/GCode.hpp", [
 ])
 
 # =============================================================================
-# 3b. Model.cpp — guard read_from_step() definition
-#     Our override STEP.cpp defines Model::read_from_step; guard the original
-#     to prevent a duplicate-symbol link error.
-# =============================================================================
-_model_cpp = ORCA / "src/libslic3r/Model.cpp"
-if _model_cpp.exists():
-    _mc = _model_cpp.read_text(encoding="utf-8", errors="replace")
-    if "#ifndef SLIC3R_NO_OCCT" not in _mc:
-        _m = re.search(r'\nModel Model::read_from_step\s*\(', _mc)
-        if _m:
-            _func_start = _m.start() + 1
-            _brace_start = _mc.index('{', _func_start)
-            _depth = 0
-            _func_end = _brace_start
-            for _i in range(_brace_start, len(_mc)):
-                _ch = _mc[_i]
-                if _ch == '{':
-                    _depth += 1
-                elif _ch == '}':
-                    _depth -= 1
-                    if _depth == 0:
-                        _func_end = _i + 1
-                        break
-            _guarded = (
-                "#ifndef SLIC3R_NO_OCCT\n"
-                + _mc[_func_start:_func_end]
-                + "\n#endif // SLIC3R_NO_OCCT\n"
-            )
-            _mc_new = _mc[:_func_start] + _guarded + _mc[_func_end:]
-            if not DRY_RUN:
-                _model_cpp.write_text(_mc_new, encoding="utf-8")
-            print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/Model.cpp (read_from_step guard)")
-        else:
-            print("  WARN: Model::read_from_step not found in Model.cpp")
-    else:
-        print("  OK (no change): src/libslic3r/Model.cpp")
-
+# NOTE: §3b (Model.cpp read_from_step guard) was removed.
+# OCCT is now compiled into the WASM engine; read_from_step compiles normally.
 # =============================================================================
 # 4. src/libslic3r/CMakeLists.txt — make OCCT / OpenCV / draco conditional
 # =============================================================================
 patch("src/libslic3r/CMakeLists.txt", [
     # Add SLIC3R_WASM compile definitions
+    # SLIC3R_NO_OCCT is intentionally absent: OCCT is now compiled into the
+    # WASM engine (deps/build_occt.sh) and the real Format/STEP.cpp is used.
     (
         r'(target_compile_definitions\s*\(\s*libslic3r\s+PUBLIC)',
-        r'\1\n  $<$<BOOL:${SLIC3R_WASM}>:SLIC3R_WASM;SLIC3R_NO_OCCT;SLIC3R_NO_OPENVDB;SLIC3R_NO_OPENCV>',
+        r'\1\n  $<$<BOOL:${SLIC3R_WASM}>:SLIC3R_WASM;SLIC3R_NO_OPENVDB;SLIC3R_NO_OPENCV>',
         1,
     ),
-    # Wrap OpenCASCADE find / link
+    # OpenCASCADE find/link: no WASM guard — our cmake/FindOpenCASCADE.cmake
+    # handles both native and WASM installs via OCCT_WASM_DIR.
+    # (The two guard patterns that previously wrapped find_package and OCCT_LIBS
+    # with if(NOT SLIC3R_WASM) have been removed.)
+    #
+    # OCCT 7.8 consolidated the STEP DataExchange toolkits — TKXDESTEP, TKSTEP,
+    # TKSTEP209, TKSTEPAttr and TKSTEPBase were all merged into a single
+    # TKDESTEP. OrcaSlicer v2.3.2's OCCT_LIBS still lists the old 7.7 names, so
+    # against our OCCT 7.8.1 the link fails with "unable to find library
+    # -lTKSTEP" (these are not imported targets, so they fall back to bare -l).
+    # Collapse the five obsolete entries to TKDESTEP (an imported target that
+    # pulls its transitive deps by full path).
     (
-        r'(find_package\s*\(\s*OpenCASCADE\b[^)]*\))',
-        r'if(NOT SLIC3R_WASM)\n\1\nendif()',
-        0,
-    ),
-    (
-        r'(\$\{OCCT_LIBS\})',
-        r'$<$<NOT:$<BOOL:${SLIC3R_WASM}>>:\1>',
-        0,
+        r'TKXDESTEP\s+TKSTEP\s+TKSTEP209\s+TKSTEPAttr\s+TKSTEPBase',
+        r'TKDESTEP',
+        1,
     ),
     # Wrap OpenCV link
     (
@@ -290,8 +263,9 @@ patch("src/libslic3r/AABBTreeLines.hpp", [
 #     for #include "..." directives, so the only reliable way to override a
 #     header that lives next to its includer is to physically replace it.
 #     The canonical stub content stays in orca-wasm/overrides/.
+# NOTE: Format/STEP.hpp is NOT overridden — the real OrcaSlicer header is used
+#       now that OCCT is compiled into the engine.
 # =============================================================================
-copy_override("src/libslic3r/Format/STEP.hpp")
 copy_override("src/libslic3r/OpenVDBUtils.hpp")
 copy_override("src/libslic3r/ObjColorUtils.hpp")
 
@@ -311,8 +285,9 @@ LIBSLIC3R_OVERRIDES_INJECTION = """\
 # This keeps the orca/ source tree free of C++ modifications.
 if(SLIC3R_WASM AND DEFINED ORCA_WEB_OVERRIDES_DIR)
   # Files always present in OrcaSlicer
+  # NOTE: Format/STEP.cpp is NOT stubbed — the real implementation is compiled
+  #       with OCCT (built by deps/build_occt.sh).
   set(_wasm_orig_stubs
-    "${CMAKE_CURRENT_SOURCE_DIR}/Format/STEP.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Format/DRC.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Format/svg.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/OpenVDBUtils.cpp"
@@ -331,7 +306,6 @@ if(SLIC3R_WASM AND DEFINED ORCA_WEB_OVERRIDES_DIR)
   set_source_files_properties(${_wasm_orig_stubs} PROPERTIES HEADER_FILE_ONLY TRUE)
 
   target_sources(libslic3r PRIVATE
-    "${ORCA_WEB_OVERRIDES_DIR}/src/libslic3r/Format/STEP.cpp"
     "${ORCA_WEB_OVERRIDES_DIR}/src/libslic3r/Format/DRC.cpp"
     "${ORCA_WEB_OVERRIDES_DIR}/src/libslic3r/Format/svg.cpp"
     "${ORCA_WEB_OVERRIDES_DIR}/src/libslic3r/OpenVDBUtils.cpp"

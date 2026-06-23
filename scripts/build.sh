@@ -52,6 +52,10 @@ echo "[deps] building GMP / MPFR / CGAL for WASM..."
 # shellcheck source=deps/build_math.sh
 source deps/build_math.sh
 
+echo "[deps] building OCCT for WASM..."
+# shellcheck source=deps/build_occt.sh
+source deps/build_occt.sh
+
 # ── Apply source patches ──────────────────────────────────────────────────────
 echo "[patch] applying WASM compatibility patches..."
 python3 patches/apply.py
@@ -78,6 +82,7 @@ emcmake cmake \
   -DMPFR_INCLUDE_DIR="${MPFR_WASM_INC}" \
   -DMPFR_LIBRARIES="${MPFR_WASM_LIB}" \
   -DCGAL_DIR="${CGAL_WASM_DIR}" \
+  -DOCCT_WASM_DIR="${OCCT_WASM_DIR}" \
   -DORCA_SRC="${ORCA_WASM_DIR}/orca/src" \
   -DORCA_DEPS="${ORCA_WASM_DIR}/orca/deps_src"
 
