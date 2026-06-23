@@ -30,7 +30,7 @@ Slice STL files locally — no server, no account, no upload. Your files never l
 git clone https://github.com/Hiosdra/OrcaWeb.git
 cd OrcaWeb
 npm install
-node scripts/download-wasm.mjs   # ~9 MB, one-time
+node scripts/download-wasm.mjs   # ~29 MB, one-time
 npm run dev
 ```
 
@@ -42,7 +42,7 @@ Then open [http://localhost:5173](http://localhost:5173).
 
 The slicer is deployed at **[hiosdra.github.io/OrcaWeb/app/](https://hiosdra.github.io/OrcaWeb/app/)**.
 
-On first load, the browser downloads ~9 MB of WASM data from GitHub Releases. Subsequent visits use the browser cache (or the PWA service worker pre-cache).
+On first load, the browser downloads ~29 MB of WASM data from GitHub Releases. Subsequent visits use the browser cache (or the PWA service worker pre-cache).
 
 ## How it works
 
@@ -55,8 +55,8 @@ Browser
 │
 └── Web Worker
     └── OrcaSlicer v2.3.2 core (WebAssembly)
-        ├── slicer.js    ~1.5 MB  Emscripten glue
-        └── slicer.wasm  ~7.5 MB  compiled slicer
+        ├── slicer.js    ~210 KB  Emscripten glue
+        └── slicer.wasm  ~29 MB   compiled slicer + OCCT (STEP)
 ```
 
 No `slicer.data` — the headless slicer never reads `orca/resources` at runtime.

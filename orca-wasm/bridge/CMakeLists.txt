@@ -35,5 +35,11 @@ target_compile_definitions(orca_web_bridge PUBLIC
   __EMSCRIPTEN__
 )
 
+# OCCT headers needed because slicer.cpp includes Format/STEP.hpp directly.
+# The toolkits themselves are linked transitively via libslic3r.
+if(DEFINED OpenCASCADE_INCLUDE_DIR)
+  target_include_directories(orca_web_bridge BEFORE PUBLIC "${OpenCASCADE_INCLUDE_DIR}")
+endif()
+
 # libslic3r exposes Boost, Eigen3, nlohmann_json etc. via its PUBLIC interface.
 target_link_libraries(orca_web_bridge PUBLIC libslic3r)

@@ -82,6 +82,7 @@ export type WorkerInMessage =
   | { type: 'SLICE'; stl: ArrayBuffer; config: OrcaConfig }
   | { type: 'SLICE_MULTI'; stls: ArrayBuffer[]; config: OrcaConfig }
   | { type: 'OBJ_TO_STL'; obj: ArrayBuffer; filename: string }
+  | { type: 'CAD_TO_STL'; cad: ArrayBuffer; filename: string }
 
 export type WorkerOutMessage =
   | { type: 'WORKER_READY' }
@@ -93,6 +94,8 @@ export type WorkerOutMessage =
   | { type: 'SLICE_MULTI_ERROR'; code: number; message: string }
   | { type: 'OBJ_STL_COMPLETE'; stl: ArrayBuffer; filename: string }
   | { type: 'OBJ_STL_ERROR'; message: string; filename: string }
+  | { type: 'CAD_STL_COMPLETE'; stl: ArrayBuffer; filename: string }
+  | { type: 'CAD_STL_ERROR'; message: string; filename: string }
 
 // --- G-code statistics ---
 
@@ -145,6 +148,12 @@ export interface OrcaModule {
     dataLen: number,
     offsetsPtr: number,
     nFiles: number,
+    outputPtrPtr: number,
+    outputLenPtr: number,
+  ): number
+  _orc_cad_to_stl(
+    cadPtr: number,
+    cadLen: number,
     outputPtrPtr: number,
     outputLenPtr: number,
   ): number

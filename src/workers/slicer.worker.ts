@@ -1,5 +1,5 @@
 import type { OrcaModule, WorkerInMessage, WorkerOutMessage } from '../types'
-import { sliceStl, sliceMultiStl, objToStl, OrcaSliceError } from '../lib/wasm-loader'
+import { sliceStl, sliceMultiStl, objToStl, cadToStl, OrcaSliceError } from '../lib/wasm-loader'
 
 let orcaModule: OrcaModule | null = null
 let loadingWasm = false
@@ -8,6 +8,7 @@ let loadingWasm = false
 let pendingSlice: { stl: ArrayBuffer; config: Record<string, unknown> } | null = null
 let pendingPlate: { stls: ArrayBuffer[]; config: Record<string, unknown> } | null = null
 const pendingObjConvertQueue: { obj: ArrayBuffer; filename: string }[] = []
+const pendingCadConvertQueue: { cad: ArrayBuffer; filename: string }[] = []
 
 function send(msg: WorkerOutMessage) {
   self.postMessage(msg)
@@ -77,6 +78,10 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         doObjToStl(pending.obj, pending.filename)
       }
       pendingObjConvertQueue.length = 0
+      for (const pending of pendingCadConvertQueue) {
+        doCadToStl(pending.cad, pending.filename)
+      }
+      pendingCadConvertQueue.length = 0
       if (pendingSlice) {
         const { stl, config } = pendingSlice
         pendingSlice = null
@@ -120,6 +125,14 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
     }
     doObjToStl(msg.obj, msg.filename)
   }
+
+  if (msg.type === 'CAD_TO_STL') {
+    if (!orcaModule) {
+      pendingCadConvertQueue.push({ cad: msg.cad, filename: msg.filename })
+      return
+    }
+    doCadToStl(msg.cad, msg.filename)
+  }
 })
 
 function doObjToStl(obj: ArrayBuffer, filename: string) {
@@ -160,6 +173,17 @@ function doSliceMulti(stls: ArrayBuffer[], config: Record<string, unknown>) {
     } else {
       send({ type: 'SLICE_MULTI_ERROR', code: -1, message: String(err) })
     }
+  }
+}
+
+function doCadToStl(cad: ArrayBuffer, filename: string) {
+  if (!orcaModule) return
+  try {
+    const stl = cadToStl(orcaModule, new Uint8Array(cad))
+    const stlBuffer = stl.buffer as ArrayBuffer
+    self.postMessage({ type: 'CAD_STL_COMPLETE', stl: stlBuffer, filename }, [stlBuffer])
+  } catch (err) {
+    send({ type: 'CAD_STL_ERROR', message: err instanceof Error ? err.message : String(err), filename })
   }
 }
 

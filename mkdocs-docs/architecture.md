@@ -33,13 +33,15 @@ The React web UI is a temporary proof-of-concept to demonstrate the engine. It i
 │   │      ├── _orc_init(configJson)                 │    │
 │   │      ├── _orc_slice(stl) → gcode string        │    │
 │   │      ├── _orc_slice_multi(stls) → gcode string │    │
-│   │      └── _orc_obj_to_stl(obj) → stl bytes      │    │
+│   │      ├── _orc_obj_to_stl(obj) → stl bytes      │    │
+│   │      └── _orc_cad_to_stl(step) → stl bytes     │    │
 │   └──────────────────┬─────────────────────────────┘    │
 │                      │ fetch                             │
 │   ┌──────────────────▼─────────────────────────────┐    │
 │   │  GitHub Releases: wasm-v2.3.2                  │    │
-│   │  ├── slicer.js    ~1.5 MB  Emscripten glue     │    │
-│   │  └── slicer.wasm  ~7.5 MB  OrcaSlicer v2.3.2   │    │
+│   │  ├── slicer.js    ~210 KB  Emscripten glue     │    │
+│   │  └── slicer.wasm  ~29 MB   OrcaSlicer v2.3.2   │    │
+│   │                   (incl. OCCT STEP engine)      │    │
 │   └────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -58,15 +60,15 @@ sequenceDiagram
     M->>S: preloadWasm()
     S->>W: new Worker(slicer.worker.ts)
     S->>W: postMessage(LOAD_WASM, url)
-    W->>R: fetch slicer.js  (~1.5 MB)
-    W->>R: fetch slicer.wasm (~7.5 MB) [parallel]
+    W->>R: fetch slicer.js  (~210 KB)
+    W->>R: fetch slicer.wasm (~29 MB) [parallel]
     W->>W: blob URL trick (add ES default export)
     W->>W: import(blobUrl) → factory({ wasmBinary })
     W->>S: postMessage(WASM_LOADED)
     S-->>M: listener → wasmStatus = 'ready'
 ```
 
-Total cold load: ~9 MB (down from ~152 MB with the old v2.3.1 + slicer.data engine).
+Total cold load: ~29 MB (down from ~152 MB with the old v2.3.1 + slicer.data engine). The increase over the original ~9 MB comes from OCCT being compiled directly into `slicer.wasm` — no separate download, no extra WASM file, no third-party dependency.
 
 ## Blob URL trick
 
@@ -156,16 +158,21 @@ These replace OrcaSlicer `.cpp` (and some `.hpp`) files whose implementation dep
 
 | Override file | Replaces | Missing library | What the stub does |
 |--------------|----------|-----------------|--------------------|
-| `Format/STEP.cpp` + `STEP.hpp` | STEP/IGES CAD import | **OCCT** (Open CASCADE) | Stub returns error; `read_from_step()` guarded out of `Model.cpp` by patch |
 | `Format/DRC.cpp` | Draco mesh import | **Draco** | Empty no-op |
-| `Format/svg.cpp` | SVG export | **OCCT** | Empty no-op |
+| `Format/svg.cpp` | SVG export | **OCCT** | Empty no-op (SVG export feature unused; not wired to the in-engine OCCT) |
 | `OpenVDBUtils.cpp` + `OpenVDBUtils.hpp` | VDB volume operations used by FDM infill | **OpenVDB** | Empty header; empty `.cpp` |
 | `SLA/Hollowing.cpp` | SLA model hollowing | **OpenVDB** | Empty no-op (SLA not used) |
 | `ObjColorUtils.cpp` + `ObjColorUtils.hpp` | OBJ colour calibration | **OpenCV** | Empty header; empty `.cpp` |
 | `Shape/TextShape.cpp` | 3D text extrusion | **FreeType** + **OCCT** | Empty no-op |
 
-!!! note "STEP/IGES in the browser"
-    Although the WASM engine stubs out OCCT, STEP and IGES files are still supported in the UI via `occt-import-js` — a separate OCCT build compiled to WASM by a third party. The conversion happens on the main thread before the STL is handed to the slicer engine.
+!!! note "STEP support — in-engine OCCT"
+    OCCT (Open CASCADE Technology 7.8.1) is compiled directly into `slicer.wasm` via `deps/build_occt.sh`. The engine exposes `_orc_cad_to_stl()` which reads a STEP file from MEMFS via OrcaSlicer's `Model::read_from_step()` (which runs `Step::load()` + `Step::mesh()` under the hood), tessellates the BRep geometry, and returns binary STL bytes.
+
+    - **Browser**: `CAD_TO_STL` message is sent to the slicer worker; the worker calls `_orc_cad_to_stl()` and replies with `CAD_STL_COMPLETE { stl }`.
+
+    No separate OCCT WASM download or third-party library is required.
+
+    **IGES is not supported** — OrcaSlicer's STEP reader (`STEPCAFControl_Reader`) does not read IGES, so `.iges`/`.igs` are not accepted by the UI.
 
 ### libnoise
 
@@ -198,7 +205,11 @@ File drop
   │                       │
   │               ModelViewer (Three.js STLLoader)
   │
-  ├─ .step / .iges ─► cadToStl() [main thread, occt-import-js]
+  ├─ .step / .stp ──► worker.postMessage(CAD_TO_STL, cad bytes)
+  │                       │
+  │               [worker] _orc_cad_to_stl() [OCCT in-engine]
+  │                       │
+  │               CAD_STL_COMPLETE { stl }
   │                       └─► synthetic .stl File → File state
   │
   └─ .obj ──────────► worker.postMessage(OBJ_TO_STL, obj bytes)
@@ -255,7 +266,7 @@ File drop
     ```bash
     # GitHub Actions → Build WASM → Run workflow
     # Or: git tag v2.3.2-ow1 && git push --tags
-    # Produces: slicer.js (~1.5 MB) + slicer.wasm (~7.5 MB)
+    # Produces: slicer.js (~210 KB) + slicer.wasm (~29 MB)
     # Published as GitHub Release wasm-v2.3.2
     ```
 
