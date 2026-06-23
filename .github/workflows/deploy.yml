@@ -15,6 +15,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # ── Auto-tag on release commits ───────────────────────────────────
+      - name: Create release tag
+        if: startsWith(github.event.head_commit.message, 'chore(release): bump to v')
+        run: |
+          VERSION=$(jq -r .version package.json)
+          TAG="v${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+          echo "Tagged $TAG on $(git rev-parse HEAD)"
+
       # ── Node / Vite app ──────────────────────────────────────────────
       - uses: actions/setup-node@v6
         with:
