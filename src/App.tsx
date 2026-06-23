@@ -355,8 +355,8 @@ export default function App() {
             <span className="hidden sm:block text-xs text-slate-400 font-medium bg-slate-100 px-2 py-0.5 rounded-full">
               Browser Slicer
             </span>
-            <span className="hidden md:block text-xs text-slate-400 font-mono">
-              v{__APP_VERSION__} · {__APP_RELEASE_DATE__}
+            <span className="text-xs text-slate-400 font-mono">
+              v{__APP_VERSION__}<span className="hidden md:inline"> · {__APP_RELEASE_DATE__}</span>
             </span>
           </div>
           <div className="flex items-center gap-3">
