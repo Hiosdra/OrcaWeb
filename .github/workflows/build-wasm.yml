@@ -72,7 +72,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: orca-wasm/deps-install
-          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-occt-${{ env.OCCT_VERSION }}-v15
+          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-occt-${{ env.OCCT_VERSION }}-v16
 
       # ── Boost ────────────────────────────────────────────────────────
       # Build Boost using b2 with the clang-emscripten toolset.  The standard
@@ -207,9 +207,9 @@ jobs:
 
           # ── Eigen3 (header-only, install cmake config) ────────────────
           echo "[eigen3] installing…"
-          curl -fL "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz" \
+          curl -fL "https://gitlab.com/libeigen/eigen/-/archive/5.0.1/eigen-5.0.1.tar.gz" \
             | tar xz -C /tmp/
-          cmake -S /tmp/eigen-3.4.0 -B /tmp/eigen-build -G Ninja \
+          cmake -S /tmp/eigen-5.0.1 -B /tmp/eigen-build -G Ninja \
             -DCMAKE_INSTALL_PREFIX="${INSTALL}" \
             -DBUILD_TESTING=OFF
           cmake --build /tmp/eigen-build --target install
