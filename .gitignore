@@ -8,6 +8,8 @@ public/wasm/slicer.data
 public/wasm/slicer.cjs
 scripts/repro-oom.mjs
 scripts/simple_cube_30mm.stl
+scripts/repro-real-stl.mjs
+scripts/voron_cube.stl
 .env
 .claude/*
 !.claude/skills/
