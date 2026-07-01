@@ -33,9 +33,10 @@ target_link_options(slicer PRIVATE
   # The --fpcast-emu pass (added by the flag above) generates trampolines up
   # to a fixed max parameter count (16 by default). libslic3r has indirectly-
   # called functions with more params than that, so wasm-opt aborts with
-  # "Fatal: max-func-params needs to be at least N" (N=22 observed). Raise it
-  # with margin above the observed requirement.
-  -sBINARYEN_EXTRA_PASSES=--pass-arg=max-func-params@32
+  # "Fatal: max-func-params needs to be at least N" (N=22 observed first,
+  # then N=40 once more of the codebase's indirect-call sites were reached).
+  # Raise it well above the observed requirement to leave headroom.
+  -sBINARYEN_EXTRA_PASSES=--pass-arg=max-func-params@64
   -fexceptions
   # No --preload-file: the headless flat-config slicer never reads orca/resources
   # at runtime (verified in-browser — a full slice opens only /tmp/*.stl/.gcode,
