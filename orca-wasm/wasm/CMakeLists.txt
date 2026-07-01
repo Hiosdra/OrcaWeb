@@ -30,6 +30,12 @@ target_link_options(slicer PRIVATE
   # slicing the real Voron Design Cube v7 STL, which crashes on load
   # regardless of print settings (see scripts/repro-real-stl.mjs).
   -sEMULATE_FUNCTION_POINTER_CASTS=1
+  # The --fpcast-emu pass (added by the flag above) generates trampolines up
+  # to a fixed max parameter count (16 by default). libslic3r has indirectly-
+  # called functions with more params than that, so wasm-opt aborts with
+  # "Fatal: max-func-params needs to be at least N" (N=22 observed). Raise it
+  # with margin above the observed requirement.
+  -sBINARYEN_EXTRA_PASSES=--pass-arg=max-func-params@32
   -fexceptions
   # No --preload-file: the headless flat-config slicer never reads orca/resources
   # at runtime (verified in-browser — a full slice opens only /tmp/*.stl/.gcode,
