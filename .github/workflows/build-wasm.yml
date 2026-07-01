@@ -30,17 +30,31 @@ jobs:
     env:
       ORCA_VERSION: ${{ github.event.inputs.orca_version || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v2.4.0' }}
       OCCT_VERSION: "7.8.1"
+      # Pinned (not "latest") for reproducible builds — matches the version
+      # documented for local builds in mkdocs-docs/wasm-build.md.
+      EMSDK_VERSION: "3.1.74"
       EMSDK: /opt/emsdk
 
     steps:
       - uses: actions/checkout@v7
 
       # ── Emscripten ──────────────────────────────────────────────────
+      # Cache the whole emsdk tree (toolchain + activated config). After the
+      # first run this also carries the embuilder-built sysroot ports
+      # (zlib/png/jpeg), so that step becomes a no-op on subsequent runs.
+      - name: Cache Emscripten
+        id: cache-emsdk
+        uses: actions/cache@v5
+        with:
+          path: /opt/emsdk
+          key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v1
+
       - name: Install Emscripten
+        if: steps.cache-emsdk.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/emscripten-core/emsdk.git /opt/emsdk
-          /opt/emsdk/emsdk install latest
-          /opt/emsdk/emsdk activate latest
+          /opt/emsdk/emsdk install "$EMSDK_VERSION"
+          /opt/emsdk/emsdk activate "$EMSDK_VERSION"
 
       # ── System deps ─────────────────────────────────────────────────
       - name: Install build tools
@@ -72,7 +86,21 @@ jobs:
         uses: actions/cache@v5
         with:
           path: orca-wasm/deps-install
-          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-occt-${{ env.OCCT_VERSION }}-v17
+          key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-occt-${{ env.OCCT_VERSION }}-v16
+          # On a key bump, fall back to the closest previous cache. Stamp files
+          # make partial deps-install safe, so only changed deps get rebuilt
+          # instead of redoing the full ~3 h build (OCCT alone is ~45 min).
+          # NOTE: because of this fallback, bumping a dependency's pinned
+          # version here is NOT enough to force a rebuild of it — the stamp
+          # file for that step must also change (see the OCCT step's
+          # version-suffixed stamp for the pattern), otherwise a restored
+          # stale cache silently keeps the old version. Bit us once already:
+          # Eigen 3.4.0->5.0.1 in 840c260 kept resolving against a restored
+          # 3.4.0 install because .headers_built wasn't version-suffixed.
+          restore-keys: |
+            wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-occt-${{ env.OCCT_VERSION }}-
+            wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-
+            wasm-deps-${{ runner.os }}-
 
       # ── Boost ────────────────────────────────────────────────────────
       # Build Boost using b2 with the clang-emscripten toolset.  The standard
@@ -202,7 +230,10 @@ jobs:
         run: |
           source /opt/emsdk/emsdk_env.sh
           INSTALL="$(pwd)/orca-wasm/deps-install"
-          STAMP="${INSTALL}/.headers_built"
+          # Stamp name is version-suffixed (like the OCCT step below) so that
+          # bumping any pinned version here invalidates it even if the cache
+          # step above only fell back to an older cache via restore-keys.
+          STAMP="${INSTALL}/.headers_built_eigen5.0.1_nlohmann3.11.3_expat2.5.0_nlopt2.7.1_cereal1.3.2"
           [[ -f "${STAMP}" ]] && echo "[headers+expat+nlopt] cached" && exit 0
 
           # ── Eigen3 (header-only, install cmake config) ────────────────
@@ -388,12 +419,12 @@ jobs:
       # Build emscripten's bundled ports so FindZLIB/FindPNG/FindJPEG can
       # reference their headers and .a files from the sysroot.
       #
-      # NO stamp short-circuit here: these ports live in the emsdk sysroot
-      # ($EMSDK/.../cache/sysroot), which is installed fresh every run and is
-      # NOT part of the cached deps-install/.  A stamp in deps-install would
-      # wrongly skip embuilder on a cache hit, leaving libpng.a absent and
-      # failing the link.  embuilder is idempotent and self-caching, so just
-      # always run it (a few seconds when already built).
+      # No stamp short-circuit here: these ports live in the emsdk sysroot
+      # ($EMSDK/.../cache/sysroot), not in the cached deps-install/.  The
+      # sysroot is now carried by the "Cache Emscripten" step above, so on a
+      # cache hit embuilder finds the ports already built and is a no-op
+      # (a few seconds); on a cold emsdk cache it builds them.  Always run it —
+      # embuilder is idempotent and self-caching.
       - name: Build WASM deps — emscripten ports (zlib/png/jpeg)
         run: |
           source /opt/emsdk/emsdk_env.sh
