@@ -5,6 +5,7 @@ cli/dist/
 public/wasm/slicer.js
 public/wasm/slicer.wasm
 public/wasm/slicer.data
+public/wasm/slicer.cjs
 .env
 .claude/*
 !.claude/skills/

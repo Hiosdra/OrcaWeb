@@ -154,7 +154,9 @@ int orc_slice(const void* stl_data, int stl_len,
     try {
         // ── load model ───────────────────────────────────────────────
         Slic3r::Model model;
-        if (!Slic3r::load_stl("/tmp/ow_in.stl", &model, "object")) {
+        const bool stl_ok = Slic3r::load_stl("/tmp/ow_in.stl", &model, "object");
+        std::remove("/tmp/ow_in.stl"); // MEMFS is RAM-backed; free it as soon as loaded
+        if (!stl_ok) {
             record_error("STL load failed");
             return -4;
         }
@@ -210,6 +212,7 @@ int orc_slice(const void* stl_data, int stl_len,
         if (!buf) { std::fclose(gf); record_error("out of memory"); return -9; }
         std::fread(buf, 1, static_cast<std::size_t>(sz), gf);
         std::fclose(gf);
+        std::remove("/tmp/ow_out.gcode"); // free the RAM-backed MEMFS copy now that it's in buf
         buf[sz] = '\0';
 
         *out_gcode = buf;
@@ -449,6 +452,7 @@ int orc_slice_multi(
         if (!buf) { std::fclose(gf); record_error("out of memory"); return -9; }
         std::fread(buf, 1, static_cast<std::size_t>(sz), gf);
         std::fclose(gf);
+        std::remove("/tmp/ow_out.gcode"); // free the RAM-backed MEMFS copy now that it's in buf
         buf[sz] = '\0';
 
         *out_gcode = buf;

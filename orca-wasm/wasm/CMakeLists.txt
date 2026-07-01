@@ -8,7 +8,11 @@ target_link_libraries(slicer PRIVATE orca_web_bridge)
 
 # ── Emscripten link flags ────────────────────────────────────────────────────
 target_link_options(slicer PRIVATE
-  -O3
+  # -O2 instead of -O3: the --fpcast-emu pass added by
+  # EMULATE_FUNCTION_POINTER_CASTS below crashes Binaryen's wasm-opt at -O3
+  # (mixed_arena.h assertion, 'index < usedElements'). -O2 runs a lighter
+  # pass pipeline that doesn't trip it.
+  -O2
   -sALLOW_MEMORY_GROWTH=1
   -sMALLOC=emmalloc
   -sSTACK_SIZE=16777216
@@ -19,10 +23,13 @@ target_link_options(slicer PRIVATE
   -sMODULARIZE=1
   -sEXPORT_NAME=OrcaModule
   -sDISABLE_EXCEPTION_CATCHING=0
-  # NOTE: -sEMULATE_FUNCTION_POINTER_CASTS=1 was removed — its --fpcast-emu
-  # wasm-opt pass crashes Binaryen at -O3 (mixed_arena.h assertion).  The link
-  # itself succeeds without it; if a genuine mismatched-signature indirect call
-  # exists it will trap at runtime with a clear message, to be fixed surgically.
+  # Emulates indirect calls through mismatched function-pointer signatures
+  # (real C code relies on this, e.g. mesh-repair dispatch tables). Without
+  # it, a mismatched-signature indirect call traps at runtime as an opaque
+  # "memory access out of bounds" RuntimeError — reproduced locally by
+  # slicing the real Voron Design Cube v7 STL, which crashes on load
+  # regardless of print settings (see scripts/repro-real-stl.mjs).
+  -sEMULATE_FUNCTION_POINTER_CASTS=1
   -fexceptions
   # No --preload-file: the headless flat-config slicer never reads orca/resources
   # at runtime (verified in-browser — a full slice opens only /tmp/*.stl/.gcode,
