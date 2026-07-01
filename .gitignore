@@ -6,6 +6,8 @@ public/wasm/slicer.js
 public/wasm/slicer.wasm
 public/wasm/slicer.data
 public/wasm/slicer.cjs
+scripts/repro-oom.mjs
+scripts/simple_cube_30mm.stl
 .env
 .claude/*
 !.claude/skills/
