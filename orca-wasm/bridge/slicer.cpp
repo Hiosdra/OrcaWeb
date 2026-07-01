@@ -209,7 +209,12 @@ int orc_slice(const void* stl_data, int stl_len,
         std::rewind(gf);
 
         char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz) + 1));
-        if (!buf) { std::fclose(gf); record_error("out of memory"); return -9; }
+        if (!buf) {
+            std::fclose(gf);
+            std::remove("/tmp/ow_out.gcode"); // free the RAM-backed MEMFS copy even on OOM
+            record_error("out of memory");
+            return -9;
+        }
         std::fread(buf, 1, static_cast<std::size_t>(sz), gf);
         std::fclose(gf);
         std::remove("/tmp/ow_out.gcode"); // free the RAM-backed MEMFS copy now that it's in buf
@@ -449,7 +454,12 @@ int orc_slice_multi(
         std::rewind(gf);
 
         char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz) + 1));
-        if (!buf) { std::fclose(gf); record_error("out of memory"); return -9; }
+        if (!buf) {
+            std::fclose(gf);
+            std::remove("/tmp/ow_out.gcode"); // free the RAM-backed MEMFS copy even on OOM
+            record_error("out of memory");
+            return -9;
+        }
         std::fread(buf, 1, static_cast<std::size_t>(sz), gf);
         std::fclose(gf);
         std::remove("/tmp/ow_out.gcode"); // free the RAM-backed MEMFS copy now that it's in buf
