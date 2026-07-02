@@ -8,11 +8,7 @@ target_link_libraries(slicer PRIVATE orca_web_bridge)
 
 # ── Emscripten link flags ────────────────────────────────────────────────────
 target_link_options(slicer PRIVATE
-  # -O2 instead of -O3: the --fpcast-emu pass added by
-  # EMULATE_FUNCTION_POINTER_CASTS below crashes Binaryen's wasm-opt at -O3
-  # (mixed_arena.h assertion, 'index < usedElements'). -O2 runs a lighter
-  # pass pipeline that doesn't trip it.
-  -O2
+  -O3
   -sALLOW_MEMORY_GROWTH=1
   -sMALLOC=emmalloc
   -sSTACK_SIZE=16777216
@@ -23,20 +19,16 @@ target_link_options(slicer PRIVATE
   -sMODULARIZE=1
   -sEXPORT_NAME=OrcaModule
   -sDISABLE_EXCEPTION_CATCHING=0
-  # Emulates indirect calls through mismatched function-pointer signatures
-  # (real C code relies on this, e.g. mesh-repair dispatch tables). Without
-  # it, a mismatched-signature indirect call traps at runtime as an opaque
-  # "memory access out of bounds" RuntimeError — reproduced locally by
-  # slicing the real Voron Design Cube v7 STL, which crashes on load
-  # regardless of print settings (see scripts/repro-real-stl.mjs).
-  -sEMULATE_FUNCTION_POINTER_CASTS=1
-  # The --fpcast-emu pass (added by the flag above) generates trampolines up
-  # to a fixed max parameter count (16 by default). libslic3r has indirectly-
-  # called functions with more params than that, so wasm-opt aborts with
-  # "Fatal: max-func-params needs to be at least N" (N=22 observed first,
-  # then N=40 once more of the codebase's indirect-call sites were reached).
-  # Raise it well above the observed requirement to leave headroom.
-  -sBINARYEN_EXTRA_PASSES=--pass-arg=max-func-params@64
+  # EMULATE_FUNCTION_POINTER_CASTS + a raised max-func-params was tried here
+  # to fix a real crash (slicing the official Voron Design Cube v7 STL traps
+  # with "memory access out of bounds" — a mismatched-signature indirect call
+  # in the mesh-repair path, reproducible with scripts/repro-real-stl.mjs).
+  # It backfired: at -O2 with max-func-params raised to 64, the emulation
+  # trampolines themselves became broken at runtime — even a trivial
+  # 12-triangle cube started crashing the same way. That's strictly worse
+  # than the original bug (which only hit specific real-world meshes), so
+  # it was reverted. The Voron Cube crash is still open; needs a source-level
+  # fix (the actual offending call site) rather than a Binaryen emulation flag.
   -fexceptions
   # No --preload-file: the headless flat-config slicer never reads orca/resources
   # at runtime (verified in-browser — a full slice opens only /tmp/*.stl/.gcode,
