@@ -141,6 +141,15 @@ int orc_init(const char* json_data, int json_len) {
         // and avoids a hard crash. Callers can still re-enable it explicitly.
         g_config.set_deserialize_strict("detect_narrow_internal_solid_infill", "0");
 
+        // Same underlying Arachne bug (SkeletalTrapezoidation::propagateBeadingsDownward)
+        // is also reachable through ordinary wall generation — OrcaSlicer defaults
+        // wall_generator to Arachne (variable-width walls). Reproduced with a real
+        // 1.1M-triangle model (Prusa Rocket Engine MK4S) via PerimeterGenerator::
+        // process_arachne(); switching to the classic (constant-width) generator
+        // avoids it and sliced the same model successfully. Callers can still
+        // re-enable Arachne explicitly if their models don't hit the bug.
+        g_config.set_deserialize_strict("wall_generator", "classic");
+
         for (auto& [key, val] : j.items()) {
             std::string sv = json_val_to_string(val);
             if (sv.empty()) continue;
