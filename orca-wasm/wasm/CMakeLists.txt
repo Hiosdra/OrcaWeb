@@ -9,6 +9,12 @@ target_link_libraries(slicer PRIVATE orca_web_bridge)
 # ── Emscripten link flags ────────────────────────────────────────────────────
 target_link_options(slicer PRIVATE
   -O3
+  # Keeps a wasm name section (function names) for readable stack traces
+  # without full DWARF — needed to root-cause the Voron Cube mismatched-
+  # signature indirect-call crash (see scripts/repro-real-stl.mjs); release
+  # builds are otherwise fully stripped and traces are just opaque
+  # wasm-function[N] indices. Negligible size/perf cost, safe to keep.
+  --profiling-funcs
   -sALLOW_MEMORY_GROWTH=1
   -sMALLOC=emmalloc
   -sSTACK_SIZE=16777216
