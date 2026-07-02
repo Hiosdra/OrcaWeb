@@ -131,24 +131,13 @@ int orc_init(const char* json_data, int json_len) {
         g_config = Slic3r::DynamicPrintConfig();
         g_config.apply(g_defaults);
 
-        // OrcaSlicer defaults detect_narrow_internal_solid_infill to true, which
-        // routes narrow solid-infill areas through Arachne's ipConcentricInternal
-        // fill (Fill.cpp). Arachne's SkeletalTrapezoidation::propagateBeadingsDownward
-        // has a real out-of-bounds bug that WASM's bounds-checked memory traps on —
-        // reproduced with ordinary real-world meshes (Voron Design Cube v7, Stanford
-        // Bunny), not just pathological input. Falling back to rectilinear for those
-        // areas (this option's documented "off" behavior) is a minor quality trade-off
-        // and avoids a hard crash. Callers can still re-enable it explicitly.
-        g_config.set_deserialize_strict("detect_narrow_internal_solid_infill", "0");
-
-        // Same underlying Arachne bug (SkeletalTrapezoidation::propagateBeadingsDownward)
-        // is also reachable through ordinary wall generation — OrcaSlicer defaults
-        // wall_generator to Arachne (variable-width walls). Reproduced with a real
-        // 1.1M-triangle model (Prusa Rocket Engine MK4S) via PerimeterGenerator::
-        // process_arachne(); switching to the classic (constant-width) generator
-        // avoids it and sliced the same model successfully. Callers can still
-        // re-enable Arachne explicitly if their models don't hit the bug.
-        g_config.set_deserialize_strict("wall_generator", "classic");
+        // NOTE: detect_narrow_internal_solid_infill and wall_generator were
+        // previously forced off/classic here to dodge a crash in Arachne's
+        // SkeletalTrapezoidation::propagateBeadingsDownward (out-of-bounds
+        // access on a degenerate "too small central edges" node — see the
+        // upstream-acknowledged bug comment in getOrCreateBeading()). That's
+        // now fixed at the source via orca-wasm/patches/apply.py (section 8),
+        // so both stay at OrcaSlicer's real defaults (Arachne enabled).
 
         for (auto& [key, val] : j.items()) {
             std::string sv = json_val_to_string(val);
