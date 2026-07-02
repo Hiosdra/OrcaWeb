@@ -63,7 +63,28 @@ jobs:
           # Minimal set — building headless WASM (no GUI, no system GTK/webkit needed)
           sudo apt-get install -y \
             ninja-build python3 cmake pkg-config \
-            m4 texinfo libssl-dev
+            m4 texinfo libssl-dev ccache
+
+      # ── ccache ───────────────────────────────────────────────────────
+      # The libslic3r/bridge compile (293 ninja targets) always rebuilds from
+      # scratch — unlike deps-install and emsdk, the build-wasm/ object dir
+      # isn't (and can't easily be) cached across runs. That makes even a
+      # one-line link-flag or bridge/*.cpp change cost the full ~50-60 min
+      # compile. ccache turns that into a near-instant rebuild for unchanged
+      # translation units.
+      - name: Cache ccache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ccache
+          key: wasm-ccache-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-${{ github.run_id }}
+          restore-keys: |
+            wasm-ccache-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-
+            wasm-ccache-${{ runner.os }}-
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=2G
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
 
       # ── Checkout OrcaSlicer at requested tag ────────────────────────
       # Do a plain shallow clone — the git submodule is not registered in index.
@@ -90,6 +111,13 @@ jobs:
           # On a key bump, fall back to the closest previous cache. Stamp files
           # make partial deps-install safe, so only changed deps get rebuilt
           # instead of redoing the full ~3 h build (OCCT alone is ~45 min).
+          # NOTE: because of this fallback, bumping a dependency's pinned
+          # version here is NOT enough to force a rebuild of it — the stamp
+          # file for that step must also change (see the OCCT step's
+          # version-suffixed stamp for the pattern), otherwise a restored
+          # stale cache silently keeps the old version. Bit us once already:
+          # Eigen 3.4.0->5.0.1 in 840c260 kept resolving against a restored
+          # 3.4.0 install because .headers_built wasn't version-suffixed.
           restore-keys: |
             wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-occt-${{ env.OCCT_VERSION }}-
             wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-
@@ -223,7 +251,10 @@ jobs:
         run: |
           source /opt/emsdk/emsdk_env.sh
           INSTALL="$(pwd)/orca-wasm/deps-install"
-          STAMP="${INSTALL}/.headers_built"
+          # Stamp name is version-suffixed (like the OCCT step below) so that
+          # bumping any pinned version here invalidates it even if the cache
+          # step above only fell back to an older cache via restore-keys.
+          STAMP="${INSTALL}/.headers_built_eigen5.0.1_nlohmann3.11.3_expat2.5.0_nlopt2.7.1_cereal1.3.2"
           [[ -f "${STAMP}" ]] && echo "[headers+expat+nlopt] cached" && exit 0
 
           # ── Eigen3 (header-only, install cmake config) ────────────────
@@ -441,6 +472,8 @@ jobs:
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${DEP_INSTALL}" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_MODULE_PATH="${WORK}/orca-wasm/cmake" \
             -DCMAKE_PROJECT_INCLUDE_BEFORE="${WORK}/orca-wasm/cmake/wasm_find_paths.cmake" \
             -DSLIC3R_WASM=ON \
@@ -469,6 +502,8 @@ jobs:
         run: |
           source /opt/emsdk/emsdk_env.sh
           emmake cmake --build orca-wasm/build-wasm --target slicer -j4
+          echo "--- ccache stats ---"
+          ccache -s || true
 
       # ── Verify & package artifacts ───────────────────────────────────
       # wasm/CMakeLists.txt POST_BUILD copies to public/wasm/ automatically.

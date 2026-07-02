@@ -461,7 +461,38 @@ patch("src/libslic3r/utils.cpp", [
 ])
 
 # =============================================================================
-# 8. Root CMakeLists.txt — append OrcaWeb bridge + WASM link target
+# 8. Arachne/SkeletalTrapezoidation.cpp — guard a known degenerate case
+#    getOrCreateBeading() has a comment acknowledging "This bug is due to too
+#    small central edges": when a node has no incident edges to measure a
+#    distance from, `dist` is left at numeric_limits<coord_t>::max() and only
+#    an assert() (stripped in our -DNDEBUG Release build) guards it before
+#    `dist * 2` overflows into beading_strategy.getOptimalBeadCount(). The
+#    garbage bead_count then drives out-of-bounds access in
+#    propagateBeadingsDownward()/interpolate() downstream — reproducible with
+#    ordinary real-world meshes (Voron Design Cube v7, Stanford Bunny, and a
+#    1.1M-triangle model) as a WASM "memory access out of bounds" trap, which
+#    a native release build likely tolerates silently instead of catching.
+#    Fall back to a safe minimum bead_count instead of proceeding with the
+#    overflowed distance.
+# =============================================================================
+patch("src/libslic3r/Arachne/SkeletalTrapezoidation.cpp", [
+    (
+        r'assert\(dist != std::numeric_limits<coord_t>::max\(\)\);\s*\n(\s*)node->data\.bead_count = beading_strategy\.getOptimalBeadCount\(dist \* 2\);',
+        r'assert(dist != std::numeric_limits<coord_t>::max());\n'
+        r'\1if (dist == std::numeric_limits<coord_t>::max()) {\n'
+        r'\1    // Degenerate node (no incident edges to measure) — see comment above\n'
+        r'\1    // getOrCreateBeading(). Avoid overflowing `dist * 2` into getOptimalBeadCount().\n'
+        r'\1    BOOST_LOG_TRIVIAL(warning) << "SkeletalTrapezoidation: degenerate node with no measurable distance, using bead_count=1";\n'
+        r'\1    node->data.bead_count = 1;\n'
+        r'\1} else {\n'
+        r'\1    node->data.bead_count = beading_strategy.getOptimalBeadCount(dist * 2);\n'
+        r'\1}',
+        1,
+    ),
+])
+
+# =============================================================================
+# 9. Root CMakeLists.txt — append OrcaWeb bridge + WASM link target
 # =============================================================================
 BRIDGE_INJECTION = """\
 
