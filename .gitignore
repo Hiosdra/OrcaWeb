@@ -10,6 +10,8 @@ scripts/repro-oom.mjs
 scripts/simple_cube_30mm.stl
 scripts/repro-real-stl.mjs
 scripts/voron_cube.stl
+scripts/bunny.stl
+scripts/rocket_engine_mk4s.stl
 .env
 .claude/*
 !.claude/skills/
