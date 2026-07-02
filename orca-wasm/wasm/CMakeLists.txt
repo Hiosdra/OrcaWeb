@@ -15,6 +15,10 @@ target_link_options(slicer PRIVATE
   # builds are otherwise fully stripped and traces are just opaque
   # wasm-function[N] indices. Negligible size/perf cost, safe to keep.
   --profiling-funcs
+  # TEMPORARY DIAGNOSTIC: pulls in the UBSan runtime for the Arachne sources
+  # instrumented in orca-wasm/patches/apply.py (section 8b), to pinpoint the
+  # exact file:line of the SkeletalTrapezoidation OOB bug. Remove once found.
+  -fsanitize=undefined
   -sALLOW_MEMORY_GROWTH=1
   -sMALLOC=emmalloc
   -sSTACK_SIZE=16777216
