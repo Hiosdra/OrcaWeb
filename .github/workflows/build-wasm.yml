@@ -63,7 +63,28 @@ jobs:
           # Minimal set — building headless WASM (no GUI, no system GTK/webkit needed)
           sudo apt-get install -y \
             ninja-build python3 cmake pkg-config \
-            m4 texinfo libssl-dev
+            m4 texinfo libssl-dev ccache
+
+      # ── ccache ───────────────────────────────────────────────────────
+      # The libslic3r/bridge compile (293 ninja targets) always rebuilds from
+      # scratch — unlike deps-install and emsdk, the build-wasm/ object dir
+      # isn't (and can't easily be) cached across runs. That makes even a
+      # one-line link-flag or bridge/*.cpp change cost the full ~50-60 min
+      # compile. ccache turns that into a near-instant rebuild for unchanged
+      # translation units.
+      - name: Cache ccache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ccache
+          key: wasm-ccache-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-${{ github.run_id }}
+          restore-keys: |
+            wasm-ccache-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-
+            wasm-ccache-${{ runner.os }}-
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=2G
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
 
       # ── Checkout OrcaSlicer at requested tag ────────────────────────
       # Do a plain shallow clone — the git submodule is not registered in index.
@@ -451,6 +472,8 @@ jobs:
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${DEP_INSTALL}" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_MODULE_PATH="${WORK}/orca-wasm/cmake" \
             -DCMAKE_PROJECT_INCLUDE_BEFORE="${WORK}/orca-wasm/cmake/wasm_find_paths.cmake" \
             -DSLIC3R_WASM=ON \
@@ -479,6 +502,8 @@ jobs:
         run: |
           source /opt/emsdk/emsdk_env.sh
           emmake cmake --build orca-wasm/build-wasm --target slicer -j4
+          echo "--- ccache stats ---"
+          ccache -s || true
 
       # ── Verify & package artifacts ───────────────────────────────────
       # wasm/CMakeLists.txt POST_BUILD copies to public/wasm/ automatically.
