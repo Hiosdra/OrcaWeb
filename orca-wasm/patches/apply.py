@@ -572,6 +572,37 @@ patch("src/libslic3r/Arachne/WallToolPaths.cpp", [
 ])
 
 # =============================================================================
+# 8f. WallToolPaths.hpp — default-initialize WallToolPathsParams fields
+#     Next crash after 8e (same UBSan location, unchanged): min_length_factor
+#     itself DOES have a documented fallback in make_paths_params() (0.5f),
+#     but min_bead_width, min_feature_size and wall_transition_length are
+#     only conditionally assigned there with NO else-fallback — if the
+#     corresponding print_object_config option isn't present (our headless
+#     WASM build ships no bundled profile JSON, unlike a real OrcaSlicer
+#     install), those fields stay uninitialized garbage. Rather than chase
+#     exactly which uninitialized field's garbage bit pattern produces the
+#     observed NaN in this particular build, default-initialize the whole
+#     struct to the same values make_paths_params() already documents as
+#     intended fallbacks (or 0/false for the ones with none documented) —
+#     a normal, idiomatic fix that only changes behavior for previously-UB
+#     construction paths.
+# =============================================================================
+patch("src/libslic3r/Arachne/WallToolPaths.hpp", [
+    (
+        r'float   min_bead_width;\n    float   min_feature_size;\n    float   min_length_factor;\n    float   wall_transition_length;\n    float   wall_transition_angle;\n    float   wall_transition_filter_deviation;\n    int     wall_distribution_count;\n    bool    is_top_or_bottom_layer;',
+        r'float   min_bead_width = 0.f;\n'
+        r'    float   min_feature_size = 0.f;\n'
+        r'    float   min_length_factor = 0.5f;\n'
+        r'    float   wall_transition_length = 0.f;\n'
+        r'    float   wall_transition_angle = 0.f;\n'
+        r'    float   wall_transition_filter_deviation = 0.f;\n'
+        r'    int     wall_distribution_count = 1;\n'
+        r'    bool    is_top_or_bottom_layer = false;',
+        1,
+    ),
+])
+
+# =============================================================================
 # 8b. TEMPORARY DIAGNOSTIC — UBSan on just the Arachne sources, to pinpoint
 #     the exact file:line of the out-of-bounds/UB bug behind the
 #     "memory access out of bounds" WASM trap in SkeletalTrapezoidation
