@@ -62,6 +62,21 @@ static std::string g_bed_shape = "rectangle";
 static void record_error(const char* msg) { g_last_error = msg ? msg : "unknown error"; }
 static void record_error(const std::string& s) { g_last_error = s; }
 
+// Unconditionally removes a MEMFS temp file on scope exit (success, early
+// return, or C++ exception alike). Without this, a throw from do_export()
+// (or anything else between file creation and the manual std::remove() at
+// the bottom of the happy path) left the partially-written file behind —
+// MEMFS is RAM-backed, so that's a real per-failed-slice memory leak over a
+// long session, not just a stray file. std::remove() on a missing path is a
+// harmless no-op (ENOENT), so double-removal on the happy path is fine.
+struct TempFileGuard {
+    std::string path;
+    explicit TempFileGuard(std::string p) : path(std::move(p)) {}
+    ~TempFileGuard() { std::remove(path.c_str()); }
+    TempFileGuard(const TempFileGuard&) = delete;
+    TempFileGuard& operator=(const TempFileGuard&) = delete;
+};
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 static std::string json_val_to_string(const nlohmann::json& v) {
     if (v.is_string())  return v.get<std::string>();
@@ -231,6 +246,9 @@ int orc_slice(const void* stl_data, int stl_len,
         }
 
         // ── export G-code to MEMFS ───────────────────────────────────
+        // Guard covers the do_export() call too: if it throws partway through
+        // writing, the partial file is still removed on the way out.
+        TempFileGuard out_guard("/tmp/ow_out.gcode");
         {
             Slic3r::GCode gcode_gen;
             gcode_gen.do_export(&print, "/tmp/ow_out.gcode", nullptr, nullptr);
@@ -247,13 +265,11 @@ int orc_slice(const void* stl_data, int stl_len,
         char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz) + 1));
         if (!buf) {
             std::fclose(gf);
-            std::remove("/tmp/ow_out.gcode"); // free the RAM-backed MEMFS copy even on OOM
             record_error("out of memory");
             return -9;
         }
         std::fread(buf, 1, static_cast<std::size_t>(sz), gf);
         std::fclose(gf);
-        std::remove("/tmp/ow_out.gcode"); // free the RAM-backed MEMFS copy now that it's in buf
         buf[sz] = '\0';
 
         *out_gcode = buf;
@@ -477,6 +493,7 @@ int orc_slice_multi(
             return -7;
         }
 
+        TempFileGuard out_guard("/tmp/ow_out.gcode");
         {
             Slic3r::GCode gcode_gen;
             gcode_gen.do_export(&print, "/tmp/ow_out.gcode", nullptr, nullptr);
@@ -492,13 +509,11 @@ int orc_slice_multi(
         char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz) + 1));
         if (!buf) {
             std::fclose(gf);
-            std::remove("/tmp/ow_out.gcode"); // free the RAM-backed MEMFS copy even on OOM
             record_error("out of memory");
             return -9;
         }
         std::fread(buf, 1, static_cast<std::size_t>(sz), gf);
         std::fclose(gf);
-        std::remove("/tmp/ow_out.gcode"); // free the RAM-backed MEMFS copy now that it's in buf
         buf[sz] = '\0';
 
         *out_gcode = buf;

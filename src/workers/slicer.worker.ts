@@ -4,6 +4,14 @@ import { toEngineConfig } from '../lib/profiles'
 
 let orcaModule: OrcaModule | null = null
 let loadingWasm = false
+// Set when the WASM module aborts at runtime (e.g. an unreachable trap or
+// OOM inside a slice). Emscripten does not support resuming or reinitializing
+// a module after abort() — every exported call after that point either
+// throws immediately or hangs — so `orcaModule` staying non-null must not be
+// read as "still usable". Once true, this worker refuses further work and
+// tells the main thread its engine is dead so a fresh worker can be spawned
+// instead of silently retrying against a corpse.
+let wasmCrashed = false
 // Slice request that arrived before WASM was ready — last-wins (UI disables
 // the Slice button while loading, so only one request can queue in practice)
 let pendingSlice: { stl: ArrayBuffer; config: Record<string, unknown> } | null = null
@@ -19,6 +27,19 @@ send({ type: 'WORKER_READY' })
 
 self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) => {
   const msg = event.data
+
+  // Once the engine has aborted, fail every work request immediately instead
+  // of queueing it (it would never resolve) or calling into the dead module
+  // (undefined behaviour post-abort). worker-singleton.ts drops this worker
+  // on the resulting *_ERROR and spawns a fresh one on the next request.
+  if (wasmCrashed) {
+    const crashMsg = 'Slicer engine crashed and cannot continue — reload to restart it'
+    if (msg.type === 'SLICE') send({ type: 'SLICE_ERROR', code: -9, message: crashMsg })
+    else if (msg.type === 'SLICE_MULTI') send({ type: 'SLICE_MULTI_ERROR', code: -9, message: crashMsg })
+    else if (msg.type === 'OBJ_TO_STL') send({ type: 'OBJ_STL_ERROR', message: crashMsg, filename: msg.filename })
+    else if (msg.type === 'CAD_TO_STL') send({ type: 'CAD_STL_ERROR', message: crashMsg, filename: msg.filename })
+    return
+  }
 
   if (msg.type === 'LOAD_WASM') {
     if (orcaModule) {
@@ -80,7 +101,11 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         wasmBinary,
         locateFile: (path: string) => `${wasmBase}/${path}${v}`,
         printErr: (m: string) => console.warn('[OrcaWASM]', m),
-        onAbort: (m: string) => console.error('[OrcaWASM abort]', m),
+        onAbort: (m: string) => {
+          console.error('[OrcaWASM abort]', m)
+          wasmCrashed = true
+          send({ type: 'WASM_ERROR', message: `Slicer engine crashed: ${m}` })
+        },
       })
 
       loadingWasm = false

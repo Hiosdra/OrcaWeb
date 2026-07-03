@@ -12,7 +12,6 @@ import {
   getWorker,
   addWorkerListener,
   getWasmStatus,
-  getWasmError,
   type WasmStatus,
 } from './lib/worker-singleton'
 
@@ -116,8 +115,15 @@ export default function App() {
       pendingFirstSliceRef.current = { id: next.id, stl: stlBuffer, config: cfg }
       // Worker will fire WASM_LOADED; the listener sends the pending slice then
     } else {
-      updateQueue(q => q.map(i => i.id === next.id ? { ...i, status: 'error', error: `Slicer engine failed to load: ${getWasmError()}` } : i))
-      currentItemIdRef.current = null
+      // 'error' — the engine failed to load or crashed mid-session.
+      // worker-singleton.ts already discarded the dead worker on that
+      // WASM_ERROR, so calling getWorker() here spawns a fresh one and
+      // kicks off a fresh WASM_LOADED/WASM_ERROR cycle: retrying a slice is
+      // a real recovery path, not a dead end that only a page reload fixes.
+      pendingFirstSliceRef.current = { id: next.id, stl: stlBuffer, config: cfg }
+      wasmStatusRef.current = 'loading'
+      setWasmStatus('loading')
+      getWorker()
     }
   }, [updateQueue])
 
