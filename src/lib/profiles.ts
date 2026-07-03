@@ -18,25 +18,7 @@ export const FILAMENT_PRESETS: Record<string, Partial<OrcaConfig>> = orcaProfile
 // these printers' real Z height, so any model taller than 100mm failed
 // "exceeds the maximum build volume height" validation regardless of which
 // printer was selected.
-export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = {
-  // No real "Generic" profile exists upstream — kept hand-typed as a
-  // reasonable placeholder for users without a specific printer.
-  'Generic 0.4': {
-    printer_model: 'Generic',
-    nozzle_diameter: 0.4,
-    bed_size_x: 256,
-    bed_size_y: 256,
-    printable_height: 250,
-  },
-  'Generic 0.6': {
-    printer_model: 'Generic',
-    nozzle_diameter: 0.6,
-    bed_size_x: 256,
-    bed_size_y: 256,
-    printable_height: 250,
-  },
-  ...orcaProfiles.printerPresets,
-}
+export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = orcaProfiles.printerPresets
 
 export function buildConfig(
   printer: string,
