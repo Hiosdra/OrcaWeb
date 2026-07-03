@@ -166,7 +166,7 @@ These replace OrcaSlicer `.cpp` (and some `.hpp`) files whose implementation dep
 | `Shape/TextShape.cpp` | 3D text extrusion | **FreeType** + **OCCT** | Empty no-op |
 
 !!! note "STEP support — in-engine OCCT"
-    OCCT (Open CASCADE Technology 7.8.1) is compiled directly into `slicer.wasm` via `deps/build_occt.sh`. The engine exposes `_orc_cad_to_stl()` which reads a STEP file from MEMFS via OrcaSlicer's `Model::read_from_step()` (which runs `Step::load()` + `Step::mesh()` under the hood), tessellates the BRep geometry, and returns binary STL bytes.
+    OCCT (Open CASCADE Technology 7.8.1) is compiled directly into `slicer.wasm` as part of the dependency build (see `.github/workflows/build-wasm.yml`'s "Build WASM deps — OCCT" step, or `orca-wasm/scripts/build-local-wsl.sh` for local builds). The engine exposes `_orc_cad_to_stl()` which reads a STEP file from MEMFS via OrcaSlicer's `Model::read_from_step()` (which runs `Step::load()` + `Step::mesh()` under the hood), tessellates the BRep geometry, and returns binary STL bytes.
 
     - **Browser**: `CAD_TO_STL` message is sent to the slicer worker; the worker calls `_orc_cad_to_stl()` and replies with `CAD_STL_COMPLETE { stl }`.
 

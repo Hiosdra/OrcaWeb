@@ -96,10 +96,6 @@ Dependencies are cached between runs (GitHub Actions cache key based on dependen
     (also copied to `wasm-artifacts/` to mirror the CI upload step) — no
     manual copy needed.
 
-    `orca-wasm/scripts/build.sh` still exists but targets OrcaSlicer v2.3.2
-    and predates the current bridge integration — it's kept for reference
-    only, don't use it for v2.4.0 builds.
-
 ## Applying patches before build
 
 `patches/apply.py` patches the OrcaSlicer source tree to make it compile under Emscripten. It is safe to run multiple times (idempotent):
