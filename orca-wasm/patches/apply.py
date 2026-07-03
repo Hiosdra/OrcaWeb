@@ -492,6 +492,29 @@ patch("src/libslic3r/Arachne/SkeletalTrapezoidation.cpp", [
 ])
 
 # =============================================================================
+# 8c. WallToolPaths.cpp — guard shorterThan() against an empty shape
+#     Found via UBSan (see section 8b): shorterThan() takes `&shape.back()`
+#     unconditionally. Called from removeSmallLines() on each ExtrusionLine
+#     in a toolpath; degenerate/thin real-world geometry (Voron Design Cube
+#     v7, Stanford Bunny) can produce a line with zero junctions, so
+#     `.back()` on the empty vector is undefined behavior — WASM traps on it
+#     as "memory access out of bounds"; a native build likely reads garbage
+#     instead. An empty shape has zero length, which is trivially "shorter
+#     than" any positive check_length, so returning true early is both safe
+#     and the semantically correct answer, not just a guard.
+# =============================================================================
+patch("src/libslic3r/Arachne/WallToolPaths.cpp", [
+    (
+        r'(template<typename T> bool shorterThan\(const T &shape, const coord_t check_length\)\s*\n\{\s*\n)(\s*)(const auto \*p0)',
+        r'\1\2if (shape.empty())\n'
+        r'\2    // Empty shape: zero length is always shorter than check_length.\n'
+        r'\2    return true;\n'
+        r'\2\3',
+        1,
+    ),
+])
+
+# =============================================================================
 # 8b. TEMPORARY DIAGNOSTIC — UBSan on just the Arachne sources, to pinpoint
 #     the exact file:line of the out-of-bounds/UB bug behind the
 #     "memory access out of bounds" WASM trap in SkeletalTrapezoidation
