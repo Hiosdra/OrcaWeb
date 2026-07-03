@@ -32,8 +32,12 @@ export default defineConfig({
             // slicer.js + slicer.wasm — CacheFirst so SW installs without
             // downloading the full engine bundle (~9 MB) upfront; both files
             // are cached on first use and stay version-matched in the same
-            // cache entry, sharing the same 30-day TTL.
-            urlPattern: /\/wasm\/slicer\.(js|wasm)$/,
+            // cache entry, sharing the same 30-day TTL. Both are fetched with
+            // a ?v=<app-version> cache-busting query param (slicer.worker.ts)
+            // so a new release's URL is a fresh cache entry rather than
+            // CacheFirst indefinitely reusing a stale pre-release binary —
+            // match the optional query string here too.
+            urlPattern: /\/wasm\/slicer\.(js|wasm)(\?.*)?$/,
             handler: 'CacheFirst',
             options: {
               cacheName: 'wasm-assets',
