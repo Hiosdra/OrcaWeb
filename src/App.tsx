@@ -5,7 +5,7 @@ import { ModelViewer } from './components/ModelViewer'
 import { SettingsPanel } from './components/SettingsPanel'
 import { GcodeViewer } from './components/GcodeViewer'
 import type { OrcaConfig, WorkerOutMessage } from './types'
-import { buildConfig } from './lib/profiles'
+import { buildConfig, PRINTER_PRESETS } from './lib/profiles'
 import { parse3mf } from './lib/parse3mf'
 import { formatBytes } from './lib/format'
 import {
@@ -48,7 +48,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('upload')
 
   const [selectedPreset, setSelectedPreset] = useState('standard')
-  const [selectedPrinter, setSelectedPrinter] = useState('Generic 0.4')
+  const [selectedPrinter, setSelectedPrinter] = useState(Object.keys(PRINTER_PRESETS)[0])
   const [selectedFilament, setSelectedFilament] = useState('PLA')
   const [configOverrides, setConfigOverrides] = useState<Partial<OrcaConfig>>({})
   const [wasmStatus, setWasmStatus] = useState<WasmStatus>(getWasmStatus)

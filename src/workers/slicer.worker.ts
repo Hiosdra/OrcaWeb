@@ -1,5 +1,6 @@
 import type { OrcaModule, WorkerInMessage, WorkerOutMessage } from '../types'
 import { sliceStl, sliceMultiStl, objToStl, cadToStl, OrcaSliceError } from '../lib/wasm-loader'
+import { toEngineConfig } from '../lib/profiles'
 
 let orcaModule: OrcaModule | null = null
 let loadingWasm = false
@@ -150,7 +151,8 @@ function doSliceMulti(stls: ArrayBuffer[], config: Record<string, unknown>) {
   if (!orcaModule) return
   try {
     const { _passthrough, ...rest } = config as Record<string, unknown> & { _passthrough?: Record<string, string> }
-    const flat = _passthrough ? { ...rest, ..._passthrough } : rest
+    const engineRest = toEngineConfig(rest)
+    const flat = _passthrough ? { ...engineRest, ..._passthrough } : engineRest
     const configJson = JSON.stringify(flat)
 
     // Concatenate all STL buffers and build int32 offset table
@@ -191,7 +193,8 @@ function doSlice(stl: ArrayBuffer, config: Record<string, unknown>) {
   if (!orcaModule) return
   try {
     const { _passthrough, ...rest } = config as Record<string, unknown> & { _passthrough?: Record<string, string> }
-    const flat = _passthrough ? { ...rest, ..._passthrough } : rest
+    const engineRest = toEngineConfig(rest)
+    const flat = _passthrough ? { ...engineRest, ..._passthrough } : engineRest
     const configJson = JSON.stringify(flat)
     const gcode = sliceStl(orcaModule, new Uint8Array(stl), configJson)
     send({ type: 'SLICE_COMPLETE', gcode })

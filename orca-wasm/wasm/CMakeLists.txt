@@ -9,6 +9,12 @@ target_link_libraries(slicer PRIVATE orca_web_bridge)
 # ── Emscripten link flags ────────────────────────────────────────────────────
 target_link_options(slicer PRIVATE
   -O3
+  # Keeps a wasm name section (function names) for readable stack traces
+  # without full DWARF — needed to root-cause the Voron Cube mismatched-
+  # signature indirect-call crash (see scripts/repro-real-stl.mjs); release
+  # builds are otherwise fully stripped and traces are just opaque
+  # wasm-function[N] indices. Negligible size/perf cost, safe to keep.
+  --profiling-funcs
   -sALLOW_MEMORY_GROWTH=1
   -sMALLOC=emmalloc
   -sSTACK_SIZE=16777216
@@ -19,10 +25,20 @@ target_link_options(slicer PRIVATE
   -sMODULARIZE=1
   -sEXPORT_NAME=OrcaModule
   -sDISABLE_EXCEPTION_CATCHING=0
-  # NOTE: -sEMULATE_FUNCTION_POINTER_CASTS=1 was removed — its --fpcast-emu
-  # wasm-opt pass crashes Binaryen at -O3 (mixed_arena.h assertion).  The link
-  # itself succeeds without it; if a genuine mismatched-signature indirect call
-  # exists it will trap at runtime with a clear message, to be fixed surgically.
+  # EMULATE_FUNCTION_POINTER_CASTS + a raised max-func-params was tried here
+  # to fix a real crash (slicing the official Voron Design Cube v7 STL traps
+  # with "memory access out of bounds"), on the initial hypothesis that it
+  # was a mismatched-signature indirect call in the mesh-repair path. It
+  # backfired: at -O2 with max-func-params raised to 64, the emulation
+  # trampolines themselves became broken at runtime — even a trivial
+  # 12-triangle cube started crashing the same way. That's strictly worse
+  # than the original bug (which only hit specific real-world meshes), so
+  # it was reverted. The real root cause turned out to be unrelated to
+  # function-pointer signatures: uninitialized WallToolPathsParams fields
+  # in Arachne's wall generator (see orca-wasm/patches/apply.py sections
+  # 8/8c/8d/8e/8f), fixed with default member initializers there instead —
+  # verified against the Voron Cube, Stanford Bunny, and a 1.1M-triangle
+  # model with Arachne enabled.
   -fexceptions
   # No --preload-file: the headless flat-config slicer never reads orca/resources
   # at runtime (verified in-browser — a full slice opens only /tmp/*.stl/.gcode,

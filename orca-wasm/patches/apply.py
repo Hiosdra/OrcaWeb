@@ -34,7 +34,18 @@ from pathlib import Path
 
 ORCA      = Path(__file__).resolve().parent.parent / "orca"
 OVERRIDES = Path(__file__).resolve().parent.parent / "overrides"
-DRY_RUN = False
+
+# Parsed here, at the top, rather than in `if __name__ == "__main__":` at the
+# bottom of the file: every patch()/copy_override()/verify_contains() call
+# below executes at module level as the interpreter reads the file top to
+# bottom, so a DRY_RUN assignment placed after them (as it previously was)
+# only took effect once every patch had already run for real — making
+# --check apply every change it claims to only preview. Parse eagerly so
+# DRY_RUN is correct for every call that follows.
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--check", action="store_true")
+_cli_args = _parser.parse_args()
+DRY_RUN = _cli_args.check
 
 
 def copy_override(rel_path: str) -> None:
@@ -83,13 +94,41 @@ def patch(rel_path: str, replacements: list[tuple[str, str, int]]) -> bool:
     return True
 
 
+def verify_contains(rel_path: str, must_contain: str, description: str) -> None:
+    """
+    Hard-fail the patcher (and therefore the CI build) if `must_contain` is
+    absent from the given file, regardless of whether this run's patch()
+    call actually matched anything.
+
+    patch() only WARNs on a regex mismatch — by design, since most patches
+    are meant to be idempotent (a pattern legitimately won't match a file
+    that's already patched from a prior run). That means a genuine failure
+    (e.g. upstream OrcaSlicer reformatting the target code so the pattern
+    never matches at all, patched or not) is silently indistinguishable
+    from "already applied" and never fails CI. Use this for patches whose
+    correctness is safety-critical — it checks the *outcome*, not whether a
+    substitution fired this run, so it passes on a truly idempotent re-run
+    but fails if the source no longer looks like what the patch expects.
+    """
+    path = ORCA / rel_path
+    if not path.exists() or must_contain not in path.read_text(encoding="utf-8", errors="replace"):
+        print(f"FATAL: {description}\n  Expected to find in {rel_path}: {must_contain!r}", file=sys.stderr)
+        if not DRY_RUN:
+            sys.exit(1)
+
+
 # =============================================================================
 # 1. Root CMakeLists.txt — add SLIC3R_WASM option; make heavy deps conditional
 # =============================================================================
 patch("CMakeLists.txt", [
-    # Add SLIC3R_WASM option near the top (after project() line)
+    # Add SLIC3R_WASM option near the top (after project() line). The
+    # negative lookahead makes this idempotent — without it, re-running
+    # apply.py against an already-patched checkout (e.g. every local
+    # rebuild via build-local-wsl.sh, which intentionally reuses the same
+    # checkout instead of re-cloning) would match project(...) again and
+    # append another duplicate option() line every single run.
     (
-        r'(project\s*\(\s*OrcaSlicer[^)]*\))',
+        r'(project\s*\(\s*OrcaSlicer[^)]*\))(?!\n\noption\(SLIC3R_WASM)',
         r'\1\n\noption(SLIC3R_WASM "Build for WebAssembly with Emscripten" OFF)',
         1,
     ),
@@ -149,7 +188,9 @@ patch("src/libslic3r/GCode.hpp", [
 patch("src/libslic3r/CMakeLists.txt", [
     # Add SLIC3R_WASM compile definitions
     # SLIC3R_NO_OCCT is intentionally absent: OCCT is now compiled into the
-    # WASM engine (deps/build_occt.sh) and the real Format/STEP.cpp is used.
+    # WASM engine (see the "Build WASM deps — OCCT" step in
+    # .github/workflows/build-wasm.yml, or build-local-wsl.sh for local
+    # builds) and the real Format/STEP.cpp is used.
     (
         r'(target_compile_definitions\s*\(\s*libslic3r\s+PUBLIC)',
         r'\1\n  $<$<BOOL:${SLIC3R_WASM}>:SLIC3R_WASM;SLIC3R_NO_OPENVDB;SLIC3R_NO_OPENCV>',
@@ -287,7 +328,8 @@ LIBSLIC3R_OVERRIDES_INJECTION = """\
 if(SLIC3R_WASM AND DEFINED ORCA_WEB_OVERRIDES_DIR)
   # Files always present in OrcaSlicer
   # NOTE: Format/STEP.cpp is NOT stubbed — the real implementation is compiled
-  #       with OCCT (built by deps/build_occt.sh).
+  #       with OCCT (see the "Build WASM deps — OCCT" step in
+  #       .github/workflows/build-wasm.yml, or build-local-wsl.sh locally).
   set(_wasm_orig_stubs
     "${CMAKE_CURRENT_SOURCE_DIR}/Format/DRC.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Format/svg.cpp"
@@ -461,7 +503,156 @@ patch("src/libslic3r/utils.cpp", [
 ])
 
 # =============================================================================
-# 8. Root CMakeLists.txt — append OrcaWeb bridge + WASM link target
+# 8. Arachne/SkeletalTrapezoidation.cpp — guard a known degenerate case
+#    getOrCreateBeading() has a comment acknowledging "This bug is due to too
+#    small central edges": when a node has no incident edges to measure a
+#    distance from, `dist` is left at numeric_limits<coord_t>::max() and only
+#    an assert() (stripped in our -DNDEBUG Release build) guards it before
+#    `dist * 2` overflows into beading_strategy.getOptimalBeadCount(). The
+#    garbage bead_count then drives out-of-bounds access in
+#    propagateBeadingsDownward()/interpolate() downstream — reproducible with
+#    ordinary real-world meshes (Voron Design Cube v7, Stanford Bunny, and a
+#    1.1M-triangle model) as a WASM "memory access out of bounds" trap, which
+#    a native release build likely tolerates silently instead of catching.
+#    Fall back to a safe minimum bead_count instead of proceeding with the
+#    overflowed distance.
+# =============================================================================
+patch("src/libslic3r/Arachne/SkeletalTrapezoidation.cpp", [
+    (
+        r'assert\(dist != std::numeric_limits<coord_t>::max\(\)\);\s*\n(\s*)node->data\.bead_count = beading_strategy\.getOptimalBeadCount\(dist \* 2\);',
+        r'assert(dist != std::numeric_limits<coord_t>::max());\n'
+        r'\1if (dist == std::numeric_limits<coord_t>::max()) {\n'
+        r'\1    // Degenerate node (no incident edges to measure) — see comment above\n'
+        r'\1    // getOrCreateBeading(). Avoid overflowing `dist * 2` into getOptimalBeadCount().\n'
+        r'\1    BOOST_LOG_TRIVIAL(warning) << "SkeletalTrapezoidation: degenerate node with no measurable distance, using bead_count=1";\n'
+        r'\1    node->data.bead_count = 1;\n'
+        r'\1} else {\n'
+        r'\1    node->data.bead_count = beading_strategy.getOptimalBeadCount(dist * 2);\n'
+        r'\1}',
+        1,
+    ),
+])
+
+# =============================================================================
+# 8c. WallToolPaths.cpp — guard shorterThan() against an empty shape
+#     Found via UBSan (see section 8b): shorterThan() takes `&shape.back()`
+#     unconditionally. Called from removeSmallLines() on each ExtrusionLine
+#     in a toolpath; degenerate/thin real-world geometry (Voron Design Cube
+#     v7, Stanford Bunny) can produce a line with zero junctions, so
+#     `.back()` on the empty vector is undefined behavior — WASM traps on it
+#     as "memory access out of bounds"; a native build likely reads garbage
+#     instead. An empty shape has zero length, which is trivially "shorter
+#     than" any positive check_length, so returning true early is both safe
+#     and the semantically correct answer, not just a guard.
+# =============================================================================
+patch("src/libslic3r/Arachne/WallToolPaths.cpp", [
+    (
+        r'(template<typename T> bool shorterThan\(const T &shape, const coord_t check_length\)\s*\n\{\s*\n)(\s*)(const auto \*p0)',
+        r'\1\2if (shape.empty())\n'
+        r'\2    // Empty shape: zero length is always shorter than check_length.\n'
+        r'\2    return true;\n'
+        r'\2\3',
+        1,
+    ),
+])
+
+# =============================================================================
+# 8d. SkeletalTrapezoidation.cpp — guard interpolate() against an empty
+#     toolpath_locations vector
+#     interpolate() (the 4-arg overload, called directly from
+#     propagateBeadingsDownward — the exact function in the crash's named
+#     stack trace) computes `left.toolpath_locations.size() - 1` into a
+#     signed coord_t without checking for empty() first: size_t(0) - 1
+#     underflows before the (implementation-defined, not truly UB, but a
+#     smell) narrowing conversion back to coord_t. The 3-arg interpolate()
+#     overload below it then writes `ret.toolpath_locations[inset_idx]` /
+#     `ret.bead_widths[inset_idx]` for inset_idx up to
+#     min(left,right).bead_widths.size() — if `ret` (a copy of whichever of
+#     left/right has larger total_thickness) has a smaller toolpath_locations
+#     than that bound, it's an out-of-bounds write. Guard both.
+# =============================================================================
+patch("src/libslic3r/Arachne/SkeletalTrapezoidation.cpp", [
+    (
+        r'(coord_t next_inset_idx;\n    for \(next_inset_idx = left\.toolpath_locations\.size\(\) - 1; next_inset_idx >= 0; next_inset_idx--\))',
+        r'if (left.toolpath_locations.empty())\n'
+        r'    { // Nothing to search — behave as if no next inset was found.\n'
+        r'        return ret;\n'
+        r'    }\n'
+        r'    \1',
+        1,
+    ),
+    (
+        r'(for \(size_t inset_idx = 0; inset_idx < std::min\(left\.bead_widths\.size\(\), right\.bead_widths\.size\(\)\); inset_idx\+\+\)\n    \{)',
+        r'for (size_t inset_idx = 0; inset_idx < std::min({left.bead_widths.size(), right.bead_widths.size(), ret.bead_widths.size(), ret.toolpath_locations.size()}); inset_idx++)\n    {',
+        1,
+    ),
+])
+
+# =============================================================================
+# 8e. WallToolPaths.cpp — skip removeSmallLines()'s shorterThan() check for
+#     a junction-less ExtrusionLine
+#     Found via UBSan after fixing 8c/8d: with those in place, the crash
+#     moves to a precise, named location — WallToolPaths.cpp:696 (in the
+#     as-patched file; effectively the shorterThan() call in
+#     removeSmallLines()) — "runtime error: -nan is outside the range of
+#     representable values of type 'long long'". min_width is left at its
+#     numeric_limits<coord_t>::max() sentinel when `line` has zero
+#     junctions (the for-loop over `line` never executes), and that
+#     sentinel then flows into `min_width / 2` / `min_width *
+#     min_length_factor`, producing a NaN/overflow when converted back to
+#     coord_t for shorterThan()'s check_length parameter. A junction-less
+#     line has nothing to measure a minimum width from, so skip the
+#     removal check for it rather than compute with the sentinel.
+# =============================================================================
+patch("src/libslic3r/Arachne/WallToolPaths.cpp", [
+    (
+        r'(coord_t        min_width = std::numeric_limits<coord_t>::max\(\);\n            for \(const ExtrusionJunction &j : line\)\n                min_width = std::min\(min_width, j\.w\);\n)(\s*)(// Only use min_length_factor)',
+        r'\1\2if (min_width == std::numeric_limits<coord_t>::max()) continue; // junction-less line: nothing to measure\n'
+        r'\2\3',
+        1,
+    ),
+])
+
+# =============================================================================
+# 8f. WallToolPaths.hpp — default-initialize WallToolPathsParams fields
+#     Next crash after 8e (same UBSan location, unchanged): min_length_factor
+#     itself DOES have a documented fallback in make_paths_params() (0.5f),
+#     but min_bead_width, min_feature_size and wall_transition_length are
+#     only conditionally assigned there with NO else-fallback — if the
+#     corresponding print_object_config option isn't present (our headless
+#     WASM build ships no bundled profile JSON, unlike a real OrcaSlicer
+#     install), those fields stay uninitialized garbage. Rather than chase
+#     exactly which uninitialized field's garbage bit pattern produces the
+#     observed NaN in this particular build, default-initialize the whole
+#     struct to the same values make_paths_params() already documents as
+#     intended fallbacks (or 0/false for the ones with none documented) —
+#     a normal, idiomatic fix that only changes behavior for previously-UB
+#     construction paths.
+# =============================================================================
+patch("src/libslic3r/Arachne/WallToolPaths.hpp", [
+    (
+        r'float   min_bead_width;\n    float   min_feature_size;\n    float   min_length_factor;\n    float   wall_transition_length;\n    float   wall_transition_angle;\n    float   wall_transition_filter_deviation;\n    int     wall_distribution_count;\n    bool    is_top_or_bottom_layer;',
+        r'float   min_bead_width = 0.f;\n'
+        r'    float   min_feature_size = 0.f;\n'
+        r'    float   min_length_factor = 0.5f;\n'
+        r'    float   wall_transition_length = 0.f;\n'
+        r'    float   wall_transition_angle = 0.f;\n'
+        r'    float   wall_transition_filter_deviation = 0.f;\n'
+        r'    int     wall_distribution_count = 1;\n'
+        r'    bool    is_top_or_bottom_layer = false;',
+        1,
+    ),
+])
+verify_contains(
+    "src/libslic3r/Arachne/WallToolPaths.hpp",
+    "float   min_bead_width = 0.f;",
+    "WallToolPathsParams default-init patch (8f) did not apply — the Arachne "
+    "uninitialized-struct crash this fixes may have regressed (upstream "
+    "OrcaSlicer may have reformatted this struct; update the regex above).",
+)
+
+# =============================================================================
+# 9. Root CMakeLists.txt — append OrcaWeb bridge + WASM link target
 # =============================================================================
 BRIDGE_INJECTION = """\
 
@@ -486,9 +677,4 @@ if _orca_root_cmake.exists():
 
 # =============================================================================
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--check", action="store_true")
-    args = parser.parse_args()
-    if args.check:
-        DRY_RUN = True
     print("\nOrcaWeb WASM patcher — done.\n")

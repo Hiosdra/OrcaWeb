@@ -37,11 +37,10 @@ orca-wasm/
 │   └── Finddraco.cmake    ← stub
 ├── patches/
 │   └── apply.py           ← idempotent Python patcher (regex-based)
-├── deps/
-│   ├── build_boost.sh     ← builds Boost for WASM
-│   └── build_math.sh      ← builds GMP, MPFR, CGAL for WASM
 ├── scripts/
-│   └── build.sh           ← end-to-end build script
+│   └── build-local-wsl.sh ← end-to-end local build script (generated from
+│                             .github/workflows/build-wasm.yml — see
+│                             ../scripts/gen-wsl-build-script.mjs)
 └── CMakeLists.txt         ← root cmake
 ```
 
@@ -49,37 +48,32 @@ orca-wasm/
 
 | File | Size | Description |
 |------|------|-------------|
-| `slicer.wasm` | ~7.5 MB | Compiled OrcaSlicer v2.4.0 core |
-| `slicer.js` | ~1.5 MB | Emscripten glue code (CommonJS IIFE) |
+| `slicer.wasm` | ~33 MB | Compiled OrcaSlicer v2.4.0 core + OCCT (STEP engine) |
+| `slicer.js` | ~220 KB | Emscripten glue code (CommonJS IIFE) |
 
 No `slicer.data` — the headless flat-config slicer never reads `orca/resources` at runtime, so the 200 MB preload file was eliminated entirely.
 
 ## Local build
 
-### Prerequisites
+Full setup instructions (Linux / macOS / WSL2, including package-manager
+commands): **[mkdocs-docs/wasm-build.md](../mkdocs-docs/wasm-build.md)**.
 
-- Emscripten SDK (emsdk) 3.1.74
-- CMake 3.22+, Ninja
-- Python 3.9+
-- curl
-
-### Steps
+Short version, once emsdk 3.1.74 and the system build tools (cmake, ninja,
+python3, m4, texinfo, openssl, ccache, a C/C++ toolchain) are installed:
 
 ```bash
-# 1. Clone OrcaSlicer submodule
-git submodule update --init --depth 1 -- orca-wasm/orca
-git -C orca-wasm/orca fetch --tags --depth 1 origin v2.4.0
-git -C orca-wasm/orca checkout v2.4.0
-
-# 2. Activate Emscripten
-source /path/to/emsdk/emsdk_env.sh
-
-# 3. Build (cold: ~25 min; warm with cache: ~8 min)
-cd orca-wasm
-./scripts/build.sh
+# from the repo root, not orca-wasm/
+./orca-wasm/scripts/build-local-wsl.sh
 ```
 
-Artifacts land in `../public/wasm/` (`slicer.js` + `slicer.wasm`).
+Cold (deps + compile): ~2.5–3 h, mostly OCCT (~45–60 min). Warm (only C++
+changed, deps + ccache already populated): ~10–15 min. Artifacts land
+directly in `../public/wasm/` (`slicer.js` + `slicer.wasm`).
+
+`build-local-wsl.sh` is generated from `.github/workflows/build-wasm.yml`
+via `../scripts/gen-wsl-build-script.mjs`, so it can't silently drift from
+what CI actually runs — re-run the generator after editing the workflow
+instead of hand-editing the script.
 
 ## C API
 

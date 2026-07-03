@@ -28,6 +28,7 @@
 #include <string>
 #include <stdexcept>
 #include <memory>
+#include <sys/stat.h>
 
 #include <emscripten.h>
 
@@ -77,9 +78,31 @@ extern "C" {
  * All values must be string-encoded exactly as OrcaSlicer stores them
  * (e.g. "0.2", "15%", "1" for true).  Unknown keys are silently ignored.
  */
+// Print::get_hrc_by_nozzle_type() (Print.cpp) reads "info/nozzle_info.json"
+// relative to Slic3r::resources_dir(), which our bridge never sets (empty
+// string) since we ship no /resources tree. The parse always fails there,
+// which is handled — but the BOOST_LOG_TRIVIAL(error) call on that failure
+// path traps with "memory access out of bounds" inside boost::log's
+// single-threaded core on every single slice, even for trivial models.
+// Pre-seed the file in MEMFS so the parse succeeds and that log call (and
+// whatever makes it crash) is never reached, rather than patching boost::log.
+static void ensure_nozzle_info_json() {
+    static bool written = false;
+    if (written) return;
+    ::mkdir("info", 0755); // ignore EEXIST
+    if (FILE* f = std::fopen("info/nozzle_info.json", "wb")) {
+        static const char kJson[] =
+            R"({"nozzle_hrc":{"hardened_steel":55,"stainless_steel":20,"tungsten_carbide":85,"brass":2,"undefine":0}})";
+        std::fwrite(kJson, 1, sizeof(kJson) - 1, f);
+        std::fclose(f);
+    }
+    written = true;
+}
+
 EMSCRIPTEN_KEEPALIVE
 int orc_init(const char* json_data, int json_len) {
     g_last_error.clear();
+    ensure_nozzle_info_json();
     try {
         auto j = nlohmann::json::parse(json_data, json_data + json_len);
         if (!j.is_object()) { record_error("config must be a JSON object"); return -2; }
@@ -107,6 +130,19 @@ int orc_init(const char* json_data, int json_len) {
         // Start from OrcaSlicer's built-in defaults so all required fields exist.
         g_config = Slic3r::DynamicPrintConfig();
         g_config.apply(g_defaults);
+
+        // use_relative_e_distances defaults to true ("Default is checked" —
+        // PrintConfig.cpp) but Print::validate() (Print.cpp) hard-fails
+        // *every* slice under relative addressing unless layer_gcode
+        // contains "G92 E0" — normally supplied by a real printer profile's
+        // start/layer G-code, none of which we ship in this headless build.
+        // Without this default every slice through the real app failed
+        // validation (-6) with "Relative extruder addressing requires
+        // resetting the extruder position...". Absolute addressing (0)
+        // needs no such G-code and works on effectively all firmwares.
+        // Callers can still opt into relative addressing explicitly if they
+        // also supply appropriate layer_gcode.
+        g_config.set_deserialize_strict("use_relative_e_distances", "0");
 
         for (auto& [key, val] : j.items()) {
             std::string sv = json_val_to_string(val);
@@ -154,7 +190,9 @@ int orc_slice(const void* stl_data, int stl_len,
     try {
         // ── load model ───────────────────────────────────────────────
         Slic3r::Model model;
-        if (!Slic3r::load_stl("/tmp/ow_in.stl", &model, "object")) {
+        const bool stl_ok = Slic3r::load_stl("/tmp/ow_in.stl", &model, "object");
+        std::remove("/tmp/ow_in.stl"); // MEMFS is RAM-backed; free it as soon as loaded
+        if (!stl_ok) {
             record_error("STL load failed");
             return -4;
         }
@@ -207,9 +245,15 @@ int orc_slice(const void* stl_data, int stl_len,
         std::rewind(gf);
 
         char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz) + 1));
-        if (!buf) { std::fclose(gf); record_error("out of memory"); return -9; }
+        if (!buf) {
+            std::fclose(gf);
+            std::remove("/tmp/ow_out.gcode"); // free the RAM-backed MEMFS copy even on OOM
+            record_error("out of memory");
+            return -9;
+        }
         std::fread(buf, 1, static_cast<std::size_t>(sz), gf);
         std::fclose(gf);
+        std::remove("/tmp/ow_out.gcode"); // free the RAM-backed MEMFS copy now that it's in buf
         buf[sz] = '\0';
 
         *out_gcode = buf;
@@ -446,9 +490,15 @@ int orc_slice_multi(
         std::rewind(gf);
 
         char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz) + 1));
-        if (!buf) { std::fclose(gf); record_error("out of memory"); return -9; }
+        if (!buf) {
+            std::fclose(gf);
+            std::remove("/tmp/ow_out.gcode"); // free the RAM-backed MEMFS copy even on OOM
+            record_error("out of memory");
+            return -9;
+        }
         std::fread(buf, 1, static_cast<std::size_t>(sz), gf);
         std::fclose(gf);
+        std::remove("/tmp/ow_out.gcode"); // free the RAM-backed MEMFS copy now that it's in buf
         buf[sz] = '\0';
 
         *out_gcode = buf;
