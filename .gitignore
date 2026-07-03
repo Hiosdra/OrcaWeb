@@ -6,6 +6,7 @@ public/wasm/slicer.js
 public/wasm/slicer.wasm
 public/wasm/slicer.data
 public/wasm/slicer.cjs
+public/wasm/.wasm-release-tag
 wasm-artifacts/
 scripts/repro-oom.mjs
 scripts/simple_cube_30mm.stl

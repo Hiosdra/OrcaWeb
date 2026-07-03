@@ -124,9 +124,16 @@ Steps:
 3. Checks out OrcaSlicer at the requested tag
 4. Runs `patches/apply.py`
 5. Builds with `cmake + ninja`
-6. Publishes `slicer.js` + `slicer.wasm` to GitHub Release `wasm-v2.4.0`
+6. Publishes `slicer.js` + `slicer.wasm` to a new, immutable GitHub Release:
+   `wasm-$ORCA_VERSION` for the first build of a given OrcaSlicer version,
+   `wasm-$ORCA_VERSION-patchN` for every later fix to `orca-wasm/` targeting
+   the same OrcaSlicer version — a rebuild never overwrites a previous
+   release's assets.
 
-The main deploy workflow (`.github/workflows/deploy.yml`) downloads these artifacts from the `wasm-v2.4.0` release on this repo and embeds them in the GitHub Pages deployment under `app/wasm/`, served from the same origin as the app.
+The main deploy workflow (`.github/workflows/deploy.yml`) resolves the
+highest-numbered release for the pinned OrcaSlicer version at deploy time,
+downloads its artifacts, and embeds them in the GitHub Pages deployment
+under `app/wasm/`, served from the same origin as the app.
 
 ## Licence
 

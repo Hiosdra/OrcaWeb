@@ -44,9 +44,10 @@ at runtime, so the 200 MB preload file was eliminated entirely (~9 MB total cold
 
 ### WASM loading
 
-In CI the WASM artifacts are downloaded from the `wasm-v2.4.0` GitHub Release and
-embedded directly in the GitHub Pages deployment, so they are served from the
-**same origin** as the app — no CORS issues.
+In CI the WASM artifacts are downloaded from the latest immutable
+`wasm-v2.4.0` (optionally `-patchN`) GitHub Release and embedded directly in
+the GitHub Pages deployment, so they are served from the **same origin** as the app —
+no CORS issues.
 
 ### Self-contained WASM build (v2.4.0)
 
@@ -69,8 +70,10 @@ Build the WASM module locally (Linux / macOS / WSL2 — see
 ./orca-wasm/scripts/build-local-wsl.sh
 ```
 
-Or trigger the `Build WASM` GitHub Actions workflow manually to produce a
-`wasm-v2.4.0` release with the compiled artifacts.
+Or trigger the `Build WASM` GitHub Actions workflow manually to publish a new
+`wasm-v2.4.0` (optionally `-patchN`) release with the compiled artifacts —
+releases are immutable, so a rebuild never overwrites a previous one (see
+[`mkdocs-docs/wasm-build.md`](mkdocs-docs/wasm-build.md)).
 
 See [`orca-wasm/README.md`](orca-wasm/README.md) for the full build guide.
 

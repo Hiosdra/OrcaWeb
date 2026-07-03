@@ -18,6 +18,15 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
+    env:
+      # Which OrcaSlicer engine version's release family to deploy. Must
+      # match build-wasm.yml's ORCA_VERSION default — bump both together
+      # when upgrading the upstream OrcaSlicer version. The actual asset tag
+      # is resolved at deploy time in "Download WASM artifacts" below, since
+      # releases are immutable (wasm-$ORCA_VERSION, then wasm-$ORCA_VERSION-
+      # patch1, -patch2, ... for later fixes — see build-wasm.yml).
+      ORCA_VERSION: v2.4.0
+
     steps:
       - uses: actions/checkout@v7
 
@@ -43,7 +52,9 @@ jobs:
       - run: npm ci
 
       # ── Download WASM artifacts ──────────────────────────────────────
-      # Primary: download slicer.js + slicer.wasm from the wasm-v2.4.0 release.
+      # Primary: resolve the latest immutable release for $ORCA_VERSION
+      # (wasm-$ORCA_VERSION, or wasm-$ORCA_VERSION-patchN if any fixes have
+      # been published since — see build-wasm.yml) and download it.
       # Fallback: restore from the previously-deployed gh-pages tree so a push
       # that only touches UI/docs never fails just because the WASM release has
       # not been created yet (e.g. immediately after a PR merge before the
@@ -53,15 +64,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p public/wasm
-          WASM_TAG="wasm-v2.4.0"
-          if gh release view "$WASM_TAG" --repo "$GITHUB_REPOSITORY" &>/dev/null; then
+          BASE_TAG="wasm-$ORCA_VERSION"
+          # Plain string ops (==, startswith, ltrimstr), not a regex — BASE_TAG
+          # contains "." which is a regex metacharacter; matching it literally
+          # this way sidesteps needing to escape it correctly in a jq/bash
+          # string that's already been through one layer of interpolation.
+          WASM_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq "
+            [.[] | .tagName | select(. == \"${BASE_TAG}\" or startswith(\"${BASE_TAG}-patch\"))]
+            | sort_by(if . == \"${BASE_TAG}\" then 0 else (ltrimstr(\"${BASE_TAG}-patch\") | tonumber) end)
+            | last // empty
+          ")
+          if [ -n "$WASM_TAG" ]; then
             gh release download "$WASM_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --pattern "slicer.*" \
               --dir public/wasm
             echo "Downloaded WASM from release $WASM_TAG"
           else
-            echo "::warning::Release $WASM_TAG not found — restoring WASM from previous gh-pages deploy"
+            echo "::warning::No release found for $ORCA_VERSION (checked $BASE_TAG and $BASE_TAG-patch*) — restoring WASM from previous gh-pages deploy"
             git fetch origin gh-pages 2>/dev/null || true
             for f in slicer.js slicer.wasm; do
               git show "origin/gh-pages:app/wasm/$f" > "public/wasm/$f" 2>/dev/null \
