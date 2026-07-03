@@ -274,9 +274,9 @@ File drop
 
 | Layer | Technology | Notes |
 |-------|-----------|-------|
-| UI | React 19, TypeScript 5 | No React Router — single-page tab state |
+| UI | React 19, TypeScript 6 | No React Router — single-page tab state |
 | Styling | Tailwind CSS v4 | Custom `orca-*` colour scale |
-| 3D | Three.js 0.170 | STLLoader, OrbitControls, LineSegments2 (fat lines) |
+| 3D | Three.js 0.184 | STLLoader, OrbitControls, LineSegments2 (fat lines) |
 | Bundler | Vite 8 | Worker ES format, configurable base |
 | WASM | OrcaSlicer **v2.4.0** | Emscripten, single-threaded, self-built |
 | Worker | Web Worker (ES module) | Blob URL for dynamic import |
