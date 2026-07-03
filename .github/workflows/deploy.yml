@@ -65,9 +65,13 @@ jobs:
         run: |
           mkdir -p public/wasm
           BASE_TAG="wasm-$ORCA_VERSION"
-          WASM_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --json tagName --jq "
-            [.[] | .tagName | select(test(\"^${BASE_TAG}(-patch[0-9]+)?\$\"))]
-            | sort_by(if test(\"-patch\") then (split(\"-patch\")[1] | tonumber) else 0 end)
+          # Plain string ops (==, startswith, ltrimstr), not a regex — BASE_TAG
+          # contains "." which is a regex metacharacter; matching it literally
+          # this way sidesteps needing to escape it correctly in a jq/bash
+          # string that's already been through one layer of interpolation.
+          WASM_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq "
+            [.[] | .tagName | select(. == \"${BASE_TAG}\" or startswith(\"${BASE_TAG}-patch\"))]
+            | sort_by(if . == \"${BASE_TAG}\" then 0 else (ltrimstr(\"${BASE_TAG}-patch\") | tonumber) end)
             | last // empty
           ")
           if [ -n "$WASM_TAG" ]; then

@@ -22,6 +22,19 @@ on:
 permissions:
   contents: write  # needed to create/update releases
 
+# Two overlapping publishing builds (workflow_dispatch, or a tag push right
+# after one) for the same ORCA_VERSION would independently compute the same
+# next patch number and collide on `gh release create` — the loser fails
+# outright after a multi-hour build with nothing published (see "Upload to
+# GitHub Release" below, which intentionally has no `|| true` fallback
+# anymore now that releases are immutable). Serialize same-version builds
+# so races queue instead of colliding; deliberately no cancel-in-progress,
+# since cancelling a multi-hour build mid-flight would waste it for nothing.
+# PR-validation builds (which never publish) get their own per-PR group so
+# unrelated PRs touching orca-wasm/ don't needlessly queue behind each other.
+concurrency:
+  group: build-wasm-${{ github.event_name == 'pull_request' && github.event.pull_request.number || (github.event.inputs.orca_version || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v2.4.0') }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -555,7 +568,7 @@ jobs:
         run: |
           BASE_TAG="wasm-$ORCA_VERSION"
           if gh release view "$BASE_TAG" --repo "$GITHUB_REPOSITORY" &>/dev/null; then
-            LATEST_PATCH=$(gh release list --repo "$GITHUB_REPOSITORY" --json tagName --jq "
+            LATEST_PATCH=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq "
               [.[] | .tagName | select(startswith(\"${BASE_TAG}-patch\")) | split(\"-patch\")[1] | tonumber]
               | max // 0
             ")

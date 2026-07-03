@@ -20,6 +20,13 @@ const WASM_DIR = join(__dirname, '../public/wasm')
 const ORCA_VERSION = 'v2.4.0'
 const REPO = 'Hiosdra/OrcaWeb'
 
+// approxSize is only used to estimate the download progress bar's total
+// (before the real Content-Length header arrives) — NOT to judge whether a
+// local file is up to date. That job belongs entirely to TAG_MARKER now
+// (below); tying "already present" to a fixed byte threshold meant any
+// build that changed the binary's size even slightly (compiler flags, a
+// dependency bump) made the check permanently fail and re-download every
+// run — exactly what happened here going from ~9 MB to ~36 MB.
 const ARTIFACTS = [
   { name: 'slicer.js',   approxSize: 220_000 },
   { name: 'slicer.wasm', approxSize: 36_000_000 },
@@ -31,22 +38,39 @@ const ARTIFACTS = [
 // as a new release rather than overwriting the previous one. Resolve
 // whichever has the highest patch number (or the base tag if no patches
 // exist yet) so local dev always gets the latest engine build.
+// Plain string comparisons rather than a regex — baseTag ("wasm-v2.4.0")
+// contains "." which is a regex metacharacter; matching it literally this
+// way sidesteps needing to escape it correctly rather than risking getting
+// that escaping subtly wrong.
 async function resolveLatestWasmTag() {
   const baseTag = `wasm-${ORCA_VERSION}`
-  const pattern = new RegExp(`^${baseTag}(?:-patch(\\d+))?$`)
-  const res = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=100`)
+  const patchPrefix = `${baseTag}-patch`
+  // Opportunistically authenticate if a token is available (CI always has
+  // one; local devs might). Unauthenticated GitHub API calls are capped at
+  // 60/hour — easy to hit if this script runs often (e.g. every checkout).
+  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN
+  const headers = token ? { Authorization: `Bearer ${token}` } : {}
+  const res = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=100`, { headers })
   if (!res.ok) throw new Error(`HTTP ${res.status} listing releases`)
   const releases = await res.json()
 
   let best = null
   let bestPatch = -1
   for (const r of releases) {
-    const m = pattern.exec(r.tag_name)
-    if (!m) continue
-    const patch = m[1] ? Number(m[1]) : 0
+    const tag = r.tag_name
+    let patch
+    if (tag === baseTag) {
+      patch = 0
+    } else if (tag.startsWith(patchPrefix)) {
+      const n = Number(tag.slice(patchPrefix.length))
+      if (!Number.isInteger(n) || n < 1) continue
+      patch = n
+    } else {
+      continue
+    }
     if (patch > bestPatch) {
       bestPatch = patch
-      best = r.tag_name
+      best = tag
     }
   }
   if (!best) throw new Error(`No release found matching ${baseTag}(-patchN)`)
@@ -67,17 +91,16 @@ function formatBytes(bytes) {
 // deploy.yml's release resolution, just on the local dev side.
 const TAG_MARKER = join(WASM_DIR, '.wasm-release-tag')
 
-function alreadyPresent(name, approxSize, tag) {
+function alreadyPresent(name, tag) {
   const p = join(WASM_DIR, name)
   if (!existsSync(p)) return false
-  const size = statSync(p).size
-  if (size <= approxSize * 0.9) return false
+  if (statSync(p).size === 0) return false // guards against a truncated/failed prior write
   if (!existsSync(TAG_MARKER)) return false
   return readFileSync(TAG_MARKER, 'utf8').trim() === tag
 }
 
 async function download(name, approxSize, releaseBase, tag) {
-  if (alreadyPresent(name, approxSize, tag)) {
+  if (alreadyPresent(name, tag)) {
     console.log(`  ✓ ${name} — already present (${tag}), skipping`)
     return
   }
