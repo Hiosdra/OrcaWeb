@@ -65,11 +65,27 @@ echo "[build-local-wsl] repo root: $(pwd)"
 echo "[build-local-wsl] ORCA_VERSION=$ORCA_VERSION"
 `
 
+// CI always starts from a fresh checkout, so build-wasm.yml's clone step
+// has no guard for "already exists" — a local re-run after any later step
+// fails would otherwise abort on `git clone` seeing a non-empty directory.
+// Only this one step needs it: every dependency step already guards itself
+// with a stamp file, and cmake/ninja are naturally idempotent.
+const LOCAL_OVERRIDES = {
+  'Checkout OrcaSlicer ${{ env.ORCA_VERSION }}': `if [ -d orca-wasm/orca/.git ]; then
+  echo "[checkout] orca-wasm/orca already present — skip"
+else
+  rm -rf orca-wasm/orca
+  git clone --depth 1 --branch "$ORCA_VERSION" \\
+    https://github.com/SoftFever/OrcaSlicer.git \\
+    orca-wasm/orca
+fi`,
+}
+
 let out = header
 for (const s of steps) {
   if (skip.has(s.name)) continue
   out += `\n# ══════════════════════════════════════════════════════════\n# ${s.name}\n# ══════════════════════════════════════════════════════════\n`
-  out += s.script + '\n'
+  out += (LOCAL_OVERRIDES[s.name] ?? s.script) + '\n'
 }
 
 const outPath = join(__dirname, '../orca-wasm/scripts/build-local-wsl.sh')

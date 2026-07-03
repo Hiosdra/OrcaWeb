@@ -16,10 +16,14 @@ echo "[build-local-wsl] ORCA_VERSION=$ORCA_VERSION"
 # ══════════════════════════════════════════════════════════
 # Checkout OrcaSlicer ${{ env.ORCA_VERSION }}
 # ══════════════════════════════════════════════════════════
-git clone --depth 1 --branch "$ORCA_VERSION" \
-  https://github.com/SoftFever/OrcaSlicer.git \
-  orca-wasm/orca
-
+if [ -d orca-wasm/orca/.git ]; then
+  echo "[checkout] orca-wasm/orca already present — skip"
+else
+  rm -rf orca-wasm/orca
+  git clone --depth 1 --branch "$ORCA_VERSION" \
+    https://github.com/SoftFever/OrcaSlicer.git \
+    orca-wasm/orca
+fi
 
 # ══════════════════════════════════════════════════════════
 # Build WASM deps — Boost
