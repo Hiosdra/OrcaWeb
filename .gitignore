@@ -6,6 +6,7 @@ artifacts/slicer.js
 artifacts/slicer.wasm
 artifacts/slicer.data
 artifacts/slicer.cjs
+artifacts/.wasm-release-tag
 wasm-artifacts/
 scripts/repro-oom.mjs
 scripts/simple_cube_30mm.stl
