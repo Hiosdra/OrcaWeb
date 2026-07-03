@@ -81,25 +81,39 @@ export const FILAMENT_PRESETS: Record<string, Partial<OrcaConfig>> = {
   },
 }
 
+// bed_size_x/y and printable_height are cross-checked against OrcaSlicer's own
+// bundled profiles (resources/profiles/<Vendor>/machine/*.json) — our headless
+// WASM build ships none of these, so the web UI's hardcoded presets are the
+// only source of truth for them. printable_height in particular used to be
+// missing from every preset here, silently falling back to the *engine's*
+// generic FullPrintConfig default of 100mm (PrintConfig.cpp) — well under
+// any of these printers' real Z height, so any model taller than 100mm
+// failed "exceeds the maximum build volume height" validation regardless of
+// which printer was selected.
 export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = {
   'Generic 0.4': {
     printer_model: 'Generic',
     nozzle_diameter: 0.4,
     bed_size_x: 256,
     bed_size_y: 256,
+    printable_height: 250,
   },
   'Generic 0.6': {
     printer_model: 'Generic',
     nozzle_diameter: 0.6,
     bed_size_x: 256,
     bed_size_y: 256,
+    printable_height: 250,
   },
   'Bambu Lab P1S': {
     printer_model: 'BambuLab P1S',
     nozzle_diameter: 0.4,
     bed_size_x: 256,
     bed_size_y: 256,
-    bed_shape: 'circle' as const,
+    // Real printable_area (fdm_bbl_3dp_001_common.json) is a square
+    // ["0x0","256x0","256x256","0x256"], not circular — 'circle' here was
+    // wrong (delta-printer bed shape, doesn't apply to Bambu's CoreXY beds).
+    printable_height: 250,
     default_speed: 300,
     outer_wall_speed: 150,
     travel_speed: 500,
@@ -109,6 +123,7 @@ export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = {
     nozzle_diameter: 0.4,
     bed_size_x: 256,
     bed_size_y: 256,
+    printable_height: 250,
     default_speed: 350,
     outer_wall_speed: 200,
     travel_speed: 600,
@@ -118,6 +133,7 @@ export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = {
     nozzle_diameter: 0.4,
     bed_size_x: 220,
     bed_size_y: 220,
+    printable_height: 250,
     default_speed: 60,
     outer_wall_speed: 40,
     travel_speed: 120,
@@ -127,6 +143,7 @@ export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = {
     nozzle_diameter: 0.4,
     bed_size_x: 250,
     bed_size_y: 210,
+    printable_height: 220,
     default_speed: 120,
     outer_wall_speed: 80,
     travel_speed: 200,
@@ -136,6 +153,9 @@ export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = {
     nozzle_diameter: 0.4,
     bed_size_x: 300,
     bed_size_y: 300,
+    // OrcaSlicer's "Voron 2.4 300" profile (300x300 bed variant) ships
+    // printable_height: 275, not the full 300 the bed size might suggest.
+    printable_height: 275,
     default_speed: 200,
     outer_wall_speed: 100,
     travel_speed: 350,
