@@ -19,11 +19,23 @@ while (i < lines.length) {
     const name = nameMatch[2]
     let j = i + 1
     let runLine = -1
+    let inlineRun = null
     while (j < lines.length) {
       const m2 = lines[j].match(/^(\s*)- name:/)
       if (m2 && m2[1].length <= stepIndent) break
       if (/^\s*run:\s*\|/.test(lines[j])) { runLine = j; break }
+      // Single-line `run: <command>` (no `|` block) — the whole step is one
+      // line, e.g. "run: python3 orca-wasm/patches/apply.py". Without this
+      // branch the step is silently dropped: runLine stays -1, the `if`
+      // below never fires, and nothing gets pushed to `steps`.
+      const inline = lines[j].match(/^\s*run:\s*(?!\|)(\S.*)$/)
+      if (inline) { inlineRun = inline[1]; break }
       j++
+    }
+    if (inlineRun !== null) {
+      steps.push({ name, script: inlineRun })
+      i = j + 1
+      continue
     }
     if (runLine !== -1) {
       const runIndent = lines[runLine].match(/^(\s*)run:/)[1].length
