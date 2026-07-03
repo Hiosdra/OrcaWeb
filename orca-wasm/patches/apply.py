@@ -34,7 +34,18 @@ from pathlib import Path
 
 ORCA      = Path(__file__).resolve().parent.parent / "orca"
 OVERRIDES = Path(__file__).resolve().parent.parent / "overrides"
-DRY_RUN = False
+
+# Parsed here, at the top, rather than in `if __name__ == "__main__":` at the
+# bottom of the file: every patch()/copy_override()/verify_contains() call
+# below executes at module level as the interpreter reads the file top to
+# bottom, so a DRY_RUN assignment placed after them (as it previously was)
+# only took effect once every patch had already run for real — making
+# --check apply every change it claims to only preview. Parse eagerly so
+# DRY_RUN is correct for every call that follows.
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--check", action="store_true")
+_cli_args = _parser.parse_args()
+DRY_RUN = _cli_args.check
 
 
 def copy_override(rel_path: str) -> None:
@@ -110,9 +121,14 @@ def verify_contains(rel_path: str, must_contain: str, description: str) -> None:
 # 1. Root CMakeLists.txt — add SLIC3R_WASM option; make heavy deps conditional
 # =============================================================================
 patch("CMakeLists.txt", [
-    # Add SLIC3R_WASM option near the top (after project() line)
+    # Add SLIC3R_WASM option near the top (after project() line). The
+    # negative lookahead makes this idempotent — without it, re-running
+    # apply.py against an already-patched checkout (e.g. every local
+    # rebuild via build-local-wsl.sh, which intentionally reuses the same
+    # checkout instead of re-cloning) would match project(...) again and
+    # append another duplicate option() line every single run.
     (
-        r'(project\s*\(\s*OrcaSlicer[^)]*\))',
+        r'(project\s*\(\s*OrcaSlicer[^)]*\))(?!\n\noption\(SLIC3R_WASM)',
         r'\1\n\noption(SLIC3R_WASM "Build for WebAssembly with Emscripten" OFF)',
         1,
     ),
@@ -661,9 +677,4 @@ if _orca_root_cmake.exists():
 
 # =============================================================================
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--check", action="store_true")
-    args = parser.parse_args()
-    if args.check:
-        DRY_RUN = True
     print("\nOrcaWeb WASM patcher — done.\n")
