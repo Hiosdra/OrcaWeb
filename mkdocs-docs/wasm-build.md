@@ -13,7 +13,12 @@ This page explains how to compile OrcaSlicer v2.4.0 to WebAssembly using the `or
 
 ## Artifacts
 
-The build produces two files (published to GitHub Release `wasm-v2.4.0`):
+The build produces two files, published as an immutable GitHub Release. The
+first build for a given OrcaSlicer version publishes `wasm-v2.4.0`; every
+later fix to `orca-wasm/` for the *same* OrcaSlicer version (not an upstream
+bump) publishes `wasm-v2.4.0-patch1`, `-patch2`, etc. as a brand-new release
+rather than overwriting the previous one — `deploy.yml` resolves whichever
+has the highest patch number at deploy time.
 
 | File | Size | Description |
 |------|------|-------------|

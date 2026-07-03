@@ -538,18 +538,36 @@ jobs:
           path: wasm-artifacts/
           retention-days: 90
 
-      # ── Create / update GitHub release with WASM assets ─────────────
+      # ── Create a new, immutable GitHub release with WASM assets ──────
       # Skip on PRs — those runs only validate compilation, not publish.
+      # Releases are never overwritten in place (no --clobber on create):
+      # the first build for a given OrcaSlicer version publishes
+      # "wasm-$ORCA_VERSION"; every subsequent build for the SAME
+      # ORCA_VERSION (a fix to our patches/bridge, not an upstream bump)
+      # publishes "wasm-$ORCA_VERSION-patchN" as a brand-new release, so a
+      # tag always points at exactly the artifacts it was created with —
+      # deploy.yml resolves the latest one at deploy time (see its
+      # "Resolve latest WASM release" step) rather than assuming a fixed tag.
       - name: Upload to GitHub Release
         if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="wasm-$ORCA_VERSION"
+          BASE_TAG="wasm-$ORCA_VERSION"
+          if gh release view "$BASE_TAG" --repo "$GITHUB_REPOSITORY" &>/dev/null; then
+            LATEST_PATCH=$(gh release list --repo "$GITHUB_REPOSITORY" --json tagName --jq "
+              [.[] | .tagName | select(startswith(\"${BASE_TAG}-patch\")) | split(\"-patch\")[1] | tonumber]
+              | max // 0
+            ")
+            TAG="${BASE_TAG}-patch$((LATEST_PATCH + 1))"
+          else
+            TAG="$BASE_TAG"
+          fi
+          echo "Publishing new release: $TAG"
           gh release create "$TAG" \
-            --title "WASM build for OrcaSlicer $ORCA_VERSION" \
-            --notes "Pre-built WASM artifacts for OrcaSlicer $ORCA_VERSION.\n\nUsed internally by the deploy workflow." \
-            --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+            --title "WASM build for OrcaSlicer $ORCA_VERSION ($TAG)" \
+            --notes "Pre-built WASM artifacts for OrcaSlicer $ORCA_VERSION.\n\nUsed internally by the deploy workflow. Immutable — a fix to orca-wasm/ publishes a new *-patchN release rather than overwriting this one." \
+            --repo "$GITHUB_REPOSITORY"
           for f in wasm-artifacts/*; do
-            gh release upload "$TAG" "$f" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$TAG" "$f" --repo "$GITHUB_REPOSITORY"
           done

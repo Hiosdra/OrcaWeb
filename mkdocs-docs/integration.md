@@ -19,7 +19,12 @@ The engine is **stateless between slicing calls** except for the config set by `
 
 ## Obtaining the WASM artifacts
 
-The two required files are published to GitHub Releases as tag `wasm-v2.4.0`:
+The two required files are published as an immutable GitHub Release: the
+first build for a given OrcaSlicer version is tagged `wasm-v2.4.0`; a later
+fix to `orca-wasm/` for the same OrcaSlicer version publishes
+`wasm-v2.4.0-patchN` as a new release instead of overwriting the previous
+one. `scripts/download-wasm.mjs` and `deploy.yml` both resolve whichever tag
+has the highest patch number automatically.
 
 | File | Size | Purpose |
 |---|---|---|
