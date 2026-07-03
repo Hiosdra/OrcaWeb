@@ -153,8 +153,7 @@ async function main() {
   writeFileSync(TAG_MARKER, `${tag}\n`)
 
   console.log('\n  All artifacts ready.')
-  console.log('  Run `npm run dev` to start the web UI')
-  console.log('  Run `node cli/src/index.ts slice --help` to use the CLI\n')
+  console.log('  Run `npm run dev` to start the web UI\n')
 }
 
 main().catch(err => {

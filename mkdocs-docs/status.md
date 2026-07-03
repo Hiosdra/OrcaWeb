@@ -67,14 +67,6 @@ Ostatnia aktualizacja: **2026-07-03** · wersja silnika: **OrcaSlicer v2.4.0** (
 | Import profilu maszyny | Pola `gcode_flavor`, `retract_length/speed`, `lift_z`, `machine_start/end_gcode`, `machine_max_speed_*`, `printable_height` — wszystkie trafiają do silnika |
 | Ekstrakcja profili z 3MF | `Metadata/*.json/.config` z archiwum |
 
-### CLI (Node.js)
-
-| Komenda | Status |
-|---------|--------|
-| `npm run cli -- slice <plik.stl>` | ✅ działa |
-| `npm run cli -- profiles` | ✅ działa |
-| Opcje `--preset`, `--printer`, `--filament` | ✅ działa |
-
 ### Deployment
 
 | Aspekt | Status |
@@ -122,7 +114,6 @@ Ostatnia aktualizacja: **2026-07-03** · wersja silnika: **OrcaSlicer v2.4.0** (
 | Variable layer height | 🟡 średni |
 | Support enforcement / blocking | 🟡 średni |
 | Multi-material | 🟠 niski |
-| Auto-arrange | 🟡 średni |
 
 ---
 
@@ -185,5 +176,4 @@ orca-wasm/                 ✅ aktywny pipeline buildowy
 └── patches/apply.py       ✅ patcher CMake + bugfixów
 
 public/wasm/               ✅ artefakty z release wasm-v2.4.0 (slicer.js + slicer.wasm)
-CLI (cli/)                 ✅ działa lokalnie
 ```

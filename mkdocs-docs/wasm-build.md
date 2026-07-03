@@ -1,12 +1,12 @@
 # Building the WASM Engine
 
-This page explains how to compile OrcaSlicer v2.4.0 to WebAssembly using the `orca-wasm/` build pipeline. You only need this if you want to change the C++ engine itself. For normal development of the web UI or CLI, download the pre-built artifacts with `node scripts/download-wasm.mjs`.
+This page explains how to compile OrcaSlicer v2.4.0 to WebAssembly using the `orca-wasm/` build pipeline. You only need this if you want to change the C++ engine itself. For normal development of the web UI, download the pre-built artifacts with `node scripts/download-wasm.mjs`.
 
 ## When to build
 
 | Scenario | Action |
 |----------|--------|
-| Develop the React UI or CLI | `node scripts/download-wasm.mjs` — done |
+| Develop the React UI | `node scripts/download-wasm.mjs` — done |
 | Change C++ bridge (`orca-wasm/bridge/slicer.cpp`) | Rebuild WASM |
 | Update to a newer OrcaSlicer version | Rebuild WASM |
 | Add or change an override stub or shim | Rebuild WASM |
