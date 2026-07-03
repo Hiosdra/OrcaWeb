@@ -131,22 +131,6 @@ int orc_init(const char* json_data, int json_len) {
         g_config = Slic3r::DynamicPrintConfig();
         g_config.apply(g_defaults);
 
-        // Arachne's SkeletalTrapezoidation::propagateBeadingsDownward has a
-        // real out-of-bounds bug, reproducible with ordinary real-world
-        // meshes (Voron Design Cube v7, Stanford Bunny) via both the narrow-
-        // solid-infill fallback (Fill.cpp) and ordinary wall generation
-        // (PerimeterGenerator::process_arachne(), confirmed with a real
-        // 1.1M-triangle model). orca-wasm/patches/apply.py (section 8) fixes
-        // one upstream-acknowledged degenerate case ("too small central
-        // edges" in getOrCreateBeading()) but that alone did NOT resolve the
-        // Voron Cube / Bunny crash when tested — the exact trigger is still
-        // unidentified without native debugging tools (ASan/UBSan), which
-        // aren't available in this build environment. Keep both safe
-        // defaults until the real bug is found; callers can still opt back
-        // into Arachne/narrow-infill-detection explicitly per-slice.
-        g_config.set_deserialize_strict("detect_narrow_internal_solid_infill", "0");
-        g_config.set_deserialize_strict("wall_generator", "classic");
-
         // use_relative_e_distances defaults to true ("Default is checked" —
         // PrintConfig.cpp) but Print::validate() (Print.cpp) hard-fails
         // *every* slice under relative addressing unless layer_gcode

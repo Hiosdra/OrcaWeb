@@ -603,43 +603,6 @@ patch("src/libslic3r/Arachne/WallToolPaths.hpp", [
 ])
 
 # =============================================================================
-# 8b. TEMPORARY DIAGNOSTIC — UBSan on just the Arachne sources, to pinpoint
-#     the exact file:line of the out-of-bounds/UB bug behind the
-#     "memory access out of bounds" WASM trap in SkeletalTrapezoidation
-#     (see section 8). Remove this block once the real bug is found and
-#     fixed — it's not meant to ship.
-# =============================================================================
-UBSAN_ARACHNE_INJECTION = """
-# ── TEMPORARY: UBSan on Arachne sources only (see apply.py section 8b) ──────
-if(SLIC3R_WASM)
-  set(ARACHNE_UBSAN_SOURCES
-    Arachne/SkeletalTrapezoidation.cpp
-    Arachne/SkeletalTrapezoidationGraph.cpp
-    Arachne/WallToolPaths.cpp
-    Arachne/BeadingStrategy/BeadingStrategy.cpp
-    Arachne/BeadingStrategy/DistributedBeadingStrategy.cpp
-    Arachne/BeadingStrategy/LimitedBeadingStrategy.cpp
-    Arachne/BeadingStrategy/OuterWallInsetBeadingStrategy.cpp
-    Arachne/BeadingStrategy/RedistributeBeadingStrategy.cpp
-    Arachne/BeadingStrategy/WideningBeadingStrategy.cpp
-  )
-  set_source_files_properties(${ARACHNE_UBSAN_SOURCES} PROPERTIES
-    COMPILE_OPTIONS "-fsanitize=undefined;-fno-sanitize-recover=undefined;-g"
-  )
-endif()
-"""
-
-_libslic3r_cmake = ORCA / "src/libslic3r/CMakeLists.txt"
-if _libslic3r_cmake.exists():
-    _content = _libslic3r_cmake.read_text(encoding="utf-8")
-    if "TEMPORARY: UBSan on Arachne sources" not in _content:
-        if not DRY_RUN:
-            _libslic3r_cmake.write_text(_content + UBSAN_ARACHNE_INJECTION, encoding="utf-8")
-        print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: src/libslic3r/CMakeLists.txt (UBSan diagnostic)")
-    else:
-        print("  OK (no change): src/libslic3r/CMakeLists.txt (UBSan diagnostic)")
-
-# =============================================================================
 # 9. Root CMakeLists.txt — append OrcaWeb bridge + WASM link target
 # =============================================================================
 BRIDGE_INJECTION = """\
