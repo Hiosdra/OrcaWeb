@@ -9,6 +9,13 @@ source "$EMSDK/emsdk_env.sh"
 export CCACHE_DIR="$HOME/.cache/ccache"
 mkdir -p "$CCACHE_DIR"
 ccache --max-size=2G >/dev/null 2>&1 || true
+# Local-only: rolling-release distros (Arch, etc.) ship a much newer CMake
+# than CI's ubuntu-latest. Several deps (EXPAT 2.5.0 confirmed) declare an
+# old cmake_minimum_required() that newer CMake rejects outright ("Compatibility
+# with CMake < 3.5 has been removed"). This env var is CMake's own documented
+# escape hatch (3.31+) and applies to every invocation without patching each
+# dep's CMakeLists.txt. Not needed in CI, so not added to build-wasm.yml.
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
 cd "$(dirname "$0")/../.."   # repo root (this script lives in orca-wasm/scripts/)
 echo "[build-local-wsl] repo root: $(pwd)"
 echo "[build-local-wsl] ORCA_VERSION=$ORCA_VERSION"
