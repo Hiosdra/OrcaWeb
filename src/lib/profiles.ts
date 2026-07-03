@@ -44,12 +44,26 @@ export function buildConfig(
   preset: string,
   overrides: Partial<OrcaConfig> = {},
 ): OrcaConfig {
-  return {
-    ...PRINTER_PRESETS[printer],
-    ...FILAMENT_PRESETS[filament],
-    ...(PRESETS.find((p) => p.name === preset)?.config ?? {}),
-    ...overrides,
+  const sources = [
+    PRINTER_PRESETS[printer],
+    FILAMENT_PRESETS[filament],
+    PRESETS.find((p) => p.name === preset)?.config ?? {},
+    overrides,
+  ]
+  // A plain {...a, ...b} spread would let a later source's _passthrough
+  // wholesale replace an earlier one's instead of merging them — e.g. the
+  // quality preset's _passthrough (its own unmapped fields) would silently
+  // discard the printer preset's machine_start_gcode/machine_end_gcode.
+  // Merge _passthrough across all sources field-by-field instead.
+  const merged: OrcaConfig = {}
+  let passthrough: Record<string, string> | undefined
+  for (const source of sources) {
+    const { _passthrough, ...rest } = source
+    Object.assign(merged, rest)
+    if (_passthrough) passthrough = { ...passthrough, ..._passthrough }
   }
+  if (passthrough) merged._passthrough = passthrough
+  return merged
 }
 
 /**

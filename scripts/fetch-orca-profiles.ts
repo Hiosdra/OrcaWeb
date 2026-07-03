@@ -96,14 +96,29 @@ const FILAMENTS: { name: string; vendor: string; filament: string }[] = [
 
 // parseOrcaProfileJson() forwards every unmapped field (start/end G-code,
 // per-axis jerk/acceleration curves, multi-extruder offsets, etc.) as
-// _passthrough so a user-imported profile can drive settings the UI doesn't
-// model. For these *bundled* profiles that's actively harmful, not just
-// bloat: real machine_start_gcode/machine_end_gcode use OrcaSlicer's
-// PlaceholderParser syntax ({if filament_type==...}, [nozzle_temperature],
-// custom G-code macros like M1002/M971/M980.3) which our bridge's plain
-// DynamicPrintConfig::set_deserialize_strict() doesn't evaluate — it would
-// either no-op or inject literal unresolved placeholder text into the
-// G-code. Keep only the fields explicitly modeled in OrcaConfig.
+// _passthrough, so a user-imported profile can drive settings the UI
+// doesn't model. Tried enabling the same thing for these *bundled* profiles
+// and reverted it after two confirmed problems (see scripts/repro-passthrough.mjs,
+// a local debug harness):
+//   1. libslic3r/PlaceholderParser.cpp IS already compiled into the WASM
+//      build (non-GUI source, part of libslic3r's normal CMake sources) and
+//      IS invoked by the real GCode::do_export path our bridge already
+//      calls — but legacy-syntax vars like `{max_layer_z + 0.5}` came back
+//      unresolved in tests, left as literal text in the G-code (invalid
+//      G-code for a real printer to execute). Needs further investigation
+//      before it can be trusted.
+//   2. Passing the full set of unmapped machine fields (extruder_offset,
+//      physical_extruder_map, retraction_distances_when_cut, etc. — meant
+//      for OrcaSlicer's multi-extruder/AMS support) crashes the engine:
+//      "memory access out of bounds" in
+//      DynamicPrintConfig::update_values_to_printer_extruders_for_multiple_filaments,
+//      called from Print::apply(), because our single-extruder headless
+//      config doesn't have the per-extruder array lengths these options
+//      expect.
+// Keep only the fields explicitly modeled in OrcaConfig (dimensions,
+// speeds, temps, quality settings — the values that actually drive a
+// correct slice) until placeholder resolution and multi-extruder-field
+// filtering are solved properly.
 function stripPassthrough(config: Partial<OrcaConfig>): Partial<OrcaConfig> {
   const { _passthrough, ...rest } = config
   void _passthrough
@@ -128,11 +143,6 @@ async function main() {
     console.log(`  ${q.label}: BBL/process/${q.process}`)
     const processFlat = await resolveInherits('BBL', 'process', q.process, cache)
     const processConfig = stripPassthrough(parseOrcaProfileJson(JSON.stringify(processFlat)))
-    // use_relative_e_distances deliberately excluded — the bridge forces it
-    // off by default (orc_init) since our headless build ships no layer_gcode
-    // with G92 E0; letting a real profile re-enable it here would silently
-    // reintroduce the "every slice fails validation" bug that fix addressed.
-    delete (processConfig as Record<string, unknown>).use_relative_e_distances
     qualityPresets.push({ name: q.name, label: q.label, description: q.description, config: processConfig })
   }
 
