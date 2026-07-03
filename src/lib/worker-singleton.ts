@@ -50,7 +50,7 @@ export function getWorker(): Worker {
   const wasmBase = import.meta.env.VITE_WASM_BASE_URL
     ?? `${import.meta.env.BASE_URL}wasm`
   wasmStatus = 'loading'
-  worker.postMessage({ type: 'LOAD_WASM', url: `${wasmBase}/slicer.js` })
+  worker.postMessage({ type: 'LOAD_WASM', url: `${wasmBase}/slicer.js`, version: __APP_VERSION__ })
 
   return worker
 }

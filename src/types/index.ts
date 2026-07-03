@@ -82,7 +82,9 @@ export interface SlicePreset {
 // --- Worker message protocol ---
 
 export type WorkerInMessage =
-  | { type: 'LOAD_WASM'; url: string }
+  // version is appended as a cache-busting query param to the slicer.js/
+  // slicer.wasm fetch URLs — see slicer.worker.ts for why.
+  | { type: 'LOAD_WASM'; url: string; version: string }
   | { type: 'SLICE'; stl: ArrayBuffer; config: OrcaConfig }
   | { type: 'SLICE_MULTI'; stls: ArrayBuffer[]; config: OrcaConfig }
   | { type: 'OBJ_TO_STL'; obj: ArrayBuffer; filename: string }

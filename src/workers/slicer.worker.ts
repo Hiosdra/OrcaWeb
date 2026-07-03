@@ -30,14 +30,26 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
 
     try {
       const wasmBase = msg.url.replace(/\/slicer\.js$/, '')
+      // slicer.js/slicer.wasm are served under a fixed, unhashed filename
+      // (they're downloaded from the wasm-v2.4.0 GitHub Release at deploy
+      // time, not processed by Vite's asset pipeline, so they get no
+      // content-hash filename the way JS/CSS bundles do). The PWA service
+      // worker caches them with a CacheFirst strategy (vite.config.ts) that
+      // never revalidates against the network — so without a cache-busting
+      // key in the URL, a browser that visited before this deploy keeps
+      // serving its stale cached engine binary indefinitely (up to the 30-day
+      // TTL), even after the rest of the app updates to a new version.
+      // Appending the app version makes each release's URL genuinely new,
+      // so CacheFirst treats it as a fresh entry instead of reusing a stale one.
+      const v = `?v=${encodeURIComponent(msg.version)}`
 
       // Fetch slicer.js text and wasm binary in parallel
       const [jsText, wasmBinary] = await Promise.all([
-        fetch(`${wasmBase}/slicer.js`).then((r) => {
+        fetch(`${wasmBase}/slicer.js${v}`).then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status} fetching slicer.js`)
           return r.text()
         }),
-        fetch(`${wasmBase}/slicer.wasm`).then((r) => {
+        fetch(`${wasmBase}/slicer.wasm${v}`).then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status} fetching slicer.wasm`)
           return r.arrayBuffer()
         }),
@@ -66,7 +78,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
 
       orcaModule = await factory({
         wasmBinary,
-        locateFile: (path: string) => `${wasmBase}/${path}`,
+        locateFile: (path: string) => `${wasmBase}/${path}${v}`,
         printErr: (m: string) => console.warn('[OrcaWASM]', m),
         onAbort: (m: string) => console.error('[OrcaWASM abort]', m),
       })
