@@ -27,14 +27,18 @@ target_link_options(slicer PRIVATE
   -sDISABLE_EXCEPTION_CATCHING=0
   # EMULATE_FUNCTION_POINTER_CASTS + a raised max-func-params was tried here
   # to fix a real crash (slicing the official Voron Design Cube v7 STL traps
-  # with "memory access out of bounds" — a mismatched-signature indirect call
-  # in the mesh-repair path, reproducible with scripts/repro-real-stl.mjs).
-  # It backfired: at -O2 with max-func-params raised to 64, the emulation
+  # with "memory access out of bounds"), on the initial hypothesis that it
+  # was a mismatched-signature indirect call in the mesh-repair path. It
+  # backfired: at -O2 with max-func-params raised to 64, the emulation
   # trampolines themselves became broken at runtime — even a trivial
   # 12-triangle cube started crashing the same way. That's strictly worse
   # than the original bug (which only hit specific real-world meshes), so
-  # it was reverted. The Voron Cube crash is still open; needs a source-level
-  # fix (the actual offending call site) rather than a Binaryen emulation flag.
+  # it was reverted. The real root cause turned out to be unrelated to
+  # function-pointer signatures: uninitialized WallToolPathsParams fields
+  # in Arachne's wall generator (see orca-wasm/patches/apply.py sections
+  # 8/8c/8d/8e/8f), fixed with default member initializers there instead —
+  # verified against the Voron Cube, Stanford Bunny, and a 1.1M-triangle
+  # model with Arachne enabled.
   -fexceptions
   # No --preload-file: the headless flat-config slicer never reads orca/resources
   # at runtime (verified in-browser — a full slice opens only /tmp/*.stl/.gcode,

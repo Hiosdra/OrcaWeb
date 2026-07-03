@@ -83,6 +83,29 @@ def patch(rel_path: str, replacements: list[tuple[str, str, int]]) -> bool:
     return True
 
 
+def verify_contains(rel_path: str, must_contain: str, description: str) -> None:
+    """
+    Hard-fail the patcher (and therefore the CI build) if `must_contain` is
+    absent from the given file, regardless of whether this run's patch()
+    call actually matched anything.
+
+    patch() only WARNs on a regex mismatch — by design, since most patches
+    are meant to be idempotent (a pattern legitimately won't match a file
+    that's already patched from a prior run). That means a genuine failure
+    (e.g. upstream OrcaSlicer reformatting the target code so the pattern
+    never matches at all, patched or not) is silently indistinguishable
+    from "already applied" and never fails CI. Use this for patches whose
+    correctness is safety-critical — it checks the *outcome*, not whether a
+    substitution fired this run, so it passes on a truly idempotent re-run
+    but fails if the source no longer looks like what the patch expects.
+    """
+    path = ORCA / rel_path
+    if not path.exists() or must_contain not in path.read_text(encoding="utf-8", errors="replace"):
+        print(f"FATAL: {description}\n  Expected to find in {rel_path}: {must_contain!r}", file=sys.stderr)
+        if not DRY_RUN:
+            sys.exit(1)
+
+
 # =============================================================================
 # 1. Root CMakeLists.txt — add SLIC3R_WASM option; make heavy deps conditional
 # =============================================================================
@@ -149,7 +172,9 @@ patch("src/libslic3r/GCode.hpp", [
 patch("src/libslic3r/CMakeLists.txt", [
     # Add SLIC3R_WASM compile definitions
     # SLIC3R_NO_OCCT is intentionally absent: OCCT is now compiled into the
-    # WASM engine (deps/build_occt.sh) and the real Format/STEP.cpp is used.
+    # WASM engine (see the "Build WASM deps — OCCT" step in
+    # .github/workflows/build-wasm.yml, or build-local-wsl.sh for local
+    # builds) and the real Format/STEP.cpp is used.
     (
         r'(target_compile_definitions\s*\(\s*libslic3r\s+PUBLIC)',
         r'\1\n  $<$<BOOL:${SLIC3R_WASM}>:SLIC3R_WASM;SLIC3R_NO_OPENVDB;SLIC3R_NO_OPENCV>',
@@ -287,7 +312,8 @@ LIBSLIC3R_OVERRIDES_INJECTION = """\
 if(SLIC3R_WASM AND DEFINED ORCA_WEB_OVERRIDES_DIR)
   # Files always present in OrcaSlicer
   # NOTE: Format/STEP.cpp is NOT stubbed — the real implementation is compiled
-  #       with OCCT (built by deps/build_occt.sh).
+  #       with OCCT (see the "Build WASM deps — OCCT" step in
+  #       .github/workflows/build-wasm.yml, or build-local-wsl.sh locally).
   set(_wasm_orig_stubs
     "${CMAKE_CURRENT_SOURCE_DIR}/Format/DRC.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Format/svg.cpp"
@@ -601,6 +627,13 @@ patch("src/libslic3r/Arachne/WallToolPaths.hpp", [
         1,
     ),
 ])
+verify_contains(
+    "src/libslic3r/Arachne/WallToolPaths.hpp",
+    "float   min_bead_width = 0.f;",
+    "WallToolPathsParams default-init patch (8f) did not apply — the Arachne "
+    "uninitialized-struct crash this fixes may have regressed (upstream "
+    "OrcaSlicer may have reformatted this struct; update the regex above).",
+)
 
 # =============================================================================
 # 9. Root CMakeLists.txt — append OrcaWeb bridge + WASM link target
