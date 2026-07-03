@@ -92,7 +92,13 @@ let out = header
 for (const s of steps) {
   if (skip.has(s.name)) continue
   out += `\n# ══════════════════════════════════════════════════════════\n# ${s.name}\n# ══════════════════════════════════════════════════════════\n`
-  out += (LOCAL_OVERRIDES[s.name] ?? s.script) + '\n'
+  // Each step runs as its own shell process in CI, so a stamp-check's
+  // `exit 0` ("already built, skip the rest of this step") only ends that
+  // one step there. Concatenated into a single script, a bare `exit 0`
+  // would terminate the ENTIRE build instead — wrap each step in a subshell
+  // so `exit` only escapes that step; `set -e` propagates into subshells,
+  // so a real failure still stops the whole script via its own nonzero exit.
+  out += `(\n${LOCAL_OVERRIDES[s.name] ?? s.script}\n)\n`
 }
 
 const outPath = join(__dirname, '../orca-wasm/scripts/build-local-wsl.sh')

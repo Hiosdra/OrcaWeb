@@ -23,6 +23,7 @@ echo "[build-local-wsl] ORCA_VERSION=$ORCA_VERSION"
 # ══════════════════════════════════════════════════════════
 # Checkout OrcaSlicer ${{ env.ORCA_VERSION }}
 # ══════════════════════════════════════════════════════════
+(
 if [ -d orca-wasm/orca/.git ]; then
   echo "[checkout] orca-wasm/orca already present — skip"
 else
@@ -31,10 +32,12 @@ else
     https://github.com/SoftFever/OrcaSlicer.git \
     orca-wasm/orca
 fi
+)
 
 # ══════════════════════════════════════════════════════════
 # Build WASM deps — Boost
 # ══════════════════════════════════════════════════════════
+(
 source /opt/emsdk/emsdk_env.sh
 BOOST_VERSION="1.83.0"
 BOOST_UNDERSCORE="${BOOST_VERSION//./_}"
@@ -88,10 +91,12 @@ echo "[boost] installed libs (sample):"
 ls "${INSTALL}/lib/libboost_system"* 2>/dev/null | head -3 || echo "  no libboost_system found!"
 touch "${STAMP}"
 
+)
 
 # ══════════════════════════════════════════════════════════
 # Build WASM deps — GMP / MPFR / CGAL
 # ══════════════════════════════════════════════════════════
+(
 source /opt/emsdk/emsdk_env.sh
 INSTALL="$(pwd)/orca-wasm/deps-install"
 STAMP="${INSTALL}/.math_built"
@@ -150,10 +155,12 @@ cmake --build /tmp/cgal-build --target install
 
 touch "${STAMP}"
 
+)
 
 # ══════════════════════════════════════════════════════════
 # Build WASM deps — Eigen3 / nlohmann / EXPAT / NLopt
 # ══════════════════════════════════════════════════════════
+(
 source /opt/emsdk/emsdk_env.sh
 INSTALL="$(pwd)/orca-wasm/deps-install"
 # Stamp name is version-suffixed (like the OCCT step below) so that
@@ -222,10 +229,12 @@ cmake --build /tmp/cereal-build --target install
 
 touch "${STAMP}"
 
+)
 
 # ══════════════════════════════════════════════════════════
 # Build WASM deps — libnoise
 # ══════════════════════════════════════════════════════════
+(
 source /opt/emsdk/emsdk_env.sh
 INSTALL="$(pwd)/orca-wasm/deps-install"
 STAMP="${INSTALL}/.libnoise_built"
@@ -250,10 +259,12 @@ ls "${INSTALL}/include/libnoise/noise.h" && echo "  headers OK"
 ls "${INSTALL}/lib/liblibnoise_static.a" && echo "  lib OK"
 touch "${STAMP}"
 
+)
 
 # ══════════════════════════════════════════════════════════
 # Build WASM deps — OCCT
 # ══════════════════════════════════════════════════════════
+(
 source /opt/emsdk/emsdk_env.sh
 OCCT_VERSION="7.8.1"
 OCCT_TAG="V${OCCT_VERSION//./_}"
@@ -338,10 +349,12 @@ ls "${INSTALL}/lib/cmake/opencascade/OpenCASCADEConfig.cmake" \
 ls "${INSTALL}/lib/libTKernel.a" && echo "  TKernel.a OK"
 touch "${STAMP}"
 
+)
 
 # ══════════════════════════════════════════════════════════
 # Build WASM deps — emscripten ports (zlib/png/jpeg)
 # ══════════════════════════════════════════════════════════
+(
 source /opt/emsdk/emsdk_env.sh
 echo "[emports] building zlib, libpng, libjpeg via embuilder…"
 embuilder build zlib libpng libjpeg
@@ -350,10 +363,12 @@ ls "$EMSDK/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/libz.a" && ec
 ls "$EMSDK/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/libpng.a" && echo "  libpng OK"
 ls "$EMSDK/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten/libjpeg.a" && echo "  libjpeg OK"
 
+)
 
 # ══════════════════════════════════════════════════════════
 # Configure WASM build
 # ══════════════════════════════════════════════════════════
+(
 source /opt/emsdk/emsdk_env.sh
 WORK="$(pwd)"
 DEP_INSTALL="${WORK}/orca-wasm/deps-install"
@@ -390,19 +405,23 @@ emcmake cmake \
   "-DCMAKE_CXX_FLAGS=-I${WORK}/orca-wasm/wasm/shims -fexceptions -DBOOST_HAS_PTHREADS=1 -DBOOST_LOG_NO_THREADS=1 -DSLIC3R_WASM=1 -DSLIC3R_NO_OPENVDB=1 -DSLIC3R_NO_OPENCV=1" \
   "-DCMAKE_C_FLAGS=-I${WORK}/orca-wasm/wasm/shims"
 
+)
 
 # ══════════════════════════════════════════════════════════
 # Build WASM module
 # ══════════════════════════════════════════════════════════
+(
 source /opt/emsdk/emsdk_env.sh
 emmake cmake --build orca-wasm/build-wasm --target slicer -j4
 echo "--- ccache stats ---"
 ccache -s || true
 
+)
 
 # ══════════════════════════════════════════════════════════
 # Package WASM artifacts
 # ══════════════════════════════════════════════════════════
+(
 echo "--- build output ---"
 ls -lh orca-wasm/build-wasm/wasm/ 2>/dev/null || ls -lh orca-wasm/build-wasm/ || true
 echo "--- public/wasm/ ---"
@@ -425,3 +444,4 @@ cp public/wasm/slicer.wasm wasm-artifacts/
 [[ -f public/wasm/slicer.data ]] && cp public/wasm/slicer.data wasm-artifacts/
 ls -lh wasm-artifacts/
 
+)
