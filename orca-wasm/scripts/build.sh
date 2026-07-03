@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# OUTDATED — targets OrcaSlicer v2.3.2 and a dep/CMake layout that predates
+# the current bridge integration (ORCA_WEB_BRIDGE_DIR etc.) and the
+# Eigen/nlohmann/EXPAT/NLopt/cereal/libnoise dep steps. Use
+# orca-wasm/scripts/build-local-wsl.sh instead (generated from and kept in
+# sync with .github/workflows/build-wasm.yml via scripts/gen-wsl-build-script.mjs).
+# Kept here for reference only — not deleted since nothing here asked for that.
+#
 # Build OrcaSlicer v2.3.2 WASM module and copy artifacts to public/wasm/.
 #
 # Prerequisites (installed or on PATH):

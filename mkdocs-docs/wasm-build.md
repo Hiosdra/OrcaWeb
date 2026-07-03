@@ -43,7 +43,7 @@ emsdk (Emscripten toolchain)
        → build/slicer.wasm
 ```
 
-Dependencies are cached between runs (GitHub Actions cache key based on dependency versions). A cold build takes ~25 min; a warm build (only C++ changes) ~8–12 min.
+Dependencies are cached between runs (GitHub Actions cache key based on dependency versions). A cold build (deps + compile) takes ~2.5–3 h, of which OCCT alone is ~45–60 min. With warm dep and `ccache` caches, a build that only touches C++ source takes ~10–15 min.
 
 ## Triggering a build
 
@@ -64,20 +64,41 @@ Dependencies are cached between runs (GitHub Actions cache key based on dependen
 
     Builds on pull requests that touch `orca-wasm/**` run automatically but skip the release-publish step.
 
-=== "Local (Linux / macOS)"
+=== "Local (Linux / macOS / WSL2)"
+
+    Windows users: WSL2 works well for this (Windows-native emsdk + this dep
+    chain is a much rockier path — Boost's `b2`, GMP/MPFR's `configure`, and
+    OCCT's CMake all assume a POSIX toolchain).
 
     ```bash
-    # Install emsdk
-    git clone https://github.com/emscripten-core/emsdk.git
-    cd emsdk && ./emsdk install 3.1.74 && ./emsdk activate 3.1.74
-    source ./emsdk_env.sh
+    # Install build tools (Arch example — use your distro's equivalents)
+    pacman -S --needed git cmake ninja python m4 texinfo openssl ccache base-devel
 
-    # Build
-    cd orca-wasm
-    ./scripts/build.sh
+    # Install emsdk (pinned to match CI — see EMSDK_VERSION in build-wasm.yml)
+    git clone https://github.com/emscripten-core/emsdk.git /opt/emsdk
+    /opt/emsdk/emsdk install 3.1.74 && /opt/emsdk/emsdk activate 3.1.74
+
+    # Clone the repo and build — run from the repo root, not orca-wasm/
+    git clone https://github.com/Hiosdra/OrcaWeb.git && cd OrcaWeb
+    ./orca-wasm/scripts/build-local-wsl.sh
     ```
 
-    Output lands in `orca-wasm/build/`. Copy `slicer.js` and `slicer.wasm` to `public/wasm/` to use them locally.
+    This script is generated from `.github/workflows/build-wasm.yml` itself
+    (via `node scripts/gen-wsl-build-script.mjs`), so it stays accurate as the
+    CI pipeline changes — re-run the generator after editing the workflow
+    rather than hand-editing the script. First run builds all dependencies
+    from scratch (~90–100 min, mostly OCCT); subsequent runs skip
+    already-built deps via stamp files in `orca-wasm/deps-install/`, and
+    `ccache` (set up automatically, `~/.cache/ccache`) makes repeat C++
+    compiles of unchanged files fast.
+
+    Artifacts land directly in `public/wasm/slicer.js` / `slicer.wasm`
+    (also copied to `wasm-artifacts/` to mirror the CI upload step) — no
+    manual copy needed.
+
+    `orca-wasm/scripts/build.sh` still exists but targets OrcaSlicer v2.3.2
+    and predates the current bridge integration — it's kept for reference
+    only, don't use it for v2.4.0 builds.
 
 ## Applying patches before build
 

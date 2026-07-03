@@ -59,14 +59,14 @@ orca-wasm/
 ├── bridge/         ← C++ bridge: orc_init / orc_slice / orc_free
 ├── wasm/shims/     ← sequential TBB stubs (WASM is single-threaded)
 ├── patches/        ← Python patcher for WASM compatibility
-├── deps/           ← Boost / GMP / MPFR / CGAL build scripts
-└── scripts/        ← build.sh end-to-end build script
+└── scripts/        ← build-local-wsl.sh end-to-end build script
 ```
 
-Build the WASM module locally:
+Build the WASM module locally (Linux / macOS / WSL2 — see
+[`mkdocs-docs/wasm-build.md`](mkdocs-docs/wasm-build.md) for full setup):
 ```bash
-source /path/to/emsdk/emsdk_env.sh
-cd orca-wasm && ./scripts/build.sh
+# from the repo root, not orca-wasm/
+./orca-wasm/scripts/build-local-wsl.sh
 ```
 
 Or trigger the `Build WASM` GitHub Actions workflow manually to produce a
