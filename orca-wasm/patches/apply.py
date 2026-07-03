@@ -515,6 +515,38 @@ patch("src/libslic3r/Arachne/WallToolPaths.cpp", [
 ])
 
 # =============================================================================
+# 8d. SkeletalTrapezoidation.cpp — guard interpolate() against an empty
+#     toolpath_locations vector
+#     interpolate() (the 4-arg overload, called directly from
+#     propagateBeadingsDownward — the exact function in the crash's named
+#     stack trace) computes `left.toolpath_locations.size() - 1` into a
+#     signed coord_t without checking for empty() first: size_t(0) - 1
+#     underflows before the (implementation-defined, not truly UB, but a
+#     smell) narrowing conversion back to coord_t. The 3-arg interpolate()
+#     overload below it then writes `ret.toolpath_locations[inset_idx]` /
+#     `ret.bead_widths[inset_idx]` for inset_idx up to
+#     min(left,right).bead_widths.size() — if `ret` (a copy of whichever of
+#     left/right has larger total_thickness) has a smaller toolpath_locations
+#     than that bound, it's an out-of-bounds write. Guard both.
+# =============================================================================
+patch("src/libslic3r/Arachne/SkeletalTrapezoidation.cpp", [
+    (
+        r'(coord_t next_inset_idx;\n    for \(next_inset_idx = left\.toolpath_locations\.size\(\) - 1; next_inset_idx >= 0; next_inset_idx--\))',
+        r'if (left.toolpath_locations.empty())\n'
+        r'    { // Nothing to search — behave as if no next inset was found.\n'
+        r'        return ret;\n'
+        r'    }\n'
+        r'    \1',
+        1,
+    ),
+    (
+        r'(for \(size_t inset_idx = 0; inset_idx < std::min\(left\.bead_widths\.size\(\), right\.bead_widths\.size\(\)\); inset_idx\+\+\)\n    \{)',
+        r'for (size_t inset_idx = 0; inset_idx < std::min({left.bead_widths.size(), right.bead_widths.size(), ret.bead_widths.size(), ret.toolpath_locations.size()}); inset_idx++)\n    {',
+        1,
+    ),
+])
+
+# =============================================================================
 # 8b. TEMPORARY DIAGNOSTIC — UBSan on just the Arachne sources, to pinpoint
 #     the exact file:line of the out-of-bounds/UB bug behind the
 #     "memory access out of bounds" WASM trap in SkeletalTrapezoidation
