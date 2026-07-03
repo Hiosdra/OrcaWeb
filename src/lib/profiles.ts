@@ -128,10 +128,10 @@ const ORCA_FIELD_MAP: Record<string, { key: keyof OrcaConfig; type: 'num' | 'pct
  * extruder/nozzle (e.g. Bambu Lab H2D), which our WASM build cannot support
  * — it's hard-coded single-extruder, so it never has the per-extruder array
  * lengths (nozzle_diameter, extruder_variant_list, and everything gated
- * behind DynamicPrintConfig::support_different_extruders() in
- * orca-wasm/orca/src/libslic3r/PrintConfig.cpp) that a real multi-extruder
- * profile's full field set — including G-code fields that reference
- * per-extruder-indexed placeholders like `[previous_extruder]` — expects.
+ * behind DynamicPrintConfig::support_different_extruders(), PrintConfig.cpp:8966-8987
+ * in orca-wasm/orca/src/libslic3r/) that a real multi-extruder profile's
+ * full field set — including G-code fields that reference per-extruder-
+ * indexed placeholders like `[previous_extruder]` — expects.
  * Passing that field set through via _passthrough crashes Print::apply()
  * with a WASM "memory access out of bounds" trap (confirmed against the
  * real Bambu Lab H2D profile; not caught by any single field-level denylist
@@ -140,18 +140,30 @@ const ORCA_FIELD_MAP: Record<string, { key: keyof OrcaConfig; type: 'num' | 'pct
  * Mirrors support_different_extruders()'s own two conditions exactly, so any
  * profile that would flip the engine into "different extruders" mode has
  * its passthrough dropped entirely rather than risk it.
+ *
+ * Real OrcaSlicer profile JSON always represents multi-value fields as JSON
+ * arrays (e.g. `["0.4","0.4"]`), never a flattened comma/semicolon string —
+ * verified directly against the actual downloaded BBL profiles. The
+ * fallback below is defensive for hand-edited/non-standard input, matching
+ * how parsePrintableArea() below already falls back to string-splitting.
  */
 function isMultiExtruderProfile(raw: Record<string, unknown>): boolean {
-  const nozzleDiameter = raw['nozzle_diameter']
-  if (Array.isArray(nozzleDiameter) && nozzleDiameter.length > 1) return true
-
-  const variantList = raw['extruder_variant_list']
-  if (variantList !== undefined) {
-    const entries = Array.isArray(variantList) ? variantList.map(String) : [String(variantList)]
-    if (entries.length > 1) return true
-    if (entries.some((entry) => entry.includes(','))) return true
+  function hasMultipleEntries(val: unknown): boolean {
+    if (val === undefined || val === null) return false
+    // extruder_variant_list's real shape is an array with one entry per
+    // physical extruder, where each entry is itself a comma-joined list of
+    // that extruder's supported variants (e.g. a single-extruder X1C profile
+    // has extruder_variant_list: ["Direct Drive Standard,Direct Drive High Flow"]
+    // — 1 array element, but 2 variants, which is enough to flip
+    // support_different_extruders() to true). Splitting every element by
+    // ","/";" before counting catches that case as well as the "flattened
+    // to one big string" defensive fallback for non-array input.
+    const rawEntries = Array.isArray(val) ? val.map(String) : [String(val)]
+    const entries = rawEntries.flatMap((entry) => entry.split(/[,;]/).map((s) => s.trim()).filter(Boolean))
+    return entries.length > 1
   }
-  return false
+
+  return hasMultipleEntries(raw['nozzle_diameter']) || hasMultipleEntries(raw['extruder_variant_list'])
 }
 
 /**
