@@ -215,10 +215,13 @@ function transformPoint(
  *   = (outerL·innerL)·p + (outerL·innerT + outerT)
  */
 function composeTransform(outer: number[] | null, inner: number[] | null): number[] | null {
-  if (!outer && !inner) return null
-  const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
-  const o = outer ?? IDENTITY
-  const i = inner ?? IDENTITY
+  // identity ∘ inner = inner, outer ∘ identity = outer — skips the 3x3
+  // multiply/translate math entirely for the common case (most objects/
+  // components carry no transform attribute at all).
+  if (!outer) return inner
+  if (!inner) return outer
+  const o = outer
+  const i = inner
   const oL = (r: number, c: number) => o[c * 3 + r]
   const iL = (r: number, c: number) => i[c * 3 + r]
 
