@@ -176,6 +176,36 @@ export function buildConfig(
   }
 }
 
+/**
+ * Translate OrcaConfig field names to the literal OrcaSlicer config option
+ * names the WASM bridge expects, for the fields where they differ.
+ *
+ * The bridge sends every key straight through to
+ * `g_config.set_deserialize_strict(key, value)` (orca-wasm/bridge/slicer.cpp)
+ * with no key translation of its own — an unrecognized key is silently
+ * skipped. `default_speed` and `enable_ironing` are OrcaConfig-only names
+ * with no matching real option (verified against PrintConfig.cpp), so
+ * everywhere they were previously set — every PRESETS entry (Draft/Standard/
+ * Fine) and any imported 3MF with ironing — silently had no effect on the
+ * actual slice.
+ *
+ * Call this once, right before JSON.stringify'ing the config for orc_init.
+ */
+export function toEngineConfig(config: OrcaConfig): Record<string, unknown> {
+  const { default_speed, enable_ironing, ...rest } = config as OrcaConfig & Record<string, unknown>
+  const out: Record<string, unknown> = { ...rest }
+  if (default_speed !== undefined) {
+    // "Speed of inner wall" (PrintConfig.cpp) — the closest real equivalent
+    // to a general/default print speed; OrcaSlicer has no single knob that
+    // also scales infill/support speeds, those remain independently set.
+    out.inner_wall_speed = default_speed
+  }
+  if (enable_ironing !== undefined) {
+    out.ironing_type = enable_ironing ? 'top' : 'no ironing'
+  }
+  return out
+}
+
 // OrcaSlicer profile field → OrcaConfig key mapping.
 // OrcaSlicer often encodes numbers as strings (e.g. "0.2") and percentages as "15%".
 const ORCA_FIELD_MAP: Record<string, { key: keyof OrcaConfig; type: 'num' | 'pct' | 'bool' | 'str' }> = {
