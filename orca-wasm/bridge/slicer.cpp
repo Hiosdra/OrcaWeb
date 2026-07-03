@@ -147,6 +147,19 @@ int orc_init(const char* json_data, int json_len) {
         g_config.set_deserialize_strict("detect_narrow_internal_solid_infill", "0");
         g_config.set_deserialize_strict("wall_generator", "classic");
 
+        // use_relative_e_distances defaults to true ("Default is checked" —
+        // PrintConfig.cpp) but Print::validate() (Print.cpp) hard-fails
+        // *every* slice under relative addressing unless layer_gcode
+        // contains "G92 E0" — normally supplied by a real printer profile's
+        // start/layer G-code, none of which we ship in this headless build.
+        // Without this default every slice through the real app failed
+        // validation (-6) with "Relative extruder addressing requires
+        // resetting the extruder position...". Absolute addressing (0)
+        // needs no such G-code and works on effectively all firmwares.
+        // Callers can still opt into relative addressing explicitly if they
+        // also supply appropriate layer_gcode.
+        g_config.set_deserialize_strict("use_relative_e_distances", "0");
+
         for (auto& [key, val] : j.items()) {
             std::string sv = json_val_to_string(val);
             if (sv.empty()) continue;
