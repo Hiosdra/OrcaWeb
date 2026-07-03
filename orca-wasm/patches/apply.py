@@ -547,6 +547,31 @@ patch("src/libslic3r/Arachne/SkeletalTrapezoidation.cpp", [
 ])
 
 # =============================================================================
+# 8e. WallToolPaths.cpp — skip removeSmallLines()'s shorterThan() check for
+#     a junction-less ExtrusionLine
+#     Found via UBSan after fixing 8c/8d: with those in place, the crash
+#     moves to a precise, named location — WallToolPaths.cpp:696 (in the
+#     as-patched file; effectively the shorterThan() call in
+#     removeSmallLines()) — "runtime error: -nan is outside the range of
+#     representable values of type 'long long'". min_width is left at its
+#     numeric_limits<coord_t>::max() sentinel when `line` has zero
+#     junctions (the for-loop over `line` never executes), and that
+#     sentinel then flows into `min_width / 2` / `min_width *
+#     min_length_factor`, producing a NaN/overflow when converted back to
+#     coord_t for shorterThan()'s check_length parameter. A junction-less
+#     line has nothing to measure a minimum width from, so skip the
+#     removal check for it rather than compute with the sentinel.
+# =============================================================================
+patch("src/libslic3r/Arachne/WallToolPaths.cpp", [
+    (
+        r'(coord_t        min_width = std::numeric_limits<coord_t>::max\(\);\n            for \(const ExtrusionJunction &j : line\)\n                min_width = std::min\(min_width, j\.w\);\n)(\s*)(// Only use min_length_factor)',
+        r'\1\2if (min_width == std::numeric_limits<coord_t>::max()) continue; // junction-less line: nothing to measure\n'
+        r'\2\3',
+        1,
+    ),
+])
+
+# =============================================================================
 # 8b. TEMPORARY DIAGNOSTIC — UBSan on just the Arachne sources, to pinpoint
 #     the exact file:line of the out-of-bounds/UB bug behind the
 #     "memory access out of bounds" WASM trap in SkeletalTrapezoidation
