@@ -53,6 +53,9 @@ export interface OrcaConfig {
   _passthrough?: Record<string, string>
 }
 
+// Curated subset of PrintConfig.cpp's sparse_infill_pattern enum (26 values
+// total) — the ones surfaced in the UI dropdown, plus crosshatch (Bambu's
+// bundled quality-tier profiles default to it).
 export type InfillPattern =
   | 'grid'
   | 'gyroid'
@@ -61,6 +64,7 @@ export type InfillPattern =
   | 'cubic'
   | 'lightning'
   | 'rectilinear'
+  | 'crosshatch'
 
 export type SupportType = 'normal(auto)' | 'normal(manual)' | 'tree(auto)' | 'tree(manual)'
 

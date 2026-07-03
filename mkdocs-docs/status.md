@@ -151,6 +151,7 @@ v0.4  ── ✅ Import OBJ (natywny parser OrcaSlicer w WASM, `orc_obj_to_stl`)
       ── ✅ bed_shape — okrągły stół (P1S) wizualizowany w podglądzie 3D i G-code
       ── ✅ FuzzySkin UI — none/external/all, thickness + point_dist (PR #32)
       ── ✅ Multi-object plate — „One plate (N)" auto-arrange przez `orc_slice_multi`
+      ── ✅ Presety drukarek/filamentów/jakości pobrane z prawdziwych profili OrcaSlicer (resources/profiles/) zamiast ręcznie wpisanych wartości
       ── Variable layer height UI
 ```
 

@@ -190,7 +190,7 @@ export function SettingsPanel({
         <SelectField
           label="Pattern"
           value={config.sparse_infill_pattern ?? 'grid'}
-          options={['grid', 'gyroid', 'honeycomb', 'triangles', 'cubic', 'lightning', 'rectilinear'] as InfillPattern[]}
+          options={['grid', 'gyroid', 'honeycomb', 'triangles', 'cubic', 'lightning', 'rectilinear', 'crosshatch'] as InfillPattern[]}
           onChange={(v) => onChange({ sparse_infill_pattern: v as InfillPattern })}
           className="mt-3"
         />
