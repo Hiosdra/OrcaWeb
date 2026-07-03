@@ -124,6 +124,49 @@ const ORCA_FIELD_MAP: Record<string, { key: keyof OrcaConfig; type: 'num' | 'pct
 }
 
 /**
+ * Detects an OrcaSlicer machine profile describing more than one physical
+ * extruder/nozzle (e.g. Bambu Lab H2D), which our WASM build cannot support
+ * — it's hard-coded single-extruder, so it never has the per-extruder array
+ * lengths (nozzle_diameter, extruder_variant_list, and everything gated
+ * behind DynamicPrintConfig::support_different_extruders(), PrintConfig.cpp:8966-8987
+ * in orca-wasm/orca/src/libslic3r/) that a real multi-extruder profile's
+ * full field set — including G-code fields that reference per-extruder-
+ * indexed placeholders like `[previous_extruder]` — expects.
+ * Passing that field set through via _passthrough crashes Print::apply()
+ * with a WASM "memory access out of bounds" trap (confirmed against the
+ * real Bambu Lab H2D profile; not caught by any single field-level denylist
+ * since the crash involves dozens of ordinary fields interacting through
+ * G-code placeholder evaluation, not just the multi-extruder-specific ones).
+ * Mirrors support_different_extruders()'s own two conditions exactly, so any
+ * profile that would flip the engine into "different extruders" mode has
+ * its passthrough dropped entirely rather than risk it.
+ *
+ * Real OrcaSlicer profile JSON always represents multi-value fields as JSON
+ * arrays (e.g. `["0.4","0.4"]`), never a flattened comma/semicolon string —
+ * verified directly against the actual downloaded BBL profiles. The
+ * fallback below is defensive for hand-edited/non-standard input, matching
+ * how parsePrintableArea() below already falls back to string-splitting.
+ */
+function isMultiExtruderProfile(raw: Record<string, unknown>): boolean {
+  function hasMultipleEntries(val: unknown): boolean {
+    if (val === undefined || val === null) return false
+    // extruder_variant_list's real shape is an array with one entry per
+    // physical extruder, where each entry is itself a comma-joined list of
+    // that extruder's supported variants (e.g. a single-extruder X1C profile
+    // has extruder_variant_list: ["Direct Drive Standard,Direct Drive High Flow"]
+    // — 1 array element, but 2 variants, which is enough to flip
+    // support_different_extruders() to true). Splitting every element by
+    // ","/";" before counting catches that case as well as the "flattened
+    // to one big string" defensive fallback for non-array input.
+    const rawEntries = Array.isArray(val) ? val.map(String) : [String(val)]
+    const entries = rawEntries.flatMap((entry) => entry.split(/[,;]/).map((s) => s.trim()).filter(Boolean))
+    return entries.length > 1
+  }
+
+  return hasMultipleEntries(raw['nozzle_diameter']) || hasMultipleEntries(raw['extruder_variant_list'])
+}
+
+/**
  * Parse bed size from OrcaSlicer's `printable_area` field.
  *
  * OrcaSlicer stores bed corners as an array of "XxY" strings, e.g.:
@@ -224,28 +267,32 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
 
     // ── Passthrough for unmapped OrcaSlicer fields ───────────────────────────
     // Collect every field not already processed so it can be forwarded verbatim
-    // to the WASM slicer (which accepts any DynamicPrintConfig key).
-    const SKIP_META = new Set(['type', 'name', 'inherits', 'from', 'version', 'description', '__proto__', 'constructor', 'prototype'])
-    const SKIP_BED  = new Set(['printable_area', 'bed_size'])
-    const alreadyMapped = new Set(Object.keys(ORCA_FIELD_MAP))
-    const passthrough: Record<string, string> = Object.create(null) as Record<string, string>
-    for (const [field, val] of Object.entries(raw)) {
-      if (SKIP_META.has(field) || SKIP_BED.has(field) || alreadyMapped.has(field)) continue
-      if (val === null || val === undefined) continue
-      let sv: string
-      if (Array.isArray(val)) {
-        // OrcaSlicer wraps values in arrays (single-extruder: ["0.8"], multi: ["0.8","1.0"]).
-        // OrcaSlicer's config deserializer expects multi-value options as comma-separated strings.
-        sv = val
-          .filter((x) => x !== null && x !== undefined)
-          .map((x) => (typeof x === 'boolean' ? (x ? '1' : '0') : String(x)))
-          .join(',')
-      } else {
-        sv = typeof val === 'boolean' ? (val ? '1' : '0') : String(val)
+    // to the WASM slicer (which accepts any DynamicPrintConfig key) — except
+    // for genuinely multi-extruder machine profiles, whose full field set
+    // crashes our single-extruder WASM build (see isMultiExtruderProfile).
+    if (!isMultiExtruderProfile(raw)) {
+      const SKIP_META = new Set(['type', 'name', 'inherits', 'from', 'version', 'description', '__proto__', 'constructor', 'prototype'])
+      const SKIP_BED  = new Set(['printable_area', 'bed_size'])
+      const alreadyMapped = new Set(Object.keys(ORCA_FIELD_MAP))
+      const passthrough: Record<string, string> = Object.create(null) as Record<string, string>
+      for (const [field, val] of Object.entries(raw)) {
+        if (SKIP_META.has(field) || SKIP_BED.has(field) || alreadyMapped.has(field)) continue
+        if (val === null || val === undefined) continue
+        let sv: string
+        if (Array.isArray(val)) {
+          // OrcaSlicer wraps values in arrays (single-extruder: ["0.8"], multi: ["0.8","1.0"]).
+          // OrcaSlicer's config deserializer expects multi-value options as comma-separated strings.
+          sv = val
+            .filter((x) => x !== null && x !== undefined)
+            .map((x) => (typeof x === 'boolean' ? (x ? '1' : '0') : String(x)))
+            .join(',')
+        } else {
+          sv = typeof val === 'boolean' ? (val ? '1' : '0') : String(val)
+        }
+        if (sv !== '') passthrough[field] = sv
       }
-      if (sv !== '') passthrough[field] = sv
+      if (Object.keys(passthrough).length > 0) config._passthrough = passthrough
     }
-    if (Object.keys(passthrough).length > 0) config._passthrough = passthrough
 
     return config
   } catch {
