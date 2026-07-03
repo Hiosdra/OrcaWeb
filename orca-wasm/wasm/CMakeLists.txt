@@ -19,6 +19,11 @@ target_link_options(slicer PRIVATE
   # instrumented in orca-wasm/patches/apply.py (section 8b), to pinpoint the
   # exact file:line of the SkeletalTrapezoidation OOB bug. Remove once found.
   -fsanitize=undefined
+  # TEMPORARY DIAGNOSTIC: the one-line UBSan report alone didn't say which
+  # call site triggered it (same report before and after the shorterThan()
+  # fix). ASSERTIONS=1 makes the abort() UBSan calls into throw a JS-level
+  # exception with a named stack trace instead of just exiting silently.
+  -sASSERTIONS=1
   -sALLOW_MEMORY_GROWTH=1
   -sMALLOC=emmalloc
   -sSTACK_SIZE=16777216
