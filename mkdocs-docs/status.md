@@ -113,8 +113,7 @@ Bridge udostępnia teraz `orc_slice_multi`'s `extruder_ids` — per-obiektowe pr
 | Element | Status |
 |---------|--------|
 | Bridge: `orc_slice_multi(..., extruder_ids, ...)` | ✅ zaimplementowane, zweryfikowane przez smoke test (scenariusz "plate: 2 objects, per-object extruder override") |
-| Prawdziwe drukarki wielo-dyszowe (`nozzle_diameter` > 1 wpis) | ❌ świadomie zablokowane — `isMultiExtruderProfile()` odrzuca passthrough takich profili; wymaga debug builda WASM (`-O0 -g`) i sesji root-cause, której nie da się przeprowadzić bez lokalnego toolchaina Emscripten |
-| UI — przypisanie ekstrudera/filamentu per obiekt w kolejce | ❌ niezrobione (wymaga najpierw powyższego) |
+| Prawdziwe drukarki wielo-dyszowe (`nozzle_diameter` > 1 wpis) + UI do przypisania ekstrudera/filamentu per obiekt w kolejce | ❌ świadomie zablokowane — `isMultiExtruderProfile()` odrzuca passthrough takich profili; wymaga debug builda WASM (`-O0 -g`) i sesji root-cause, której nie da się przeprowadzić bez lokalnego toolchaina Emscripten. UI nie ma sensu budować przed odblokowaniem silnika |
 
 ---
 
@@ -126,7 +125,6 @@ Bridge udostępnia teraz `orc_slice_multi`'s `extruder_ids` — per-obiektowe pr
 |---------|-----------|
 | Variable layer height | 🟡 średni |
 | Support enforcement / blocking | 🟡 średni |
-| Prawdziwe drukarki wielo-dyszowe (heterogeniczne ekstrudery) | 🟠 niski — patrz sekcja „Multi-ekstruder / multi-material" wyżej |
 
 ---
 
