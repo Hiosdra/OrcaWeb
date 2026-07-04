@@ -452,3 +452,10 @@ cp artifacts/slicer.wasm wasm-artifacts/
 ls -lh wasm-artifacts/
 
 )
+
+# ══════════════════════════════════════════════════════════
+# Smoke test WASM module
+# ══════════════════════════════════════════════════════════
+(
+node orca-wasm/scripts/smoke-test.mjs --wasm-dir artifacts
+)
