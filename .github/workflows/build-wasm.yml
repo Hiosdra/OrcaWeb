@@ -595,10 +595,13 @@ jobs:
             TAG="$BASE_TAG"
           fi
           echo "Publishing new release: $TAG"
-          gh release create "$TAG" \
+          # Attach assets in the same `gh release create` call rather than a
+          # separate `gh release upload` afterward: GitHub now marks a
+          # release immutable as soon as it's created, so a later upload call
+          # fails with "HTTP 422: Cannot upload assets to an immutable
+          # release." Passing the files as trailing args uploads them
+          # atomically as part of creation, before that immutability applies.
+          gh release create "$TAG" wasm-artifacts/* \
             --title "WASM build for OrcaSlicer $ORCA_VERSION ($TAG)" \
             --notes "Pre-built WASM artifacts for OrcaSlicer $ORCA_VERSION.\n\nUsed internally by the deploy workflow. Immutable — a fix to orca-wasm/ publishes a new *-patchN release rather than overwriting this one." \
             --repo "$GITHUB_REPOSITORY"
-          for f in wasm-artifacts/*; do
-            gh release upload "$TAG" "$f" --repo "$GITHUB_REPOSITORY"
-          done
