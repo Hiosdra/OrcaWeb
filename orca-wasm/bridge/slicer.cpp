@@ -114,6 +114,21 @@ static std::string json_val_to_string(const nlohmann::json& v) {
     return "";
 }
 
+// ModelObject::center_around_origin() centers the raw mesh bounding box on
+// *all three* axes, including Z — it's meant to be called with an existing
+// instance that absorbs the shift (see its desktop usage), which then
+// re-lands the object on the bed. This bridge calls it before any instance
+// exists, so nothing compensates for the Z shift: the mesh's own vertical
+// midpoint (not its bottom) ends up at bed level, and the object floats
+// half above / half below Z=0. Desktop Orca's bed-centering only recenters
+// X/Y and leaves Z exactly as authored in the source mesh — do the same here.
+static void center_object_xy_only(Slic3r::ModelObject* obj) {
+    Slic3r::Vec3d shift = -obj->raw_mesh_bounding_box().center();
+    shift.z() = 0.0;
+    obj->translate(shift);
+    obj->origin_translation += shift;
+}
+
 // ── public API ────────────────────────────────────────────────────────────────
 extern "C" {
 
@@ -262,9 +277,9 @@ int orc_slice(void* session_ptr, const void* stl_data, int stl_len,
         }
 
         // ── place model on bed ───────────────────────────────────────
-        // Center the mesh at origin, then offset to bed centre.
+        // Center the mesh in X/Y, then offset to bed centre.
         for (auto* obj : model.objects) {
-            obj->center_around_origin();
+            center_object_xy_only(obj);
             if (obj->instances.empty()) {
                 auto* inst = obj->add_instance();
                 // Place at bed centre, derived from bed_size_x / bed_size_y in config.
@@ -505,7 +520,7 @@ int orc_slice_multi(
         // ── centre each mesh; give each one an instance; optional extruder override ──
         for (std::size_t i = 0; i < model.objects.size(); i++) {
             auto* obj = model.objects[i];
-            obj->center_around_origin();
+            center_object_xy_only(obj);
             if (obj->instances.empty())
                 obj->add_instance();
             if (can_map_extruders && extruder_ids[i] > 0) {

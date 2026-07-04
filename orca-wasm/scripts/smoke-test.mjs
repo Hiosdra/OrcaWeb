@@ -78,7 +78,7 @@ function icosphere(subdivisions) {
 
   // Normalize to unit sphere, scale to a 10mm-radius solid, lift so min z = 0
   // (matches how the real bridge expects/centers a model — see orc_slice's
-  // center_around_origin() call, which handles X/Y but leaves Z as-is).
+  // center_object_xy_only() call, which handles X/Y but leaves Z as-is).
   const radius = 10
   verts = verts.map(([x, y, z]) => {
     const len = Math.sqrt(x * x + y * y + z * z) || 1
@@ -261,6 +261,26 @@ function assertSaneGcode(gcode, label) {
   if (lines < 50) throw new Error(`${label}: only ${lines} lines — expected a real multi-layer slice`)
 }
 
+// Regression guard for the bug fixed by center_object_xy_only() in
+// slicer.cpp: center_around_origin() used to center the mesh on Z too,
+// leaving the object floating with its vertical midpoint (not its base) at
+// the bed plane. The torture mesh's base sits at z=0 (see icosphere()
+// above), so a correctly-placed slice's lowest G0/G1 Z move should land at
+// the first layer height, never deep below zero (sunk into the bed) or
+// far above it (floating).
+function assertRestsOnBed(gcode, label, firstLayerHeight) {
+  const zValues = []
+  for (const line of gcode.split('\n')) {
+    if (!/^G[01] /.test(line)) continue
+    const m = line.match(/Z(-?[0-9.]+)/)
+    if (m) zValues.push(parseFloat(m[1]))
+  }
+  if (zValues.length === 0) throw new Error(`${label}: no Z-bearing G0/G1 moves found`)
+  const minZ = Math.min(...zValues)
+  if (minZ < -0.01) throw new Error(`${label}: minimum Z is ${minZ} — model appears to be sunk below the bed`)
+  if (minZ > firstLayerHeight + 0.05) throw new Error(`${label}: minimum Z is ${minZ}, expected ~${firstLayerHeight} — model appears to be floating above the bed`)
+}
+
 // ── real base config (Generic-ish printer + PLA + Standard) ───────────────────
 // Deliberately not importing src/lib/profiles.ts (TS + depends on the bundled
 // orca-profiles.json shape); a minimal but real, representative config is
@@ -319,6 +339,7 @@ async function main() {
       initSession(module, session, JSON.stringify(scenario.config))
       const gcode = sliceOnce(module, session, stlBytes)
       assertSaneGcode(gcode, scenario.name)
+      assertRestsOnBed(gcode, scenario.name, scenario.config.initial_layer_height)
       console.log(`PASS (${gcode.length} bytes)`)
     } catch (err) {
       failures++
@@ -341,6 +362,7 @@ async function main() {
     initSession(module, session, JSON.stringify(BASE_CONFIG))
     const gcode = sliceMultiOnce(module, session, [stlBytes, stlBytes], Int32Array.from([1, 1]))
     assertSaneGcode(gcode, 'plate/extruder-ids')
+    assertRestsOnBed(gcode, 'plate/extruder-ids', BASE_CONFIG.initial_layer_height)
     console.log(`PASS (${gcode.length} bytes)`)
   } catch (err) {
     failures++
