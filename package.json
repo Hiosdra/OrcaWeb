@@ -9,6 +9,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "setup": "node scripts/download-wasm.mjs",
+    "smoke-test": "node orca-wasm/scripts/smoke-test.mjs",
     "generate-pwa-assets": "pwa-assets-generator --config pwa-assets.config.ts"
   },
   "dependencies": {

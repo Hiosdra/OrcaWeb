@@ -8,12 +8,12 @@ This guide is for developers who want to embed the OrcaSlicer WASM engine in the
 
 | Capability | Function |
 |---|---|
-| Slice STL → G-code | `orc_init` + `orc_slice` |
-| Slice multiple STLs on one plate → G-code | `orc_init` + `orc_slice_multi` |
-| Convert OBJ → binary STL | `orc_obj_to_stl` |
-| Convert STEP → binary STL | `orc_cad_to_stl` |
+| Slice STL → G-code | `orc_session_create` + `orc_init` + `orc_slice` |
+| Slice multiple STLs on one plate → G-code | `orc_session_create` + `orc_init` + `orc_slice_multi` |
+| Convert OBJ → binary STL | `orc_obj_to_stl` (no session needed) |
+| Convert STEP → binary STL | `orc_cad_to_stl` (no session needed) |
 
-The engine is **stateless between slicing calls** except for the config set by `orc_init`. It is **single-threaded** — use a Web Worker (browser) or a Worker Thread (Node.js) to avoid blocking the event loop.
+`orc_init`/`orc_slice`/`orc_slice_multi` take an opaque **session** handle (from `orc_session_create()`) as their first argument — see [API Reference → orc_session_create](api-reference.md#orc_session_create-orc_session_destroy) and [ADR-008](adr/adr-008-session-handle.md). Create one session and reuse it for every slice; free it with `orc_session_destroy()` when done. The config set by `orc_init` persists on that session between slicing calls. The engine is **single-threaded** — use a Web Worker (browser) or a Worker Thread (Node.js) to avoid blocking the event loop.
 
 ---
 
@@ -52,12 +52,14 @@ Running the engine in a Web Worker keeps the main thread free while the ~29 MB W
 import { loadOrcaModule, sliceStl } from './wasm-loader'
 
 let module: Awaited<ReturnType<typeof loadOrcaModule>> | null = null
+let session = 0   // created once, reused for every slice (see ADR-008)
 
 self.addEventListener('message', async (e) => {
   const { type } = e.data
 
   if (type === 'LOAD') {
     module = await loadOrcaModule()   // no argument — uses built-in WASM_BASE
+    session = module._orc_session_create()
     self.postMessage({ type: 'READY' })
     return
   }
@@ -65,7 +67,7 @@ self.addEventListener('message', async (e) => {
   if (type === 'SLICE' && module) {
     const { stl, config } = e.data
     try {
-      const gcode = sliceStl(module, new Uint8Array(stl), JSON.stringify(config))
+      const gcode = sliceStl(module, session, new Uint8Array(stl), JSON.stringify(config))
       self.postMessage({ type: 'DONE', gcode })
     } catch (err) {
       self.postMessage({ type: 'ERROR', message: String(err) })
@@ -124,6 +126,10 @@ const factory = fn({}, {})
 
 const module = await factory({ wasmBinary })
 
+// One session per worker/process, reused for every slice (ADR-008)
+const session = module._orc_session_create()
+if (!session) throw new Error('orc_session_create failed')
+
 // Slice
 const stl = readFileSync('./model.stl')
 const configJson = JSON.stringify({ layer_height: 0.2, nozzle_diameter: 0.4 })
@@ -132,7 +138,7 @@ const enc = new TextEncoder()
 const configBytes = enc.encode(configJson)
 const configPtr = module._malloc(configBytes.length)
 module.HEAPU8.set(configBytes, configPtr)
-const initCode = module._orc_init(configPtr, configBytes.length)
+const initCode = module._orc_init(session, configPtr, configBytes.length)
 module._free(configPtr)
 if (initCode !== 0) throw new Error(`orc_init failed: ${initCode}`)
 
@@ -140,9 +146,9 @@ const stlPtr = module._malloc(stl.length)
 module.HEAPU8.set(stl, stlPtr)  // Buffer extends Uint8Array — pass directly to avoid pool-offset bug
 const ptrPtr = module._malloc(4)
 const lenPtr = module._malloc(4)
-const rc = module._orc_slice(stlPtr, stl.length, ptrPtr, lenPtr)
+const rc = module._orc_slice(session, stlPtr, stl.length, ptrPtr, lenPtr)
 module._free(stlPtr)
-if (rc !== 0) throw new Error(`orc_slice failed: ${rc} — ${module.UTF8ToString(module._orc_decode_exception(0))}`)
+if (rc !== 0) throw new Error(`orc_slice failed: ${rc} — ${module.UTF8ToString(module._orc_decode_exception(session))}`)
 
 const gcodePtr = module.getValue(ptrPtr, 'i32')
 const gcodeLen = module.getValue(lenPtr, 'i32')
@@ -193,13 +199,14 @@ The `wasmBinary` option tells Emscripten not to re-fetch `slicer.wasm` — the b
 import { sliceStl } from './lib/wasm-loader'
 
 // module = loaded OrcaModule (see above)
+// session = module._orc_session_create(), created once and reused (ADR-008)
 // stlData = Uint8Array of the .stl file (binary or ASCII both accepted)
 // configJson = JSON string of OrcaConfig fields
 
-const gcode: string = sliceStl(module, stlData, configJson)
+const gcode: string = sliceStl(module, session, stlData, configJson)
 ```
 
-Under the hood, `sliceStl` calls `orc_init` then `orc_slice` and handles WASM heap allocation / deallocation. It throws `OrcaSliceError` on failure.
+Under the hood, `sliceStl` calls `orc_init` then `orc_slice` on the given session and handles WASM heap allocation / deallocation. It throws `OrcaSliceError` on failure.
 
 ### Minimal config
 
@@ -238,7 +245,14 @@ for (let i = 0; i < stls.length; i++) {
   pos += stls[i].length
 }
 
-const gcode = sliceMultiStl(module, combined, offsets, stls.length, configJson)
+const gcode = sliceMultiStl(module, session, combined, offsets, stls.length, configJson)
+```
+
+Optionally assign each object a 1-based `"extruder"`/filament slot (single-nozzle multi-material — see [API Reference → orc_slice_multi](api-reference.md#orc_slice_multi)):
+
+```typescript
+const extruderIds = Int32Array.from([1, 2])   // one entry per file, 0 = default
+const gcode = sliceMultiStl(module, session, combined, offsets, stls.length, configJson, extruderIds)
 ```
 
 ---
@@ -285,7 +299,7 @@ All four helper functions (`sliceStl`, `sliceMultiStl`, `objToStl`, `cadToStl`) 
 import { OrcaSliceError } from './lib/wasm-loader'
 
 try {
-  const gcode = sliceStl(module, stlData, configJson)
+  const gcode = sliceStl(module, session, stlData, configJson)
 } catch (err) {
   if (err instanceof OrcaSliceError) {
     console.error(`Slice failed (code ${err.code}): ${err.message}`)
@@ -295,11 +309,17 @@ try {
 
 `OrcaSliceError.message` is the human-readable message returned by `orc_decode_exception` (last error stored by the C++ bridge), with a fallback to a code-based description.
 
-When calling C functions directly, retrieve the last error with:
+When calling C functions directly, retrieve the last error with the same session used for the failing call:
+
+```typescript
+const errPtr = module._orc_decode_exception(session)
+const message = module.UTF8ToString(errPtr)
+```
+
+For `orc_obj_to_stl`/`orc_cad_to_stl` (no session), pass `0`:
 
 ```typescript
 const errPtr = module._orc_decode_exception(0)
-const message = module.UTF8ToString(errPtr)
 ```
 
 ---
@@ -400,6 +420,11 @@ _passthrough: {
 The WASM heap is managed by Emscripten. All input buffers must be copied onto the heap before calling C functions, and all output buffers must be freed with `orc_free`.
 
 ```typescript
+// One session per module instance, created once and freed at shutdown
+const session = module._orc_session_create()
+// ... use it for every orc_init/orc_slice/orc_slice_multi call ...
+module._orc_session_destroy(session)
+
 // Allocate + write
 const ptr = module._malloc(bytes.length)
 module.HEAPU8.set(bytes, ptr)
@@ -421,7 +446,8 @@ module._free(ptr)
 
 !!! warning "orc_free vs _free"
     Use `module._orc_free(ptr)` for buffers **returned** by `orc_slice`, `orc_slice_multi`, `orc_obj_to_stl`, and `orc_cad_to_stl`. These are `malloc`'d by the C++ bridge.  
-    Use `module._free(ptr)` for buffers you allocated yourself with `module._malloc()`.
+    Use `module._free(ptr)` for buffers you allocated yourself with `module._malloc()`.  
+    Use `module._orc_session_destroy(session)` — not `_free`/`_orc_free` — to release a session handle.
 
 ---
 
@@ -464,18 +490,25 @@ function loadEngine(wasmBase: string): Promise<any> {
   return _enginePromise
 }
 
-// Slice a single file (engine is reused across calls)
+// One session, created once and reused for every slice (ADR-008)
+let _session = 0
+
+// Slice a single file (engine + session are reused across calls)
 async function sliceFile(stlBytes: Uint8Array, config: object): Promise<string> {
   const module = await loadEngine('/wasm')
+  if (!_session) {
+    _session = module._orc_session_create()
+    if (!_session) throw new Error('orc_session_create failed')
+  }
 
   const enc = new TextEncoder()
   const cfgBytes = enc.encode(JSON.stringify(config))
   const cfgPtr = module._malloc(cfgBytes.length)
   module.HEAPU8.set(cfgBytes, cfgPtr)
-  const initCode = module._orc_init(cfgPtr, cfgBytes.length)
+  const initCode = module._orc_init(_session, cfgPtr, cfgBytes.length)
   module._free(cfgPtr)
   if (initCode !== 0) {
-    throw new Error(`orc_init: ${module.UTF8ToString(module._orc_decode_exception(0))}`)
+    throw new Error(`orc_init: ${module.UTF8ToString(module._orc_decode_exception(_session))}`)
   }
 
   const stlPtr = module._malloc(stlBytes.length)
@@ -483,13 +516,13 @@ async function sliceFile(stlBytes: Uint8Array, config: object): Promise<string> 
   const ptrPtr = module._malloc(4)
   const lenPtr = module._malloc(4)
 
-  const rc = module._orc_slice(stlPtr, stlBytes.length, ptrPtr, lenPtr)
+  const rc = module._orc_slice(_session, stlPtr, stlBytes.length, ptrPtr, lenPtr)
   module._free(stlPtr)
 
   if (rc !== 0) {
     module._free(ptrPtr)
     module._free(lenPtr)
-    throw new Error(`orc_slice (${rc}): ${module.UTF8ToString(module._orc_decode_exception(0))}`)
+    throw new Error(`orc_slice (${rc}): ${module.UTF8ToString(module._orc_decode_exception(_session))}`)
   }
 
   const gcodePtr = module.getValue(ptrPtr, 'i32')

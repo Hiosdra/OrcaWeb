@@ -86,7 +86,14 @@ export type WorkerInMessage =
   // slicer.wasm fetch URLs — see slicer.worker.ts for why.
   | { type: 'LOAD_WASM'; url: string; version: string }
   | { type: 'SLICE'; stl: ArrayBuffer; config: OrcaConfig }
-  | { type: 'SLICE_MULTI'; stls: ArrayBuffer[]; config: OrcaConfig }
+  | {
+      type: 'SLICE_MULTI'
+      stls: ArrayBuffer[]
+      config: OrcaConfig
+      // Optional per-object "extruder" override, parallel to stls (0/omitted
+      // = inherit default). See orc_slice_multi in orca-wasm/bridge/slicer.cpp.
+      extruderIds?: number[]
+    }
   | { type: 'OBJ_TO_STL'; obj: ArrayBuffer; filename: string }
   | { type: 'CAD_TO_STL'; cad: ArrayBuffer; filename: string }
 
@@ -136,8 +143,15 @@ export type SliceStatus =
 export interface OrcaModule {
   _malloc(size: number): number
   _free(ptr: number): void
-  _orc_init(payloadPtr: number, payloadLen: number): number
+  // Session handle — one per worker for the worker's whole lifetime today
+  // (see src/lib/wasm-loader.ts), but scoping engine state behind an opaque
+  // handle instead of module-wide globals means a future caller (Node CLI,
+  // worker pool) can safely hold more than one independent slicer session.
+  _orc_session_create(): number
+  _orc_session_destroy(session: number): void
+  _orc_init(session: number, payloadPtr: number, payloadLen: number): number
   _orc_slice(
+    session: number,
     inputPtr: number,
     inputLen: number,
     outputPtrPtr: number,
@@ -150,10 +164,15 @@ export interface OrcaModule {
     outputLenPtr: number,
   ): number
   _orc_slice_multi(
+    session: number,
     dataPtr: number,
     dataLen: number,
     offsetsPtr: number,
     nFiles: number,
+    // Nullable (pass 0) i32 array pointer, one 1-based "extruder" override per
+    // file (0 = inherit default). See orca-wasm/bridge/slicer.cpp's
+    // orc_slice_multi doc comment for exactly what this does and does not enable.
+    extruderIdsPtr: number,
     outputPtrPtr: number,
     outputLenPtr: number,
   ): number
@@ -164,7 +183,10 @@ export interface OrcaModule {
     outputLenPtr: number,
   ): number
   _orc_free(ptr: number): void
-  _orc_decode_exception(ptr: number): number
+  // Pass the session used for a failing _orc_init/_orc_slice/_orc_slice_multi
+  // call; pass 0 after a failing _orc_obj_to_stl/_orc_cad_to_stl call (those
+  // take no session).
+  _orc_decode_exception(session: number): number
   setValue(ptr: number, value: number, type: string): void
   getValue(ptr: number, type: string): number
   HEAPU8: Uint8Array

@@ -42,10 +42,15 @@ emsdk (Emscripten toolchain)
   │
   ├─ python3 orca-wasm/patches/apply.py   ← idempotent; patches the checkout
   │
-  └─ cmake -S orca-wasm -B build -DSLIC3R_WASM=ON
-     ninja slicer
-       → build/slicer.js
-       → build/slicer.wasm
+  ├─ cmake -S orca-wasm -B build -DSLIC3R_WASM=ON
+  │   ninja slicer
+  │     → build/slicer.js
+  │     → build/slicer.wasm
+  │
+  └─ node orca-wasm/scripts/smoke-test.mjs   ← real orc_init/orc_slice(_multi)
+                                                calls; a build that compiles
+                                                but traps never reaches the
+                                                release step (ADR-009)
 ```
 
 Dependencies are cached between runs (GitHub Actions cache key based on dependency versions). A cold build (deps + compile) takes ~2.5–3 h, of which OCCT alone is ~45–60 min. With warm dep and `ccache` caches, a build that only touches C++ source takes ~10–15 min.
@@ -65,9 +70,10 @@ Dependencies are cached between runs (GitHub Actions cache key based on dependen
     2. Check out the OrcaSlicer submodule at the specified tag
     3. Apply `patches/apply.py`
     4. Compile with `cmake + ninja`
-    5. Publish artifacts to the corresponding GitHub Release
+    5. Run `orca-wasm/scripts/smoke-test.mjs` against the freshly built engine (see [ADR-009](adr/adr-009-wasm-smoke-test.md)) — a build that compiles but fails this step never reaches the next one
+    6. Publish artifacts to the corresponding GitHub Release
 
-    Builds on pull requests that touch `orca-wasm/**` run automatically but skip the release-publish step.
+    Builds on pull requests that touch `orca-wasm/**` run automatically but skip the release-publish step (the smoke test still runs).
 
 === "Local (Linux / macOS / WSL2)"
 

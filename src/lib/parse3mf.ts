@@ -69,10 +69,20 @@ function modelXmlToStl(xml: string): Uint8Array {
     throw new Error(`Invalid 3MF XML: ${msg}`)
   }
 
-  // Build a map of object id → {vertices, triangles}
+  // Build a map of object id → {vertices, triangles, components}.
+  // Per the 3MF core spec an <object> holds EITHER an inline <mesh> OR a
+  // <components> list of <component objectid="…" transform="…"> references
+  // to other objects (used for assemblies / multi-part models) — some
+  // objects have both. Component refs used to be silently dropped, so any
+  // part built entirely out of components (no direct mesh) vanished with no
+  // error.
   const objectMap = new Map<
     string,
-    { verts: number[][]; tris: [number, number, number][] }
+    {
+      verts: number[][]
+      tris: [number, number, number][]
+      components: { objectid: string; transform: number[] | null }[]
+    }
   >()
 
   for (const obj of Array.from(doc.getElementsByTagName('object'))) {
@@ -82,6 +92,7 @@ function modelXmlToStl(xml: string): Uint8Array {
     const id = obj.getAttribute('id') ?? ''
     const verts: number[][] = []
     const tris: [number, number, number][] = []
+    const components: { objectid: string; transform: number[] | null }[] = []
 
     for (const v of Array.from(obj.getElementsByTagName('vertex'))) {
       verts.push([
@@ -97,42 +108,65 @@ function modelXmlToStl(xml: string): Uint8Array {
         parseInt(t.getAttribute('v3') ?? '0', 10),
       ])
     }
+    for (const c of Array.from(obj.getElementsByTagName('component'))) {
+      const cid = c.getAttribute('objectid')
+      if (!cid) continue
+      const cTransformStr = c.getAttribute('transform')
+      components.push({ objectid: cid, transform: cTransformStr ? parseTransform(cTransformStr) : null })
+    }
 
-    if (verts.length > 0 && tris.length > 0) objectMap.set(id, { verts, tris })
+    if ((verts.length > 0 && tris.length > 0) || components.length > 0) {
+      objectMap.set(id, { verts, tris, components })
+    }
+  }
+
+  // Recursively resolves an object's own triangles plus everything reachable
+  // through its <component> refs, composing transforms along the way.
+  // `onStack` guards against a cyclic component graph (A → B → A); it is not
+  // a "visited once" set, so the same object referenced from two different
+  // branches (a legitimate diamond, e.g. four bolts sharing one mesh) is
+  // still resolved each time with its own transform.
+  function collectTriangles(
+    id: string,
+    transform: number[] | null,
+    out: Tri3[],
+    onStack: Set<string>,
+  ): void {
+    if (onStack.has(id)) return
+    const obj = objectMap.get(id)
+    if (!obj) return
+    onStack.add(id)
+
+    for (const [i1, i2, i3] of obj.tris) {
+      const p1 = transformPoint(obj.verts[i1] ?? [0, 0, 0], transform)
+      const p2 = transformPoint(obj.verts[i2] ?? [0, 0, 0], transform)
+      const p3 = transformPoint(obj.verts[i3] ?? [0, 0, 0], transform)
+      out.push([p1, p2, p3])
+    }
+    for (const comp of obj.components) {
+      collectTriangles(comp.objectid, composeTransform(transform, comp.transform), out, onStack)
+    }
+
+    onStack.delete(id)
   }
 
   // Collect all triangles from build items, applying transforms
-  const allTriangles: [
-    [number, number, number],
-    [number, number, number],
-    [number, number, number],
-  ][] = []
+  const allTriangles: Tri3[] = []
 
   for (const item of Array.from(doc.getElementsByTagName('item'))) {
     const oid = item.getAttribute('objectid') ?? ''
-    const obj = objectMap.get(oid)
-    if (!obj) continue
+    if (!objectMap.has(oid)) continue
 
     const transformStr = item.getAttribute('transform')
     const m = transformStr ? parseTransform(transformStr) : null
 
-    for (const [i1, i2, i3] of obj.tris) {
-      const p1 = transformPoint(obj.verts[i1] ?? [0, 0, 0], m)
-      const p2 = transformPoint(obj.verts[i2] ?? [0, 0, 0], m)
-      const p3 = transformPoint(obj.verts[i3] ?? [0, 0, 0], m)
-      if (p1 && p2 && p3) allTriangles.push([p1, p2, p3])
-    }
+    collectTriangles(oid, m, allTriangles, new Set())
   }
 
   // Fall back: if build section was empty, include all model objects as-is
   if (allTriangles.length === 0) {
-    for (const obj of objectMap.values()) {
-      for (const [i1, i2, i3] of obj.tris) {
-        const p1 = obj.verts[i1], p2 = obj.verts[i2], p3 = obj.verts[i3]
-        if (p1 && p2 && p3) {
-          allTriangles.push([p1 as [number,number,number], p2 as [number,number,number], p3 as [number,number,number]])
-        }
-      }
+    for (const id of objectMap.keys()) {
+      collectTriangles(id, null, allTriangles, new Set())
     }
   }
 
@@ -164,6 +198,49 @@ function transformPoint(
     m[1] * x + m[4] * y + m[7] * z + m[10],
     m[2] * x + m[5] * y + m[8] * z + m[11],
   ]
+}
+
+/**
+ * Composes two 3MF column-major 3×4 transforms into one, as if `inner` is
+ * applied first and `outer` second (matches nested <component> resolution:
+ * outer = the transform accumulated so far, inner = the component's own
+ * transform attribute). Returns null only when both inputs are null
+ * (pure identity), so the common case of unrotated/untranslated parts stays
+ * on the cheap `transformPoint(p, null)` path.
+ *
+ * Each matrix encodes an affine map result = L·p + t, where L is the 3×3
+ * linear part (stored column-major: m[0..2]/m[3..5]/m[6..8]) and t is the
+ * translation (m[9..11]). Composing affine maps: outer(inner(p))
+ *   = outerL·(innerL·p + innerT) + outerT
+ *   = (outerL·innerL)·p + (outerL·innerT + outerT)
+ */
+function composeTransform(outer: number[] | null, inner: number[] | null): number[] | null {
+  // identity ∘ inner = inner, outer ∘ identity = outer — skips the 3x3
+  // multiply/translate math entirely for the common case (most objects/
+  // components carry no transform attribute at all).
+  if (!outer) return inner
+  if (!inner) return outer
+  const o = outer
+  const i = inner
+  const oL = (r: number, c: number) => o[c * 3 + r]
+  const iL = (r: number, c: number) => i[c * 3 + r]
+
+  const result = new Array<number>(12).fill(0)
+  for (let c = 0; c < 3; c++) {
+    for (let r = 0; r < 3; r++) {
+      let sum = 0
+      for (let k = 0; k < 3; k++) sum += oL(r, k) * iL(k, c)
+      result[c * 3 + r] = sum
+    }
+  }
+  const iT = [i[9], i[10], i[11]]
+  const oT = [o[9], o[10], o[11]]
+  for (let r = 0; r < 3; r++) {
+    let sum = oT[r]
+    for (let k = 0; k < 3; k++) sum += oL(r, k) * iT[k]
+    result[9 + r] = sum
+  }
+  return result
 }
 
 type Tri3 = [[number,number,number],[number,number,number],[number,number,number]]

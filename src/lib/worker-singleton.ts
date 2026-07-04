@@ -34,6 +34,14 @@ export function getWorker(): Worker {
     } else if (msg.type === 'WASM_ERROR') {
       wasmStatus = 'error'
       wasmError = msg.message
+      // Whether the module failed to load or aborted mid-session, this
+      // worker's WASM instance is unusable from here on (Emscripten has no
+      // "reload after abort" path). Drop it so the next getWorker() call
+      // spawns a clean worker + reloads the engine from scratch, rather than
+      // leaving the app permanently stuck on a dead instance until a full
+      // page reload.
+      worker?.terminate()
+      worker = null
     }
     listeners.forEach((fn) => fn(msg))
   }
@@ -41,6 +49,8 @@ export function getWorker(): Worker {
   worker.onerror = (e) => {
     wasmStatus = 'error'
     wasmError = e.message ?? 'Worker crashed'
+    worker?.terminate()
+    worker = null
     const msg: WorkerOutMessage = { type: 'WASM_ERROR', message: wasmError }
     listeners.forEach((fn) => fn(msg))
   }

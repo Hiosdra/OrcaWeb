@@ -48,8 +48,11 @@ target_link_options(slicer PRIVATE
   -sFORCE_FILESYSTEM=1
   # Exported C functions consumed by the JS runtime
   "-sEXPORTED_FUNCTIONS=[\
+'_orc_session_create',\
+'_orc_session_destroy',\
 '_orc_init',\
 '_orc_slice',\
+'_orc_slice_multi',\
 '_orc_obj_to_stl',\
 '_orc_cad_to_stl',\
 '_orc_free',\

@@ -2,7 +2,7 @@
 
 Ten dokument opisuje aktualny stan projektu: zaimplementowane funkcje, znane ograniczenia i planowane ulepszenia.
 
-Ostatnia aktualizacja: **2026-07-03** · wersja silnika: **OrcaSlicer v2.4.0** (własny build, wdrożony na produkcji) · wersja aplikacji: **v0.7.0**
+Ostatnia aktualizacja: **2026-07-04** · wersja silnika: **OrcaSlicer v2.4.0** (własny build, wdrożony na produkcji) · wersja aplikacji: **v0.7.0**
 
 ---
 
@@ -46,6 +46,9 @@ Ostatnia aktualizacja: **2026-07-03** · wersja silnika: **OrcaSlicer v2.4.0** (
 | JPEG miniatury G-code | Prawdziwy JPEG (RGBA→RGB, standard libjpeg) — od PR #13 |
 | Licznik czasu slicowania | Przycisk pokazuje `Slicing… (12s)` — rzetelna informacja bez fikcyjnych etapów — od PR #15 |
 | PWA / tryb offline | Service Worker (Workbox) pre-cache'uje wszystkie assety + WASM przy pierwszej wizycie; instalacja jako aplikacja natywna |
+| Silnik sesyjny (`orc_session_create`/`orc_session_destroy`) | Stan silnika (config, bed, last error) przeniesiony z globalnych statyków C++ do uchwytu sesji — patrz [ADR-008](adr/adr-008-session-handle.md) |
+| Odzyskiwanie po awarii WASM | `onAbort` realnie zgłasza `WASM_ERROR` do głównego wątku; martwy Worker jest odrzucany i zastępowany świeżym przy kolejnej próbie |
+| Smoke test silnika w CI | `orca-wasm/scripts/smoke-test.mjs` — realny `orc_init`/`orc_slice(_multi)` po każdym buildzie, przed publikacją release'u — patrz [ADR-009](adr/adr-009-wasm-smoke-test.md) |
 
 ### Override approach (engine clean layer)
 
@@ -103,6 +106,15 @@ Ostatnia aktualizacja: **2026-07-03** · wersja silnika: **OrcaSlicer v2.4.0** (
 |---------|-----------|
 | Duże pliki STL (>50 MB) | Mogą powodować zacinanie się podczas podglądu |
 
+### Multi-ekstruder / multi-material
+
+Bridge udostępnia teraz `orc_slice_multi`'s `extruder_ids` — per-obiektowe przypisanie do klucza konfiguracyjnego OrcaSlicera `"extruder"` (`ModelConfig::set`, `PrintConfig.cpp`), które silnik i tak już normalizuje do `*_filament_id` (`normalize_fdm()`). To jest ścieżka "jedna dysza, wiele slotów filamentu" (AMS-style) — **nie** dotyka `nozzle_diameter`, więc nie wchodzi w kod `support_different_extruders()` odpowiedzialny za wcześniej potwierdzony crash na prawdziwym profilu Bambu Lab H2D (patrz `isMultiExtruderProfile()` w `src/lib/profiles.ts` i [ADR-008](adr/adr-008-session-handle.md)).
+
+| Element | Status |
+|---------|--------|
+| Bridge: `orc_slice_multi(..., extruder_ids, ...)` | ✅ zaimplementowane, zweryfikowane przez smoke test (scenariusz "plate: 2 objects, per-object extruder override") |
+| Prawdziwe drukarki wielo-dyszowe (`nozzle_diameter` > 1 wpis) + UI do przypisania ekstrudera/filamentu per obiekt w kolejce | ❌ świadomie zablokowane — `isMultiExtruderProfile()` odrzuca passthrough takich profili; wymaga debug builda WASM (`-O0 -g`) i sesji root-cause, której nie da się przeprowadzić bez lokalnego toolchaina Emscripten. UI nie ma sensu budować przed odblokowaniem silnika |
+
 ---
 
 ## ❌ Nie zaimplementowane
@@ -113,7 +125,6 @@ Ostatnia aktualizacja: **2026-07-03** · wersja silnika: **OrcaSlicer v2.4.0** (
 |---------|-----------|
 | Variable layer height | 🟡 średni |
 | Support enforcement / blocking | 🟡 średni |
-| Multi-material | 🟠 niski |
 
 ---
 
@@ -144,6 +155,12 @@ v0.4  ── ✅ Import OBJ (natywny parser OrcaSlicer w WASM, `orc_obj_to_stl`)
       ── ✅ Multi-object plate — „One plate (N)" auto-arrange przez `orc_slice_multi`
       ── ✅ Presety drukarek/filamentów/jakości pobrane z prawdziwych profili OrcaSlicer (resources/profiles/) zamiast ręcznie wpisanych wartości
       ── Variable layer height UI
+
+      ── ✅ Sesyjny stan silnika — orc_session_create/destroy zamiast globalnych statyków C++ (ADR-008)
+      ── ✅ Odzyskiwanie po awarii WASM — worker martwy po abort() jest odrzucany i zastępowany
+      ── ✅ Smoke test silnika w CI — realny orc_init/orc_slice(_multi) po każdym buildzie (ADR-009)
+      ── ✅ Bridge: per-obiektowe przypisanie ekstrudera/filamentu (orc_slice_multi extruder_ids) — jedna dysza, wiele slotów filamentu
+      ── Prawdziwe drukarki wielo-dyszowe — zablokowane do czasu root-cause session z debug buildem WASM
 ```
 
 ---
@@ -162,14 +179,15 @@ src/
 ├── lib/
 │   ├── profiles.ts        ✅ presety z rozmiarami + kształtem stołu, 30+ pól + passthrough wszystkich pozostałych
 │   ├── parse3mf.ts        ✅ 3MF → binary STL + OrcaConfig
-│   ├── wasm-loader.ts     ✅ orc_init / orc_slice / orc_slice_multi / orc_obj_to_stl / orc_cad_to_stl (STEP) / error codes
-│   └── worker-singleton.ts ✅ singleton, preload WASM
+│   ├── wasm-loader.ts     ✅ sesja (orc_session_create/destroy) + orc_init / orc_slice / orc_slice_multi (extruder_ids) / orc_obj_to_stl / orc_cad_to_stl (STEP) / error codes
+│   └── worker-singleton.ts ✅ singleton, preload WASM, drop+respawn workera po WASM_ERROR
 ├── workers/
-│   └── slicer.worker.ts   ✅ WASM load + SLICE + SLICE_MULTI + OBJ_TO_STL
+│   └── slicer.worker.ts   ✅ WASM load + tworzenie sesji + SLICE + SLICE_MULTI + OBJ_TO_STL
 └── types/index.ts         ✅ OrcaConfig, GcodeStats, WorkerMessages, SliceStatus
 
 orca-wasm/                 ✅ aktywny pipeline buildowy
-├── bridge/slicer.cpp      ✅ orc_init / orc_slice / orc_slice_multi / orc_obj_to_stl bridge
+├── bridge/slicer.cpp      ✅ orc_session_create/destroy + orc_init / orc_slice / orc_slice_multi / orc_obj_to_stl bridge
+├── scripts/smoke-test.mjs ✅ post-build regression test (patrz ADR-009)
 ├── wasm/                  ✅ CMakeLists, link flags, shims
 ├── wasm/shims/tbb/        ✅ sekwencyjne stuby TBB
 ├── overrides/             ✅ C++ stuby (OCCT/OpenVDB/OpenCV/Draco)
@@ -177,3 +195,5 @@ orca-wasm/                 ✅ aktywny pipeline buildowy
 
 public/wasm/               ✅ artefakty z release wasm-v2.4.0 (slicer.js + slicer.wasm)
 ```
+
+Brak katalogu `cli/` jest świadomy — CLI zostało zaimplementowane, a następnie w całości usunięte (`chore: remove CLI` — frontend → bridge → engine only). Nie jest to cel projektu.

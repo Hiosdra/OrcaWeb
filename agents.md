@@ -28,7 +28,7 @@ WASM artifacts (`public/wasm/`) are gitignored — run the download script after
 
 The React frontend (`src/`) is a temporary PoC to demonstrate the engine. It is not the end goal. Design decisions, dependency choices, and feature work should prioritise making the WASM engine complete and correct — all slicer features working (fuzzy skin, supports, infill, etc.) — over the web UI.
 
-The target end-state is a fully working OrcaSlicer CLI running on the WASM engine.
+The target end-state is a fully working, embeddable OrcaSlicer WASM engine — not necessarily a CLI. A Node CLI wrapper existed early on and was deliberately removed (`chore: remove CLI` — frontend → bridge → engine only); it is not a project goal.
 
 ## Architecture
 
