@@ -51,6 +51,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # ── Node (for the post-build smoke test) ─────────────────────────
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
       # ── Emscripten ──────────────────────────────────────────────────
       # Cache the whole emsdk tree (toolchain + activated config). After the
       # first run this also carries the embuilder-built sysroot ports
@@ -543,6 +548,19 @@ jobs:
           cp public/wasm/slicer.wasm wasm-artifacts/
           [[ -f public/wasm/slicer.data ]] && cp public/wasm/slicer.data wasm-artifacts/
           ls -lh wasm-artifacts/
+
+      # ── Smoke test ────────────────────────────────────────────────────
+      # A build can compile cleanly and still be functionally broken (the
+      # Voron Cube wall-generator crash and the boost::log/nozzle_info.json
+      # crash both slipped through compile-only checks in the past — see
+      # orca-wasm/bridge/slicer.cpp's ensure_nozzle_info_json() comment and
+      # wasm/CMakeLists.txt's --profiling-funcs comment). Actually slice
+      # something with the freshly built engine before trusting it enough to
+      # publish a release or upload it as an artifact anyone might use.
+      # Runs before both "Upload artifacts" and the release step below so a
+      # broken engine never reaches either.
+      - name: Smoke test WASM module
+        run: node orca-wasm/scripts/smoke-test.mjs --wasm-dir public/wasm
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
