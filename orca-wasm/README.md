@@ -1,6 +1,6 @@
 # orca-wasm — OrcaSlicer WASM build
 
-Clean-room Emscripten build of [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer) v2.4.0 targeting the browser.
+Clean-room Emscripten build of [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer) v2.4.2 targeting the browser.
 
 → **[Full build guide in the docs](https://hiosdra.github.io/OrcaWeb/docs/wasm-build/)**
 
@@ -8,7 +8,7 @@ Clean-room Emscripten build of [OrcaSlicer](https://github.com/SoftFever/OrcaSli
 
 ```
 orca-wasm/
-├── orca/                  ← git submodule: SoftFever/OrcaSlicer@v2.4.0
+├── orca/                  ← git submodule: SoftFever/OrcaSlicer@v2.4.2
 ├── bridge/
 │   ├── slicer.cpp         ← C++ bridge (orc_init / orc_slice / orc_obj_to_stl)
 │   └── CMakeLists.txt
@@ -48,7 +48,7 @@ orca-wasm/
 
 | File | Size | Description |
 |------|------|-------------|
-| `slicer.wasm` | ~33 MB | Compiled OrcaSlicer v2.4.0 core + OCCT (STEP engine) |
+| `slicer.wasm` | ~33 MB | Compiled OrcaSlicer v2.4.2 core + OCCT (STEP engine) |
 | `slicer.js` | ~220 KB | Emscripten glue code (CommonJS IIFE) |
 
 No `slicer.data` — the headless flat-config slicer never reads `orca/resources` at runtime, so the 200 MB preload file was eliminated entirely.
@@ -116,7 +116,7 @@ See the [Architecture docs](https://hiosdra.github.io/OrcaWeb/docs/architecture/
 
 `.github/workflows/build-wasm.yml` — triggered by:
 - **Manual dispatch:** Actions → Build WASM → Run workflow (specify OrcaSlicer tag)
-- **Tag push:** `git tag wasm-v2.4.0-ow1 && git push --tags`
+- **Tag push:** `git tag wasm-v2.4.2-ow1 && git push --tags`
 - **Push to master** touching `orca-wasm/**` or the workflow itself — auto-publishes the next patch release
 - **Pull requests** touching the same paths — validation build only, nothing is published
 

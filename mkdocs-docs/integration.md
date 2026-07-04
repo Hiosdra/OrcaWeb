@@ -20,15 +20,15 @@ This guide is for developers who want to embed the OrcaSlicer WASM engine in the
 ## Obtaining the WASM artifacts
 
 The two required files are published as an immutable GitHub Release: the
-first build for a given OrcaSlicer version is tagged `wasm-v2.4.0`; a later
+first build for a given OrcaSlicer version is tagged `wasm-v2.4.2`; a later
 fix to `orca-wasm/` for the same OrcaSlicer version publishes
-`wasm-v2.4.0-patchN` as a new release instead of overwriting the previous
+`wasm-v2.4.2-patchN` as a new release instead of overwriting the previous
 one. `scripts/download-wasm.mjs` and `deploy.yml` both resolve whichever tag
 has the highest patch number automatically.
 
 | File | Size | Purpose |
 |---|---|---|
-| `slicer.wasm` | ~29 MB | Compiled engine (OrcaSlicer v2.4.0 + OCCT 7.8.1) |
+| `slicer.wasm` | ~29 MB | Compiled engine (OrcaSlicer v2.4.2 + OCCT 7.8.1) |
 | `slicer.js` | ~210 KB | Emscripten JS glue (CommonJS IIFE) |
 
 **Download via the provided script:**

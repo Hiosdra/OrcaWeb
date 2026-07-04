@@ -1,6 +1,6 @@
 # Building the WASM Engine
 
-This page explains how to compile OrcaSlicer v2.4.0 to WebAssembly using the `orca-wasm/` build pipeline. You only need this if you want to change the C++ engine itself. For normal development of the web UI, download the pre-built artifacts with `node scripts/download-wasm.mjs`.
+This page explains how to compile OrcaSlicer v2.4.2 to WebAssembly using the `orca-wasm/` build pipeline. You only need this if you want to change the C++ engine itself. For normal development of the web UI, download the pre-built artifacts with `node scripts/download-wasm.mjs`.
 
 ## When to build
 
@@ -14,9 +14,9 @@ This page explains how to compile OrcaSlicer v2.4.0 to WebAssembly using the `or
 ## Artifacts
 
 The build produces two files, published as an immutable GitHub Release. The
-first build for a given OrcaSlicer version publishes `wasm-v2.4.0`; every
+first build for a given OrcaSlicer version publishes `wasm-v2.4.2`; every
 later fix to `orca-wasm/` for the *same* OrcaSlicer version (not an upstream
-bump) publishes `wasm-v2.4.0-patch1`, `-patch2`, etc. as a brand-new release
+bump) publishes `wasm-v2.4.2-patch1`, `-patch2`, etc. as a brand-new release
 rather than overwriting the previous one — `deploy.yml` resolves whichever
 has the highest patch number at deploy time. Each release's description
 includes an auto-generated changelog: the list of commits touching
@@ -24,7 +24,7 @@ includes an auto-generated changelog: the list of commits touching
 
 | File | Size | Description |
 |------|------|-------------|
-| `slicer.wasm` | ~29 MB | Compiled OrcaSlicer v2.4.0 core + OCCT (STEP engine) |
+| `slicer.wasm` | ~29 MB | Compiled OrcaSlicer v2.4.2 core + OCCT (STEP engine) |
 | `slicer.js` | ~210 KB | Emscripten glue code (CommonJS IIFE) |
 
 There is no `slicer.data` — the headless flat-config slicer never reads `orca/resources` at runtime, so the 200 MB preload file was eliminated entirely.
@@ -40,7 +40,7 @@ emsdk (Emscripten toolchain)
   │   ├── Eigen / nlohmann / EXPAT / NLopt / cereal
   │   └── Emscripten ports: zlib, libpng, libjpeg
   │
-  ├─ Checkout OrcaSlicer v2.4.0 (git submodule orca/orca/)
+  ├─ Checkout OrcaSlicer v2.4.2 (git submodule orca/orca/)
   │
   ├─ python3 orca-wasm/patches/apply.py   ← idempotent; patches the checkout
   │
@@ -63,8 +63,8 @@ Dependencies are cached between runs (GitHub Actions cache key based on dependen
 
     Two ways to trigger:
 
-    - **Manual dispatch:** go to **Actions → Build WASM → Run workflow**, enter the OrcaSlicer tag (e.g. `v2.4.0`), and run.
-    - **Tag push:** push a tag matching `wasm-v*.*.*` (e.g. `git tag wasm-v2.4.0-ow2 && git push --tags`). The workflow picks up the tag automatically.
+    - **Manual dispatch:** go to **Actions → Build WASM → Run workflow**, enter the OrcaSlicer tag (e.g. `v2.4.2`), and run.
+    - **Tag push:** push a tag matching `wasm-v*.*.*` (e.g. `git tag wasm-v2.4.2-ow2 && git push --tags`). The workflow picks up the tag automatically.
 
     Both paths:
 

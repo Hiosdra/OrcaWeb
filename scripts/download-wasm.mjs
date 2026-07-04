@@ -17,7 +17,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const WASM_DIR = join(__dirname, '../public/wasm')
 // Must match build-wasm.yml's/deploy.yml's ORCA_VERSION default — bump all
 // three together when upgrading the upstream OrcaSlicer version.
-const ORCA_VERSION = 'v2.4.0'
+const ORCA_VERSION = 'v2.4.2'
 const REPO = 'Hiosdra/OrcaWeb'
 
 // approxSize is only used to estimate the download progress bar's total

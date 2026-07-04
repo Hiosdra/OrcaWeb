@@ -1,6 +1,6 @@
 # OrcaWeb
 
-**OrcaSlicer v2.4.0 running entirely in your browser via WebAssembly.**
+**OrcaSlicer v2.4.2 running entirely in your browser via WebAssembly.**
 
 Slice STL files locally — no server, no account, no upload. Your files never leave your device.
 
@@ -54,7 +54,7 @@ Browser
 │   └── SettingsPanel → presets + profile import
 │
 └── Web Worker
-    └── OrcaSlicer v2.4.0 core (WebAssembly)
+    └── OrcaSlicer v2.4.2 core (WebAssembly)
         ├── slicer.js    ~210 KB  Emscripten glue
         └── slicer.wasm  ~29 MB   compiled slicer + OCCT (STEP)
 ```
