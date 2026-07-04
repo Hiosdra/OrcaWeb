@@ -27,6 +27,7 @@
 
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { createRequire } from 'node:module'
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
@@ -124,6 +125,21 @@ function generateTortureStl() {
 // project's root package.json ("type": "module") — a plain require()/import
 // of the file would make Node parse its CommonJS syntax as ES module syntax
 // and fail. A data: URL sidesteps that entirely.
+//
+// Built with `-sENVIRONMENT=web,worker,node`, slicer.js's own Node-detection
+// branch unconditionally does `var fs = require("fs"); ... scriptDirectory =
+// __dirname + "/"` whenever it detects Node — but loading it as a real ES
+// module (which the data: URL trick does) means `require`/`__dirname` don't
+// exist as module-scope bindings, so a bare reference to either throws
+// ReferenceError before the factory ever runs. Polyfilling them as globals
+// works because an unresolved bare identifier in any script/module falls
+// back to a same-named own property on globalThis. We supply wasmBinary
+// directly below, so the actual fs/path calls this unlocks are never
+// exercised — only the unconditional `__dirname + "/"` assignment needs to
+// not throw.
+globalThis.require ??= createRequire(import.meta.url)
+globalThis.__dirname ??= '.'
+globalThis.__filename ??= ''
 
 async function loadModule(wasmDir) {
   const jsPath = resolve(wasmDir, 'slicer.js')
