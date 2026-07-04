@@ -6,18 +6,41 @@ Exported by `slicer.wasm` via Emscripten. Called from `src/lib/wasm-loader.ts`.
 
 All functions use C linkage (`extern "C"`). The Emscripten JS glue (`slicer.js`) exposes them with a leading underscore, e.g. `_orc_init`.
 
+`orc_init`, `orc_slice`, and `orc_slice_multi` take a session handle as their
+first argument (see [ADR-008](adr/adr-008-session-handle.md)) — allocate one
+with `orc_session_create()` before calling any of them, and free it with
+`orc_session_destroy()` when done. `orc_obj_to_stl` / `orc_cad_to_stl` are pure
+format conversions with no config state, so they take no session.
+
+---
+
+### `orc_session_create` / `orc_session_destroy`
+
+```c
+void* orc_session_create();          // 0 (null) = allocation failed
+void  orc_session_destroy(void* session);
+```
+
+Allocate/free an opaque engine session — the config, initialisation flag, bed
+geometry, and last-error message that used to live in process-wide C++
+statics now live behind this handle instead, so more than one independent
+session can safely exist in the same WASM instance. `src/workers/slicer.worker.ts`
+creates exactly one session right after the module loads and reuses it for
+the worker's entire lifetime.
+
 ---
 
 ### `orc_init`
 
 ```c
-int orc_init(const char* config_json, int json_len);
+int orc_init(void* session, const char* config_json, int json_len);
 ```
 
 Initialise the slicer with a JSON configuration object. Must be called before `orc_slice` or `orc_slice_multi`.
 
 **Parameters**
 
+- `session` — handle from `orc_session_create()`
 - `config_json` — pointer to UTF-8 JSON string on the WASM heap
 - `json_len` — byte length of the string
 
@@ -26,6 +49,7 @@ Initialise the slicer with a JSON configuration object. Must be called before `o
 | Code | Meaning |
 |---|---|
 | `0` | Success |
+| `-1` | Null/invalid session handle |
 | `-2` | JSON parse failure or any C++ exception during initialisation |
 
 **Behaviour**
@@ -33,7 +57,7 @@ Initialise the slicer with a JSON configuration object. Must be called before `o
 - Starts from OrcaSlicer's built-in defaults so all required fields are always present.
 - Unknown JSON keys are silently ignored.
 - The special keys `bed_size_x`, `bed_size_y`, and `bed_shape` are extracted for model centering and are **not** forwarded to the OrcaSlicer config engine.
-- On success the configuration persists for all subsequent `orc_slice` / `orc_slice_multi` calls until `orc_init` is called again.
+- On success the configuration persists for all subsequent `orc_slice` / `orc_slice_multi` calls on the same session until `orc_init` is called again.
 
 ---
 
@@ -41,6 +65,7 @@ Initialise the slicer with a JSON configuration object. Must be called before `o
 
 ```c
 int orc_slice(
+    void*       session,
     const void* stl_data, int stl_len,
     char**      out_gcode, int* out_len
 );
@@ -50,6 +75,7 @@ Slice an STL file and write G-code to a newly allocated buffer.
 
 **Parameters**
 
+- `session` — handle from `orc_session_create()`, already `orc_init`'d
 - `stl_data` — pointer to binary or ASCII STL bytes on the WASM heap
 - `stl_len` — byte length of the STL
 - `out_gcode` — on success, written with the address of a malloc'd, null-terminated G-code string
@@ -60,7 +86,7 @@ Slice an STL file and write G-code to a newly allocated buffer.
 | Code | Meaning |
 |---|---|
 | `0` | Success |
-| `-1` | Invalid arguments or `orc_init` was not called |
+| `-1` | Invalid arguments, null session, or `orc_init` was not called |
 | `-3` | Could not write STL to MEMFS |
 | `-4` | STL load failed (invalid or corrupt geometry) |
 | `-5` | Model contains no objects |
@@ -77,21 +103,32 @@ Slice an STL file and write G-code to a newly allocated buffer.
 
 ```c
 int orc_slice_multi(
+    void*       session,
     const void* all_stl, int all_stl_len,
     const int*  offsets,  int n_files,
+    const int*  extruder_ids,
     char**      out_gcode, int* out_len
 );
 ```
 
 Arrange multiple STL files on a single plate and slice them to one G-code file.
-Requires `orc_init` to have been called first.
+Requires `orc_init` to have been called first on the same session.
 
 **Parameters**
 
+- `session` — handle from `orc_session_create()`, already `orc_init`'d
 - `all_stl` — concatenation of all STL file bytes on the WASM heap
 - `all_stl_len` — total byte length of the concatenated buffer
 - `offsets` — `int32` array of length `n_files * 2`: `[start0, len0, start1, len1, …]`
 - `n_files` — number of STL files
+- `extruder_ids` — nullable `int32` array of length `n_files`: a 1-based
+  `"extruder"` config override per object (`0` = inherit the config's
+  default). Forwarded to OrcaSlicer's per-object `extruder` config key
+  (`coInt`, `min 0` = inherit; `normalize_fdm()` resolves it to the
+  per-region `*_filament_id` fields) — the classic single-nozzle
+  multi-material path, not a multi-nozzle machine. Pass `0`/null to leave
+  every object on the default extruder (unchanged behaviour from before this
+  parameter existed).
 - `out_gcode` — on success, written with the address of the output G-code buffer
 - `out_len` — on success, written with the byte length of the output buffer
 
@@ -193,23 +230,23 @@ Free a buffer allocated by `orc_slice`, `orc_slice_multi`, `orc_obj_to_stl`, or 
 ### `orc_decode_exception`
 
 ```c
-const char* orc_decode_exception(void* unused);
+const char* orc_decode_exception(void* session);
 ```
 
 Return the last error message stored by the C++ bridge as a null-terminated UTF-8 string. The pointer is valid only until the next `orc_*` call.
 
+Pass the **session** used for a failing `orc_init` / `orc_slice` / `orc_slice_multi` call. Pass `0` (null) after a failing `orc_obj_to_stl` / `orc_cad_to_stl` call — those take no session, and `0` falls back to a small dedicated error slot used only by those two conversion functions.
+
 **Usage pattern**
 
 ```typescript
-const rc = module._orc_slice(stlPtr, stlLen, ptrPtr, lenPtr)
+const rc = module._orc_slice(session, stlPtr, stlLen, ptrPtr, lenPtr)
 if (rc !== 0) {
-  const errPtr = module._orc_decode_exception(0)
+  const errPtr = module._orc_decode_exception(session)
   const message = module.UTF8ToString(errPtr)
   throw new Error(`orc_slice (${rc}): ${message}`)
 }
 ```
-
-Called with argument `0` (the `unused` parameter is ignored by the implementation).
 
 ---
 
@@ -262,14 +299,19 @@ interface OrcaModule {
   HEAPU8: Uint8Array
 
   // OrcaSlicer bridge
-  _orc_init(configPtr: number, len: number): number
+  _orc_session_create(): number                  // 0 = allocation failed
+  _orc_session_destroy(session: number): void
+  _orc_init(session: number, configPtr: number, len: number): number
   _orc_slice(
+    session: number,
     stlPtr: number, stlLen: number,
     outPtrPtr: number, outLenPtr: number,
   ): number
   _orc_slice_multi(
+    session: number,
     dataPtr: number, dataLen: number,
     offsetsPtr: number, nFiles: number,
+    extruderIdsPtr: number,                      // nullable (0) i32 array pointer
     outPtrPtr: number, outLenPtr: number,
   ): number
   _orc_obj_to_stl(
@@ -281,7 +323,7 @@ interface OrcaModule {
     outPtrPtr: number, outLenPtr: number,
   ): number
   _orc_free(ptr: number): void
-  _orc_decode_exception(unused: number): number  // returns ptr to C string
+  _orc_decode_exception(session: number): number  // returns ptr to C string; 0 for conversion errors
 }
 ```
 
@@ -309,6 +351,7 @@ Communication between the main thread and `slicer.worker.ts`.
   type: 'SLICE_MULTI'
   stls: ArrayBuffer[]   // all transferred (zero-copy)
   config: OrcaConfig
+  extruderIds?: number[]  // optional, parallel to stls — see orc_slice_multi
 }
 
 // Convert an OBJ file to binary STL

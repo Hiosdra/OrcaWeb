@@ -58,6 +58,8 @@ nav:
     - 'ADR-005: No slicer.data': adr/adr-005-no-slicer-data.md
     - 'ADR-006: Engine Patch Strategy': adr/adr-006-patch-strategy.md
     - 'ADR-007: Sequential TBB Stubs': adr/adr-007-tbb-stubs.md
+    - 'ADR-008: Session-Scoped Engine State': adr/adr-008-session-handle.md
+    - 'ADR-009: WASM Build Smoke Test': adr/adr-009-wasm-smoke-test.md
 
 markdown_extensions:
   - admonition

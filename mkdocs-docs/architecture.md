@@ -2,7 +2,7 @@
 
 ## Project vision
 
-The main product of this repository is the **WASM slicer engine** — OrcaSlicer compiled to WebAssembly with full feature parity (fuzzy skin, infill, supports, all slicer parameters). The goal is a fully working OrcaSlicer that runs without a native binary, usable as a CLI or embedded in any environment that can execute WASM.
+The main product of this repository is the **WASM slicer engine** — OrcaSlicer compiled to WebAssembly with full feature parity (fuzzy skin, infill, supports, all slicer parameters). The goal is a fully working OrcaSlicer that runs without a native binary, embeddable in any environment that can execute WASM. A Node CLI wrapper existed early on and was deliberately removed (`chore: remove CLI` — frontend → bridge → engine only); it is not a project goal.
 
 The React web UI is a temporary proof-of-concept to demonstrate the engine. It is not the end goal and is not the primary focus of development effort.
 
@@ -30,9 +30,11 @@ The React web UI is a temporary proof-of-concept to demonstrate the engine. It i
 │   ┌──────────────────▼─────────────────────────────┐    │
 │   │  Web Worker: slicer.worker.ts                  │    │
 │   │  └── wasm-loader.ts                            │    │
-│   │      ├── _orc_init(configJson)                 │    │
-│   │      ├── _orc_slice(stl) → gcode string        │    │
-│   │      ├── _orc_slice_multi(stls) → gcode string │    │
+│   │      ├── _orc_session_create/destroy()          │    │
+│   │      ├── _orc_init(session, configJson)         │    │
+│   │      ├── _orc_slice(session, stl) → gcode       │    │
+│   │      ├── _orc_slice_multi(session, stls,        │    │
+│   │      │       extruderIds) → gcode string        │    │
 │   │      ├── _orc_obj_to_stl(obj) → stl bytes      │    │
 │   │      └── _orc_cad_to_stl(step) → stl bytes     │    │
 │   └──────────────────┬─────────────────────────────┘    │
@@ -182,6 +184,35 @@ libnoise (Perlin / Billow / RidgedMulti / Voronoi noise) **is** compiled into th
 
 Change `ORCA_VERSION` in `build-wasm.yml` and re-run CI. Only changes to the signatures of overridden functions require stub updates.
 
+### Session-scoped engine state
+
+`orca-wasm/bridge/slicer.cpp` scopes the active config, bed geometry, and last
+error behind an opaque `orc_session_create()`/`orc_session_destroy()` handle
+rather than process-wide C++ statics — see [ADR-008](adr/adr-008-session-handle.md).
+`slicer.worker.ts` creates one session right after the module loads and reuses
+it for the worker's entire lifetime, so this is behaviour-equivalent to the
+old global-state bridge today; it only removes the structural blocker to a
+future caller (Node CLI, worker pool) holding more than one session safely in
+the same WASM instance.
+
+### Worker crash recovery
+
+If the WASM module aborts at runtime (an unreachable trap, OOM), `onAbort`
+reports a `WASM_ERROR` to the main thread and the worker refuses further work
+instead of calling into the dead module. `worker-singleton.ts` terminates and
+drops that worker on any `WASM_ERROR` (load failure or runtime crash alike);
+the next `getWorker()` call — including the one `App.tsx` triggers when
+retrying a slice after an `'error'` status — spawns a fresh worker and reloads
+the engine from scratch, so a mid-session crash is recoverable without a full
+page reload.
+
+### WASM build smoke test
+
+`build-wasm.yml` runs `orca-wasm/scripts/smoke-test.mjs` after packaging and
+before publishing a release — real `orc_init`/`orc_slice(_multi)` calls against
+the freshly built engine, not just a successful compile. See
+[ADR-009](adr/adr-009-wasm-smoke-test.md).
+
 ## Coordinate systems
 
 Both viewers use a **Z-up** scene to match the slicer engine — G-code axes map directly to Three.js axes with no permutation.
@@ -267,6 +298,8 @@ File drop
     # GitHub Actions → Build WASM → Run workflow
     # Or: git tag v2.4.0-ow1 && git push --tags
     # Produces: slicer.js (~210 KB) + slicer.wasm (~29 MB)
+    # Runs orca-wasm/scripts/smoke-test.mjs before publishing (ADR-009) —
+    # a build that fails the smoke test never reaches the release step
     # Published as GitHub Release wasm-v2.4.0
     ```
 

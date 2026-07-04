@@ -12,3 +12,5 @@ Each ADR explains the context, the decision taken, and the resulting trade-offs.
 | [ADR-005](adr-005-no-slicer-data.md) | Headless Flat-Config — Eliminating slicer.data | Accepted | 2026-06-13 |
 | [ADR-006](adr-006-patch-strategy.md) | Three-Layer Engine Patch Strategy | Accepted | 2026-06-14 |
 | [ADR-007](adr-007-tbb-stubs.md) | Sequential TBB Stubs for Single-Threaded WASM | Accepted | 2026-06-14 |
+| [ADR-008](adr-008-session-handle.md) | Session-Scoped Engine State | Accepted | 2026-07-04 |
+| [ADR-009](adr-009-wasm-smoke-test.md) | WASM Build Smoke Test | Accepted | 2026-07-04 |
