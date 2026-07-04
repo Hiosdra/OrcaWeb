@@ -2,16 +2,22 @@
  * OrcaWeb WASM bridge — clean-room implementation.
  *
  * Exports C-linkage symbols consumed by the JavaScript runtime:
- *   orc_init(json, len)                                  → 0 = ok
- *   orc_slice(stl, stlLen, outPtr, outLen)               → 0 = ok
- *   orc_slice_multi(all, allLen, offsets, n, out, outLen) → 0 = ok
- *   orc_obj_to_stl(obj, objLen, outPtr, outLen)          → 0 = ok
- *   orc_cad_to_stl(cad, cadLen, outPtr, outLen)          → 0 = ok (STEP)
+ *   orc_session_create()                                          → opaque session handle (0 = alloc failed)
+ *   orc_session_destroy(session)
+ *   orc_init(session, json, len)                                  → 0 = ok
+ *   orc_slice(session, stl, stlLen, outPtr, outLen)                → 0 = ok
+ *   orc_slice_multi(session, all, allLen, offsets, n,
+ *                   extruderIds, out, outLen)                     → 0 = ok
+ *   orc_obj_to_stl(obj, objLen, outPtr, outLen)                   → 0 = ok
+ *   orc_cad_to_stl(cad, cadLen, outPtr, outLen)                   → 0 = ok (STEP)
  *   orc_free(ptr)
- *   orc_decode_exception(ptr)                            → null-terminated UTF-8 string
+ *   orc_decode_exception(session)                                 → null-terminated UTF-8 string
  *
- * Error codes for orc_slice / orc_init:
- *   -1  invalid / uninitialized state
+ * orc_obj_to_stl / orc_cad_to_stl are pure format conversions — they never
+ * touch slicer config state, so they take no session handle.
+ *
+ * Error codes for orc_slice / orc_init / orc_slice_multi:
+ *   -1  invalid / uninitialized state (includes a null/invalid session handle)
  *   -2  JSON parse failure
  *   -3  STL write to MEMFS failed
  *   -4  STL load failed
@@ -28,6 +34,7 @@
 #include <string>
 #include <stdexcept>
 #include <memory>
+#include <new>
 #include <sys/stat.h>
 
 #include <emscripten.h>
@@ -48,19 +55,41 @@
 #include <nlohmann/json.hpp>
 
 // ── module state ─────────────────────────────────────────────────────────────
+// Read-only template of OrcaSlicer's built-in defaults — constructed once,
+// never mutated afterwards, so it's safe to share across every session.
 static Slic3r::FullPrintConfig g_defaults;
-static Slic3r::DynamicPrintConfig g_config;
-static bool g_initialized = false;
-static std::string g_last_error;
-// Bed centre in mm — computed from bed_size_x / bed_size_y in the config JSON.
-// Defaults to centre of a 256×256 mm bed (same as the historical hardcoded value).
-static double g_bed_cx = 128.0;
-static double g_bed_cy = 128.0;
-// "rectangle" or "circle" — read from bed_shape in the config JSON.
-static std::string g_bed_shape = "rectangle";
 
-static void record_error(const char* msg) { g_last_error = msg ? msg : "unknown error"; }
-static void record_error(const std::string& s) { g_last_error = s; }
+// Per-session engine state, behind an opaque handle instead of process-wide
+// statics. Today the JS side still creates exactly one session per worker
+// and uses it for that worker's entire lifetime, so behaviour is unchanged —
+// this only removes the structural blocker that made it unsafe for a future
+// caller (a Node CLI batch-processing many jobs, or a worker pool) to hold
+// more than one independent slicer session in the same WASM instance.
+struct OrcSession {
+    Slic3r::DynamicPrintConfig config;
+    bool initialized = false;
+    std::string last_error;
+    // Bed centre in mm — computed from bed_size_x / bed_size_y in the config JSON.
+    // Defaults to centre of a 256×256 mm bed (same as the historical hardcoded value).
+    double bed_cx = 128.0;
+    double bed_cy = 128.0;
+    // "rectangle" or "circle" — read from bed_shape in the config JSON.
+    std::string bed_shape = "rectangle";
+};
+
+static OrcSession* as_session(void* ptr) { return static_cast<OrcSession*>(ptr); }
+
+static void record_error(OrcSession& s, const char* msg) { s.last_error = msg ? msg : "unknown error"; }
+static void record_error(OrcSession& s, const std::string& str) { s.last_error = str; }
+
+// orc_obj_to_stl / orc_cad_to_stl are pure format conversions with no config
+// state, so they don't need a session — but the JS caller still wants
+// orc_decode_exception() to work for them. Keep a small dedicated error slot
+// for these two functions; orc_decode_exception(0) (JS's existing call
+// pattern for conversion errors) falls back to it when no session is passed.
+static std::string g_conversion_last_error;
+static void record_error(const char* msg) { g_conversion_last_error = msg ? msg : "unknown error"; }
+static void record_error(const std::string& str) { g_conversion_last_error = str; }
 
 // Unconditionally removes a MEMFS temp file on scope exit (success, early
 // return, or C++ exception alike). Without this, a throw from do_export()
@@ -87,6 +116,18 @@ static std::string json_val_to_string(const nlohmann::json& v) {
 
 // ── public API ────────────────────────────────────────────────────────────────
 extern "C" {
+
+/** Allocate a new engine session. Returns 0 (null) on allocation failure. */
+EMSCRIPTEN_KEEPALIVE
+void* orc_session_create() {
+    return new (std::nothrow) OrcSession();
+}
+
+/** Free a session created by orc_session_create(). Safe to call with null. */
+EMSCRIPTEN_KEEPALIVE
+void orc_session_destroy(void* session_ptr) {
+    delete as_session(session_ptr);
+}
 
 /**
  * Initialise the slicer with a JSON config object.
@@ -115,12 +156,14 @@ static void ensure_nozzle_info_json() {
 }
 
 EMSCRIPTEN_KEEPALIVE
-int orc_init(const char* json_data, int json_len) {
-    g_last_error.clear();
+int orc_init(void* session_ptr, const char* json_data, int json_len) {
+    OrcSession* session = as_session(session_ptr);
+    if (!session) return -1;
+    session->last_error.clear();
     ensure_nozzle_info_json();
     try {
         auto j = nlohmann::json::parse(json_data, json_data + json_len);
-        if (!j.is_object()) { record_error("config must be a JSON object"); return -2; }
+        if (!j.is_object()) { record_error(*session, "config must be a JSON object"); return -2; }
 
         // Extract bed dimensions (not native OrcaSlicer config keys — used only
         // for model centering below).  The JS layer passes bed_size_x / bed_size_y
@@ -135,16 +178,16 @@ int orc_init(const char* json_data, int json_len) {
                 }
                 return fallback;
             };
-            g_bed_cx = pick("bed_size_x", 256.0) / 2.0;
-            g_bed_cy = pick("bed_size_y", 256.0) / 2.0;
-            g_bed_shape = (j.contains("bed_shape") && j["bed_shape"].is_string())
+            session->bed_cx = pick("bed_size_x", 256.0) / 2.0;
+            session->bed_cy = pick("bed_size_y", 256.0) / 2.0;
+            session->bed_shape = (j.contains("bed_shape") && j["bed_shape"].is_string())
                 ? j["bed_shape"].get<std::string>()
                 : "rectangle";
         }
 
         // Start from OrcaSlicer's built-in defaults so all required fields exist.
-        g_config = Slic3r::DynamicPrintConfig();
-        g_config.apply(g_defaults);
+        session->config = Slic3r::DynamicPrintConfig();
+        session->config.apply(g_defaults);
 
         // use_relative_e_distances defaults to true ("Default is checked" —
         // PrintConfig.cpp) but Print::validate() (Print.cpp) hard-fails
@@ -157,7 +200,7 @@ int orc_init(const char* json_data, int json_len) {
         // needs no such G-code and works on effectively all firmwares.
         // Callers can still opt into relative addressing explicitly if they
         // also supply appropriate layer_gcode.
-        g_config.set_deserialize_strict("use_relative_e_distances", "0");
+        session->config.set_deserialize_strict("use_relative_e_distances", "0");
 
         for (auto& [key, val] : j.items()) {
             std::string sv = json_val_to_string(val);
@@ -166,16 +209,16 @@ int orc_init(const char* json_data, int json_len) {
                 // set_deserialize_strict builds a ConfigSubstitutionContext with
                 // the Disable rule internally; incompatible values throw and are
                 // skipped below.
-                g_config.set_deserialize_strict(key, sv);
+                session->config.set_deserialize_strict(key, sv);
             } catch (...) {
                 // silently skip unknown / incompatible keys
             }
         }
 
-        g_initialized = true;
+        session->initialized = true;
         return 0;
     } catch (const std::exception& e) {
-        record_error(e.what());
+        record_error(*session, e.what());
         return -2;
     }
 }
@@ -187,17 +230,19 @@ int orc_init(const char* json_data, int json_len) {
  * Caller must free the buffer with orc_free().
  */
 EMSCRIPTEN_KEEPALIVE
-int orc_slice(const void* stl_data, int stl_len,
+int orc_slice(void* session_ptr, const void* stl_data, int stl_len,
               char** out_gcode, int* out_len) {
-    g_last_error.clear();
-    if (!g_initialized) { record_error("call orc_init first"); return -1; }
+    OrcSession* session = as_session(session_ptr);
+    if (!session) return -1;
+    session->last_error.clear();
+    if (!session->initialized) { record_error(*session, "call orc_init first"); return -1; }
     if (!stl_data || stl_len <= 0 || !out_gcode || !out_len)
         return -1;
 
     // Write raw STL bytes into Emscripten's MEMFS so OrcaSlicer can read it.
     {
         FILE* f = std::fopen("/tmp/ow_in.stl", "wb");
-        if (!f) { record_error("cannot open /tmp/ow_in.stl for writing"); return -3; }
+        if (!f) { record_error(*session, "cannot open /tmp/ow_in.stl for writing"); return -3; }
         std::fwrite(stl_data, 1, static_cast<std::size_t>(stl_len), f);
         std::fclose(f);
     }
@@ -208,11 +253,11 @@ int orc_slice(const void* stl_data, int stl_len,
         const bool stl_ok = Slic3r::load_stl("/tmp/ow_in.stl", &model, "object");
         std::remove("/tmp/ow_in.stl"); // MEMFS is RAM-backed; free it as soon as loaded
         if (!stl_ok) {
-            record_error("STL load failed");
+            record_error(*session, "STL load failed");
             return -4;
         }
         if (model.objects.empty()) {
-            record_error("model contains no objects");
+            record_error(*session, "model contains no objects");
             return -5;
         }
 
@@ -223,25 +268,25 @@ int orc_slice(const void* stl_data, int stl_len,
             if (obj->instances.empty()) {
                 auto* inst = obj->add_instance();
                 // Place at bed centre, derived from bed_size_x / bed_size_y in config.
-                inst->set_offset(Slic3r::Vec3d(g_bed_cx, g_bed_cy, 0.0));
+                inst->set_offset(Slic3r::Vec3d(session->bed_cx, session->bed_cy, 0.0));
             }
         }
 
         // ── configure & slice ────────────────────────────────────────
         Slic3r::Print print;
-        print.apply(model, g_config);
+        print.apply(model, session->config);
 
         {
             // Print::validate() returns a StringObjectException whose
             // `string` member holds the error message ("" when valid).
             Slic3r::StringObjectException err = print.validate();
-            if (!err.string.empty()) { record_error(err.string); return -6; }
+            if (!err.string.empty()) { record_error(*session, err.string); return -6; }
         }
 
         try {
             print.process();
         } catch (const Slic3r::SlicingError& e) {
-            record_error(e.what());
+            record_error(*session, e.what());
             return -7;
         }
 
@@ -256,7 +301,7 @@ int orc_slice(const void* stl_data, int stl_len,
 
         // ── read result back ─────────────────────────────────────────
         FILE* gf = std::fopen("/tmp/ow_out.gcode", "rb");
-        if (!gf) { record_error("gcode export produced no output"); return -8; }
+        if (!gf) { record_error(*session, "gcode export produced no output"); return -8; }
 
         std::fseek(gf, 0, SEEK_END);
         long sz = std::ftell(gf);
@@ -265,7 +310,7 @@ int orc_slice(const void* stl_data, int stl_len,
         char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz) + 1));
         if (!buf) {
             std::fclose(gf);
-            record_error("out of memory");
+            record_error(*session, "out of memory");
             return -9;
         }
         std::fread(buf, 1, static_cast<std::size_t>(sz), gf);
@@ -277,7 +322,7 @@ int orc_slice(const void* stl_data, int stl_len,
         return 0;
 
     } catch (const std::exception& e) {
-        record_error(e.what());
+        record_error(*session, e.what());
         return -9;
     }
 }
@@ -297,7 +342,7 @@ int orc_slice(const void* stl_data, int stl_len,
 EMSCRIPTEN_KEEPALIVE
 int orc_obj_to_stl(const char* obj_data, int obj_len,
                    char** out_stl, int* out_len) {
-    g_last_error.clear();
+    g_conversion_last_error.clear();
     if (!obj_data || obj_len <= 0 || !out_stl || !out_len) return -1;
 
     {
@@ -386,20 +431,36 @@ int orc_obj_to_stl(const char* obj_data, int obj_len,
 /**
  * Slice multiple STL files arranged on a single plate.
  *
- * all_stl   concatenation of all STL file bytes
- * offsets   int32 pairs [start0, len0, start1, len1, …] — one per file
- * n_files   number of files (= offsets length / 2)
+ * all_stl      concatenation of all STL file bytes
+ * offsets      int32 pairs [start0, len0, start1, len1, …] — one per file
+ * n_files      number of files (= offsets length / 2)
+ * extruder_ids nullable int32 array of length n_files — 1-based "extruder"
+ *              override per object (0 = inherit the config's default),
+ *              forwarded to OrcaSlicer's per-object `extruder` config key
+ *              (PrintConfig.cpp: coInt, min 0 = inherit; normalize_fdm()
+ *              resolves it to the per-region *_filament_id fields). This is
+ *              the classic single-nozzle multi-material path — different
+ *              objects on one plate printed with different filament slots —
+ *              and does NOT touch nozzle_diameter/support_different_extruders(),
+ *              so it stays clear of the still-unresolved multi-nozzle crash
+ *              documented on isMultiExtruderProfile() in src/lib/profiles.ts.
+ *              Ignored (no-op) when null, so existing single-extruder callers
+ *              are unaffected.
  *
  * Error codes: same convention as orc_slice.
  */
 EMSCRIPTEN_KEEPALIVE
 int orc_slice_multi(
+    void* session_ptr,
     const void* all_stl, int all_stl_len,
     const int* offsets, int n_files,
+    const int* extruder_ids,
     char** out_gcode, int* out_len)
 {
-    g_last_error.clear();
-    if (!g_initialized) { record_error("call orc_init first"); return -1; }
+    OrcSession* session = as_session(session_ptr);
+    if (!session) return -1;
+    session->last_error.clear();
+    if (!session->initialized) { record_error(*session, "call orc_init first"); return -1; }
     if (!all_stl || all_stl_len <= 0 || !offsets || n_files <= 0 || !out_gcode || !out_len)
         return -1;
 
@@ -413,13 +474,13 @@ int orc_slice_multi(
             const int start = offsets[i * 2];
             const int len   = offsets[i * 2 + 1];
             if (start < 0 || len <= 0 || start + len > all_stl_len) {
-                record_error("invalid offset table");
+                record_error(*session, "invalid offset table");
                 return -1;
             }
             const std::string path = "/tmp/ow_multi_" + std::to_string(i) + ".stl";
             {
                 FILE* f = std::fopen(path.c_str(), "wb");
-                if (!f) { record_error("cannot write temp STL"); return -3; }
+                if (!f) { record_error(*session, "cannot write temp STL"); return -3; }
                 std::fwrite(base + start, 1, static_cast<std::size_t>(len), f);
                 std::fclose(f);
             }
@@ -427,19 +488,29 @@ int orc_slice_multi(
             const bool ok = Slic3r::load_stl(path.c_str(), &model, name.c_str());
             std::remove(path.c_str());
             if (!ok) {
-                record_error("STL load failed for file " + std::to_string(i));
+                record_error(*session, "STL load failed for file " + std::to_string(i));
                 return -4;
             }
         }
 
-        if (model.objects.empty()) { record_error("no objects loaded"); return -5; }
+        if (model.objects.empty()) { record_error(*session, "no objects loaded"); return -5; }
 
+        // Per-object extruder override requires an exact 1:1 file→object
+        // correspondence (true for the common case of one watertight solid
+        // per STL). If any file expanded into more than one object, skip the
+        // mapping entirely rather than guess a wrong association.
+        const bool can_map_extruders =
+            extruder_ids != nullptr && model.objects.size() == static_cast<std::size_t>(n_files);
 
-        // ── centre each mesh; give each one an instance ───────────────────
-        for (auto* obj : model.objects) {
+        // ── centre each mesh; give each one an instance; optional extruder override ──
+        for (std::size_t i = 0; i < model.objects.size(); i++) {
+            auto* obj = model.objects[i];
             obj->center_around_origin();
             if (obj->instances.empty())
                 obj->add_instance();
+            if (can_map_extruders && extruder_ids[i] > 0) {
+                obj->config.set("extruder", extruder_ids[i]);
+            }
         }
 
         // ── auto-arrange on the bed ───────────────────────────────────────
@@ -447,20 +518,20 @@ int orc_slice_multi(
         // For circular beds the arrangement boundary is the largest axis-aligned
         // square inscribed in the circle (half-side = radius / √2) so objects are
         // never placed in the rectangle corners that fall outside the printable area.
-        const double half_w = (g_bed_shape == "circle")
-            ? g_bed_cx / std::sqrt(2.0)
-            : g_bed_cx;
-        const double half_h = (g_bed_shape == "circle")
-            ? g_bed_cy / std::sqrt(2.0)
-            : g_bed_cy;
+        const double half_w = (session->bed_shape == "circle")
+            ? session->bed_cx / std::sqrt(2.0)
+            : session->bed_cx;
+        const double half_h = (session->bed_shape == "circle")
+            ? session->bed_cy / std::sqrt(2.0)
+            : session->bed_cy;
         const Slic3r::BoundingBox bed(
             Slic3r::Point(
-                static_cast<coord_t>((g_bed_cx - half_w) * 1e6),
-                static_cast<coord_t>((g_bed_cy - half_h) * 1e6)
+                static_cast<coord_t>((session->bed_cx - half_w) * 1e6),
+                static_cast<coord_t>((session->bed_cy - half_h) * 1e6)
             ),
             Slic3r::Point(
-                static_cast<coord_t>((g_bed_cx + half_w) * 1e6),
-                static_cast<coord_t>((g_bed_cy + half_h) * 1e6)
+                static_cast<coord_t>((session->bed_cx + half_w) * 1e6),
+                static_cast<coord_t>((session->bed_cy + half_h) * 1e6)
             )
         );
 
@@ -470,26 +541,26 @@ int orc_slice_multi(
 
         // Objects that don't fit land at bed centre instead of throwing
         Slic3r::arrange_objects(model, bed, params,
-            [](Slic3r::arrangement::ArrangePolygon& ap) {
+            [session](Slic3r::arrangement::ArrangePolygon& ap) {
                 ap.translation = Slic3r::Vec2crd(
-                    static_cast<coord_t>(g_bed_cx * 1e6),
-                    static_cast<coord_t>(g_bed_cy * 1e6)
+                    static_cast<coord_t>(session->bed_cx * 1e6),
+                    static_cast<coord_t>(session->bed_cy * 1e6)
                 );
             });
 
         // ── configure & slice ─────────────────────────────────────────────
         Slic3r::Print print;
-        print.apply(model, g_config);
+        print.apply(model, session->config);
 
         {
             Slic3r::StringObjectException err = print.validate();
-            if (!err.string.empty()) { record_error(err.string); return -6; }
+            if (!err.string.empty()) { record_error(*session, err.string); return -6; }
         }
 
         try {
             print.process();
         } catch (const Slic3r::SlicingError& e) {
-            record_error(e.what());
+            record_error(*session, e.what());
             return -7;
         }
 
@@ -500,7 +571,7 @@ int orc_slice_multi(
         }
 
         FILE* gf = std::fopen("/tmp/ow_out.gcode", "rb");
-        if (!gf) { record_error("gcode export produced no output"); return -8; }
+        if (!gf) { record_error(*session, "gcode export produced no output"); return -8; }
 
         std::fseek(gf, 0, SEEK_END);
         long sz = std::ftell(gf);
@@ -509,7 +580,7 @@ int orc_slice_multi(
         char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz) + 1));
         if (!buf) {
             std::fclose(gf);
-            record_error("out of memory");
+            record_error(*session, "out of memory");
             return -9;
         }
         std::fread(buf, 1, static_cast<std::size_t>(sz), gf);
@@ -521,7 +592,7 @@ int orc_slice_multi(
         return 0;
 
     } catch (const std::exception& e) {
-        record_error(e.what());
+        record_error(*session, e.what());
         return -9;
     }
 }
@@ -548,7 +619,7 @@ int orc_slice_multi(
 EMSCRIPTEN_KEEPALIVE
 int orc_cad_to_stl(const char* cad_data, int cad_len,
                    char** out_stl, int* out_len) {
-    g_last_error.clear();
+    g_conversion_last_error.clear();
     if (!cad_data || cad_len <= 0 || !out_stl || !out_len) return -1;
 
     const char* tmp_in  = "/tmp/ow_in.step";
@@ -658,11 +729,19 @@ void orc_free(void* ptr) {
 
 /**
  * Return the last error message as a null-terminated string.
- * The pointer is valid until the next orc_* call.
+ * The pointer is valid until the next orc_* call on the same session (or,
+ * for a null session, the next orc_obj_to_stl / orc_cad_to_stl call).
+ *
+ * Pass the session used for the failing orc_init / orc_slice / orc_slice_multi
+ * call. Pass 0/null after a failing orc_obj_to_stl / orc_cad_to_stl call
+ * (those take no session) — this is also why the parameter used to be
+ * documented as "unused" and JS always passed literal 0: that call pattern
+ * still works unchanged for conversion errors.
  */
 EMSCRIPTEN_KEEPALIVE
-const char* orc_decode_exception(void* /*unused*/) {
-    return g_last_error.c_str();
+const char* orc_decode_exception(void* session_ptr) {
+    OrcSession* session = as_session(session_ptr);
+    return session ? session->last_error.c_str() : g_conversion_last_error.c_str();
 }
 
 } // extern "C"

@@ -3,6 +3,11 @@ import { sliceStl, sliceMultiStl, objToStl, cadToStl, OrcaSliceError } from '../
 import { toEngineConfig } from '../lib/profiles'
 
 let orcaModule: OrcaModule | null = null
+// Created once, right after the module loads, and reused for the worker's
+// entire lifetime — behaviour-equivalent to the old global-state bridge, but
+// via an explicit handle now that orca-wasm/bridge/slicer.cpp scopes engine
+// state per-session instead of to process-wide statics.
+let session = 0
 let loadingWasm = false
 // Set when the WASM module aborts at runtime (e.g. an unreachable trap or
 // OOM inside a slice). Emscripten does not support resuming or reinitializing
@@ -15,7 +20,7 @@ let wasmCrashed = false
 // Slice request that arrived before WASM was ready — last-wins (UI disables
 // the Slice button while loading, so only one request can queue in practice)
 let pendingSlice: { stl: ArrayBuffer; config: Record<string, unknown> } | null = null
-let pendingPlate: { stls: ArrayBuffer[]; config: Record<string, unknown> } | null = null
+let pendingPlate: { stls: ArrayBuffer[]; config: Record<string, unknown>; extruderIds?: number[] } | null = null
 const pendingObjConvertQueue: { obj: ArrayBuffer; filename: string }[] = []
 const pendingCadConvertQueue: { cad: ArrayBuffer; filename: string }[] = []
 
@@ -108,6 +113,14 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         },
       })
 
+      session = orcaModule._orc_session_create()
+      if (!session) {
+        orcaModule = null
+        loadingWasm = false
+        send({ type: 'WASM_ERROR', message: 'Failed to allocate slicer session (out of memory?)' })
+        return
+      }
+
       loadingWasm = false
       send({ type: 'WASM_LOADED' })
 
@@ -126,9 +139,9 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         doSlice(stl, config)
       }
       if (pendingPlate) {
-        const { stls, config } = pendingPlate
+        const { stls, config, extruderIds } = pendingPlate
         pendingPlate = null
-        doSliceMulti(stls, config)
+        doSliceMulti(stls, config, extruderIds)
       }
     } catch (err) {
       loadingWasm = false
@@ -150,10 +163,10 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
 
   if (msg.type === 'SLICE_MULTI') {
     if (!orcaModule) {
-      pendingPlate = { stls: msg.stls, config: msg.config as Record<string, unknown> }
+      pendingPlate = { stls: msg.stls, config: msg.config as Record<string, unknown>, extruderIds: msg.extruderIds }
       return
     }
-    doSliceMulti(msg.stls, msg.config as Record<string, unknown>)
+    doSliceMulti(msg.stls, msg.config as Record<string, unknown>, msg.extruderIds)
   }
 
   if (msg.type === 'OBJ_TO_STL') {
@@ -184,7 +197,7 @@ function doObjToStl(obj: ArrayBuffer, filename: string) {
   }
 }
 
-function doSliceMulti(stls: ArrayBuffer[], config: Record<string, unknown>) {
+function doSliceMulti(stls: ArrayBuffer[], config: Record<string, unknown>, extruderIds?: number[]) {
   if (!orcaModule) return
   try {
     const { _passthrough, ...rest } = config as Record<string, unknown> & { _passthrough?: Record<string, string> }
@@ -204,7 +217,11 @@ function doSliceMulti(stls: ArrayBuffer[], config: Record<string, unknown>) {
       pos += stls[i].byteLength
     }
 
-    const gcode = sliceMultiStl(orcaModule, combined, offsets, stls.length, configJson)
+    const extruderIdsArr = extruderIds && extruderIds.length === stls.length
+      ? Int32Array.from(extruderIds)
+      : undefined
+
+    const gcode = sliceMultiStl(orcaModule, session, combined, offsets, stls.length, configJson, extruderIdsArr)
     send({ type: 'SLICE_MULTI_COMPLETE', gcode })
   } catch (err) {
     if (err instanceof OrcaSliceError) {
@@ -233,7 +250,7 @@ function doSlice(stl: ArrayBuffer, config: Record<string, unknown>) {
     const engineRest = toEngineConfig(rest)
     const flat = _passthrough ? { ...engineRest, ..._passthrough } : engineRest
     const configJson = JSON.stringify(flat)
-    const gcode = sliceStl(orcaModule, new Uint8Array(stl), configJson)
+    const gcode = sliceStl(orcaModule, session, new Uint8Array(stl), configJson)
     send({ type: 'SLICE_COMPLETE', gcode })
   } catch (err) {
     if (err instanceof OrcaSliceError) {
