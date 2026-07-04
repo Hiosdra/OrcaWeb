@@ -57,7 +57,7 @@ jobs:
       # (zlib/png/jpeg), so that step becomes a no-op on subsequent runs.
       - name: Cache Emscripten
         id: cache-emsdk
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: /opt/emsdk
           key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v1
@@ -86,7 +86,7 @@ jobs:
       # compile. ccache turns that into a near-instant rebuild for unchanged
       # translation units.
       - name: Cache ccache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ccache
           key: wasm-ccache-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-${{ github.run_id }}
@@ -117,7 +117,7 @@ jobs:
       # Each dep build uses an internal stamp file so partial caches are safe:
       # a step is a no-op if its stamp already exists, regardless of cache hit.
       - name: Restore dep cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: orca-wasm/deps-install
           key: wasm-deps-${{ runner.os }}-orca-${{ env.ORCA_VERSION }}-occt-${{ env.OCCT_VERSION }}-v16
