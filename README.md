@@ -8,6 +8,7 @@ OrcaSlicer compiled to WebAssembly. Slice STL files directly in the browser — 
 
 - Full OrcaSlicer engine (WASM) — same slicing quality as the desktop app
 - 3D model preview + G-code layer visualiser side-by-side
+- Import STL, 3MF, OBJ, and STEP files — OBJ and STEP are converted to STL by native OrcaSlicer/OCCT code compiled into the WASM engine, no extra downloads
 - Import OrcaSlicer profiles (.json) from your desktop installation
 - Built-in presets: Bambu Lab P1S/X1C, Prusa MK4, Ender 3, Voron 2.4
 
@@ -17,7 +18,7 @@ OrcaSlicer compiled to WebAssembly. Slice STL files directly in the browser — 
 git clone https://github.com/Hiosdra/OrcaWeb.git
 cd OrcaWeb
 npm install
-node scripts/download-wasm.mjs   # ~9 MB, one-time download
+node scripts/download-wasm.mjs   # ~29 MB, one-time download
 npm run dev
 ```
 
@@ -35,12 +36,12 @@ Browser
 │
 └── Web Worker (slicer.worker.ts)
     └── OrcaSlicer WASM module
-        ├── slicer.js    (~1.5 MB)
-        └── slicer.wasm  (~7.5 MB)
+        ├── slicer.js    (~210 KB)
+        └── slicer.wasm  (~29 MB, includes OCCT for STEP import)
 ```
 
 No `slicer.data` — the headless flat-config slicer never reads `orca/resources`
-at runtime, so the 200 MB preload file was eliminated entirely (~9 MB total cold load).
+at runtime, so the 200 MB preload file was eliminated entirely (~29 MB total cold load).
 
 ### WASM loading
 
