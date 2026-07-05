@@ -60,7 +60,10 @@ export function getWorker(): Worker {
   const wasmBase = import.meta.env.VITE_WASM_BASE_URL
     ?? `${import.meta.env.BASE_URL}wasm`
   wasmStatus = 'loading'
-  worker.postMessage({ type: 'LOAD_WASM', url: `${wasmBase}/slicer.js`, version: __APP_VERSION__ })
+  // __WASM_VERSION__ (not __APP_VERSION__) — tracks the WASM engine build itself,
+  // so an engine-only change (bridge/API) busts the cache even without an app
+  // release. See vite.config.ts and deploy.yml's "Download WASM artifacts" step.
+  worker.postMessage({ type: 'LOAD_WASM', url: `${wasmBase}/slicer.js`, version: __WASM_VERSION__ })
 
   return worker
 }
