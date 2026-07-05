@@ -29,6 +29,7 @@ Ostatnia aktualizacja: **2026-07-05** · wersja silnika: **OrcaSlicer v2.4.0** (
 | Widok model + G-code obok siebie | Po slicowaniu — synchronizowany układ obok siebie |
 | Pobieranie G-code | Przycisk „Download .gcode" z poprawną nazwą pliku |
 | Status silnika (badge) | „Loading engine…" / „Engine error" w nagłówku |
+| Wersja silnika w nagłówku | `v{app} · {data} · engine v{orca}` pod logo — ten sam tekst na każdej szerokości ekranu (mobile/tablet/desktop) |
 | Stopka — link do źródeł (AGPL) | Widoczny link „Source (AGPL-3.0)" → repo GitHub |
 
 ### Silnik WASM

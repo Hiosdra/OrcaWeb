@@ -117,6 +117,10 @@ jobs:
           # WASM served from same origin — no external URL needed.
           # worker-singleton.ts uses import.meta.env.BASE_URL + 'wasm'
           VITE_WASM_VERSION: ${{ env.WASM_VERSION }}
+          # Human-readable engine version shown in the app header (App.tsx) —
+          # the job-level $ORCA_VERSION this workflow actually resolved/used,
+          # not the cache-busting hash above.
+          VITE_ORCA_VERSION: ${{ env.ORCA_VERSION }}
 
       # ── Python / MkDocs ─────────────────────────────────────────────
       - uses: actions/setup-python@v6

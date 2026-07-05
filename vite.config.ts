@@ -15,12 +15,19 @@ const RELEASE_DATE = process.env.VITE_RELEASE_DATE ?? new Date().toISOString().s
 // app release. Falls back to the app version for local dev, where there's no
 // deploy-time WASM_TAG and the PWA service worker is disabled anyway.
 const WASM_VERSION = process.env.VITE_WASM_VERSION ?? version
+// The upstream OrcaSlicer tag the engine was built from (e.g. "v2.4.0") — a
+// human-readable label for the UI, distinct from WASM_VERSION above (which is
+// a cache-busting key, not something worth showing anyone). Set by deploy.yml
+// from its own $ORCA_VERSION; the fallback here is for local dev only and
+// must be kept in sync with deploy.yml / build-wasm.yml's ORCA_VERSION default.
+const ORCA_ENGINE_VERSION = process.env.VITE_ORCA_VERSION ?? 'v2.4.0'
 
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(version),
     __APP_RELEASE_DATE__: JSON.stringify(RELEASE_DATE),
     __WASM_VERSION__: JSON.stringify(WASM_VERSION),
+    __ORCA_ENGINE_VERSION__: JSON.stringify(ORCA_ENGINE_VERSION),
   },
   // VITE_BASE is set in CI for GitHub Pages (/OrcaWeb/app/); locally it's /
   base: process.env.VITE_BASE ?? '/',

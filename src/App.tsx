@@ -354,18 +354,22 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-orca-50 flex flex-col">
       <header className="sticky top-0 z-10 bg-white/80 backdrop-blur-sm border-b border-slate-200">
-        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <OrcaLogo className="w-7 h-7" />
-            <span className="font-bold text-slate-800 tracking-tight">OrcaWeb</span>
-            <span className="hidden sm:block text-xs text-slate-400 font-medium bg-slate-100 px-2 py-0.5 rounded-full">
-              Browser Slicer
-            </span>
-            <span className="text-xs text-slate-400 font-mono">
-              v{__APP_VERSION__}<span className="hidden md:inline"> · {__APP_RELEASE_DATE__}</span>
-            </span>
+        <div className="max-w-5xl mx-auto px-4 py-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <OrcaLogo className="w-7 h-7 shrink-0" />
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-800 tracking-tight">OrcaWeb</span>
+                <span className="hidden sm:block text-xs text-slate-400 font-medium bg-slate-100 px-2 py-0.5 rounded-full">
+                  Browser Slicer
+                </span>
+              </div>
+              <div className="text-xs text-slate-400 font-mono">
+                v{__APP_VERSION__} · {__APP_RELEASE_DATE__} · engine {__ORCA_ENGINE_VERSION__}
+              </div>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0">
             <WasmStatusBadge status={wasmStatus} />
             <a
               href="https://github.com/Hiosdra/OrcaWeb"
