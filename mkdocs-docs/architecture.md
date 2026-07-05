@@ -217,6 +217,15 @@ before publishing a release — real `orc_init`/`orc_slice(_multi)` calls agains
 the freshly built engine, not just a successful compile. See
 [ADR-009](adr/adr-009-wasm-smoke-test.md).
 
+### E2E UI smoke test
+
+`.github/workflows/e2e-smoke.yml` runs a Playwright test (`e2e/slice.spec.ts`)
+against the real UI on every PR: upload a synthetic STL, slice it through the
+actual `FileUpload` → worker → WASM path, and assert the result reaches
+`Done`. Downloads the latest *published* engine release rather than building
+one, since engine-source correctness is already gated by the WASM build
+smoke test above. See [ADR-010](adr/adr-010-e2e-smoke-test.md).
+
 ## Coordinate systems
 
 Both viewers use a **Z-up** scene to match the slicer engine — G-code axes map directly to Three.js axes with no permutation.
