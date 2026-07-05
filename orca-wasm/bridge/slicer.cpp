@@ -51,6 +51,8 @@
 #include "libslic3r/GCode.hpp"
 #include "libslic3r/Exception.hpp"
 
+#include <boost/algorithm/string/predicate.hpp>
+
 // nlohmann/json — available as a bundled dep inside OrcaSlicer
 #include <nlohmann/json.hpp>
 
@@ -127,6 +129,22 @@ static void center_object_xy_only(Slic3r::ModelObject* obj) {
     shift.z() = 0.0;
     obj->translate(shift);
     obj->origin_translation += shift;
+}
+
+// Print::m_isBBLPrinter (accessed via is_BBL_printer()) has no default
+// member initializer and is otherwise only ever assigned by desktop GUI code
+// (BackgroundSlicingProcess.cpp, OrcaSlicer.cpp) from PresetBundle's vendor
+// info — none of which runs in this headless bridge. Left unset, it reads
+// as uninitialized memory, which GCode.cpp uses to pick between the Bambu
+// and "compatible" (;TYPE: ...) reserved-tag formats when writing extrusion
+// role comments. A mismatch between that and what desktop OrcaSlicer expects
+// when re-opening the file (it infers the format from the exported
+// printer_model config) makes every extrusion role show as "Undefined" in
+// the Line Type breakdown. Mirror the same "Bambu Lab" vendor-name prefix
+// check GUI code uses so it's set deterministically from the same
+// printer_model the JS layer already sends.
+static void set_is_bbl_printer(Slic3r::Print& print, const Slic3r::DynamicPrintConfig& config) {
+    print.is_BBL_printer() = boost::starts_with(config.opt_string("printer_model"), "Bambu Lab");
 }
 
 // ── public API ────────────────────────────────────────────────────────────────
@@ -290,6 +308,7 @@ int orc_slice(void* session_ptr, const void* stl_data, int stl_len,
         // ── configure & slice ────────────────────────────────────────
         Slic3r::Print print;
         print.apply(model, session->config);
+        set_is_bbl_printer(print, session->config);
 
         {
             // Print::validate() returns a StringObjectException whose
@@ -566,6 +585,7 @@ int orc_slice_multi(
         // ── configure & slice ─────────────────────────────────────────────
         Slic3r::Print print;
         print.apply(model, session->config);
+        set_is_bbl_printer(print, session->config);
 
         {
             Slic3r::StringObjectException err = print.validate();
