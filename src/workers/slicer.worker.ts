@@ -65,8 +65,11 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       // key in the URL, a browser that visited before this deploy keeps
       // serving its stale cached engine binary indefinitely (up to the 30-day
       // TTL), even after the rest of the app updates to a new version.
-      // Appending the app version makes each release's URL genuinely new,
-      // so CacheFirst treats it as a fresh entry instead of reusing a stale one.
+      // msg.version is __WASM_VERSION__ (the resolved WASM release tag, not the
+      // app version — see worker-singleton.ts / vite.config.ts), so this key
+      // changes whenever the engine binary changes, even between app releases.
+      // That makes each engine build's URL genuinely new, so CacheFirst treats
+      // it as a fresh entry instead of reusing a stale, API-mismatched one.
       const v = `?v=${encodeURIComponent(msg.version)}`
 
       // Fetch slicer.js text and wasm binary in parallel

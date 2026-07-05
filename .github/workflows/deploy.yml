@@ -91,6 +91,23 @@ jobs:
           fi
           ls -lh public/wasm/ || true
 
+      # ── Derive a cache-busting key for the WASM engine ────────────────
+      # Hashing the actual downloaded slicer.wasm bytes (rather than reusing
+      # $WASM_TAG or the app's package.json version) means the frontend's
+      # ?v=<key> query param — and therefore whether the PWA CacheFirst cache
+      # and the CDN edge treat it as a new URL — always tracks the engine
+      # binary that's actually being shipped, in both the release-download and
+      # the gh-pages-restore fallback path above. This is what closes the bug
+      # where a bridge/API change (395d3fe) landed on master, published a new
+      # WASM release, but package.json's version didn't change — so the old
+      # ?v=<app-version> query stayed identical and browsers/CDN kept serving
+      # the stale, ABI-mismatched engine indefinitely.
+      - name: Compute WASM cache-busting key
+        run: |
+          WASM_VERSION=$(sha256sum public/wasm/slicer.wasm | cut -c1-16)
+          echo "WASM_VERSION=$WASM_VERSION" >> "$GITHUB_ENV"
+          echo "Using WASM cache key: $WASM_VERSION"
+
       # ── Build Vite app ───────────────────────────────────────────────
       - name: Build Vite app
         run: npm run build
@@ -99,6 +116,7 @@ jobs:
           VITE_BASE: /OrcaWeb/app/
           # WASM served from same origin — no external URL needed.
           # worker-singleton.ts uses import.meta.env.BASE_URL + 'wasm'
+          VITE_WASM_VERSION: ${{ env.WASM_VERSION }}
 
       # ── Python / MkDocs ─────────────────────────────────────────────
       - uses: actions/setup-python@v6
