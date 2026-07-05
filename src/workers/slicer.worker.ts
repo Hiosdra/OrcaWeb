@@ -1,6 +1,7 @@
 import type { OrcaModule, WorkerInMessage, WorkerOutMessage } from '../types'
 import { sliceStl, sliceMultiStl, objToStl, cadToStl, OrcaSliceError } from '../lib/wasm-loader'
 import { toEngineConfig } from '../lib/profiles'
+import { logInfo, logWarn, logError } from '../lib/log'
 
 let orcaModule: OrcaModule | null = null
 // Created once, right after the module loads, and reused for the worker's
@@ -59,7 +60,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
     // "Engine error" incident was hard to diagnose precisely because nothing
     // useful was logged before the failure.
     const loadStartedAt = performance.now()
-    console.info(`[OrcaWASM] loading engine ${msg.engineLabel} from ${msg.url}`)
+    logInfo(`[OrcaWASM] loading engine ${msg.engineLabel} from ${msg.url}`)
 
     try {
       const wasmBase = msg.url.replace(/\/slicer\.js$/, '')
@@ -90,7 +91,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
           return r.arrayBuffer()
         }),
       ])
-      console.info(
+      logInfo(
         `[OrcaWASM] fetched slicer.js (${(jsText.length / 1024).toFixed(0)} KB) `
         + `+ slicer.wasm (${(wasmBinary.byteLength / 1e6).toFixed(1)} MB) `
         + `in ${Math.round(performance.now() - loadStartedAt)}ms`,
@@ -120,9 +121,9 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       orcaModule = await factory({
         wasmBinary,
         locateFile: (path: string) => `${wasmBase}/${path}${v}`,
-        printErr: (m: string) => console.warn('[OrcaWASM]', m),
+        printErr: (m: string) => logWarn('[OrcaWASM]', m),
         onAbort: (m: string) => {
-          console.error('[OrcaWASM abort]', m)
+          logError('[OrcaWASM abort]', m)
           wasmCrashed = true
           send({ type: 'WASM_ERROR', message: `Slicer engine crashed: ${m}` })
         },
@@ -132,13 +133,13 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       if (!session) {
         orcaModule = null
         loadingWasm = false
-        console.error(`[OrcaWASM] session allocation failed after ${Math.round(performance.now() - loadStartedAt)}ms`)
+        logError(`[OrcaWASM] session allocation failed after ${Math.round(performance.now() - loadStartedAt)}ms`)
         send({ type: 'WASM_ERROR', message: 'Failed to allocate slicer session (out of memory?)' })
         return
       }
 
       loadingWasm = false
-      console.info(
+      logInfo(
         `[OrcaWASM] engine ${msg.engineLabel} ready in ${Math.round(performance.now() - loadStartedAt)}ms — session #${session}`,
       )
       send({ type: 'WASM_LOADED' })
@@ -164,7 +165,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       }
     } catch (err) {
       loadingWasm = false
-      console.error(
+      logError(
         `[OrcaWASM] engine ${msg.engineLabel} failed to load after ${Math.round(performance.now() - loadStartedAt)}ms:`,
         err,
       )
@@ -237,7 +238,7 @@ function doSliceMulti(stls: ArrayBuffer[], config: Record<string, unknown>, extr
   if (!orcaModule) return
   const startedAt = performance.now()
   const totalMB = stls.reduce((sum, s) => sum + s.byteLength, 0) / 1e6
-  console.info(
+  logInfo(
     `[OrcaWASM] slice-multi start — ${stls.length} STL(s), ${totalMB.toFixed(2)} MB total, `
     + `${summarizeConfig(config)}${extruderIds ? `, extruders [${extruderIds.join(',')}]` : ''}`,
   )
@@ -264,7 +265,7 @@ function doSliceMulti(stls: ArrayBuffer[], config: Record<string, unknown>, extr
       : undefined
 
     const gcode = sliceMultiStl(orcaModule, session, combined, offsets, stls.length, configJson, extruderIdsArr)
-    console.info(
+    logInfo(
       `[OrcaWASM] slice-multi done in ${Math.round(performance.now() - startedAt)}ms `
       + `— G-code ${(gcode.length / 1e6).toFixed(2)} MB`,
     )
@@ -272,10 +273,10 @@ function doSliceMulti(stls: ArrayBuffer[], config: Record<string, unknown>, extr
   } catch (err) {
     const ms = Math.round(performance.now() - startedAt)
     if (err instanceof OrcaSliceError) {
-      console.error(`[OrcaWASM] slice-multi failed after ${ms}ms — code ${err.code}: ${err.message}`)
+      logError(`[OrcaWASM] slice-multi failed after ${ms}ms — code ${err.code}: ${err.message}`)
       send({ type: 'SLICE_MULTI_ERROR', code: err.code, message: err.message })
     } else {
-      console.error(`[OrcaWASM] slice-multi failed after ${ms}ms:`, err)
+      logError(`[OrcaWASM] slice-multi failed after ${ms}ms:`, err)
       send({ type: 'SLICE_MULTI_ERROR', code: -1, message: String(err) })
     }
   }
@@ -295,14 +296,14 @@ function doCadToStl(cad: ArrayBuffer, filename: string) {
 function doSlice(stl: ArrayBuffer, config: Record<string, unknown>) {
   if (!orcaModule) return
   const startedAt = performance.now()
-  console.info(`[OrcaWASM] slice start — STL ${(stl.byteLength / 1e6).toFixed(2)} MB, ${summarizeConfig(config)}`)
+  logInfo(`[OrcaWASM] slice start — STL ${(stl.byteLength / 1e6).toFixed(2)} MB, ${summarizeConfig(config)}`)
   try {
     const { _passthrough, ...rest } = config as Record<string, unknown> & { _passthrough?: Record<string, string> }
     const engineRest = toEngineConfig(rest)
     const flat = _passthrough ? { ...engineRest, ..._passthrough } : engineRest
     const configJson = JSON.stringify(flat)
     const gcode = sliceStl(orcaModule, session, new Uint8Array(stl), configJson)
-    console.info(
+    logInfo(
       `[OrcaWASM] slice done in ${Math.round(performance.now() - startedAt)}ms `
       + `— G-code ${(gcode.length / 1e6).toFixed(2)} MB`,
     )
@@ -310,10 +311,10 @@ function doSlice(stl: ArrayBuffer, config: Record<string, unknown>) {
   } catch (err) {
     const ms = Math.round(performance.now() - startedAt)
     if (err instanceof OrcaSliceError) {
-      console.error(`[OrcaWASM] slice failed after ${ms}ms — code ${err.code}: ${err.message}`)
+      logError(`[OrcaWASM] slice failed after ${ms}ms — code ${err.code}: ${err.message}`)
       send({ type: 'SLICE_ERROR', code: err.code, message: err.message })
     } else {
-      console.error(`[OrcaWASM] slice failed after ${ms}ms:`, err)
+      logError(`[OrcaWASM] slice failed after ${ms}ms:`, err)
       send({ type: 'SLICE_ERROR', code: -1, message: String(err) })
     }
   }
