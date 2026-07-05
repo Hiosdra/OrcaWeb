@@ -83,8 +83,10 @@ export interface SlicePreset {
 
 export type WorkerInMessage =
   // version is appended as a cache-busting query param to the slicer.js/
-  // slicer.wasm fetch URLs — see slicer.worker.ts for why.
-  | { type: 'LOAD_WASM'; url: string; version: string }
+  // slicer.wasm fetch URLs — see slicer.worker.ts for why. engineLabel is the
+  // human-readable resolved WASM release tag (__ORCA_ENGINE_VERSION__), used
+  // only for console diagnostics, never for cache-busting or URLs.
+  | { type: 'LOAD_WASM'; url: string; version: string; engineLabel: string }
   | { type: 'SLICE'; stl: ArrayBuffer; config: OrcaConfig }
   | {
       type: 'SLICE_MULTI'

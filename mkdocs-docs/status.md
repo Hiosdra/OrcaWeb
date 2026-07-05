@@ -80,6 +80,8 @@ Ostatnia aktualizacja: **2026-07-05** · wersja silnika: **OrcaSlicer v2.4.0** (
 | Release WASM `wasm-v2.4.0` | ✅ `slicer.js` + `slicer.wasm` (~29 MB łącznie, z OCCT STEP) |
 | Deploy resilience | ✅ fallback na poprzedni `gh-pages` gdy release nie istnieje |
 | CI build na PRach (ścieżki orca-wasm/) | ✅ każdy PR dotykający silnika uruchamia ~12 min build |
+| Auto-bump wersji aplikacji | ✅ każdy deploy sam podbija patch w `package.json`/`status.md` i taguje `vX.Y.Z` — bez ręcznej edycji (patrz `/release` tylko dla świadomego minor/major) |
+| Auto-rebuild silnika po zmianie `orca-wasm/` | ✅ push na `master` dotykający `orca-wasm/**` sam odpala `build-wasm.yml`; `deploy.yml` czeka na jego wynik (`workflow_run`) zamiast ścigać się ze starym silnikiem |
 | Strona promująca (landing) | ✅ `hiosdra.github.io/OrcaWeb/` |
 | Dokumentacja MkDocs | ✅ `hiosdra.github.io/OrcaWeb/docs/` |
 | Dependabot + grupowanie zależności | ✅ tygodniowy harmonogram |
