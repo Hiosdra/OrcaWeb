@@ -97,7 +97,16 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           CURRENT_VERSION=$(jq -r .version package.json)
-          LATEST_TAG=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+          # Query the remote directly rather than relying on local tag refs:
+          # actions/checkout's `ref: <sha>` above pins to a raw commit, and
+          # (unlike checking out a branch) that mode does not reliably bring
+          # tags down even with fetch-depth: 0 -- confirmed live, where this
+          # used to read no v0.7.1 tag at all and treat 0.7.1 as a "manual"
+          # bump to preserve, silently never auto-incrementing.
+          LATEST_TAG=$(git ls-remote --tags --refs origin \
+            | sed 's#.*refs/tags/##' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V | tail -n1)
           LATEST_VERSION=${LATEST_TAG#v}
 
           if [ -z "$LATEST_VERSION" ] || [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
