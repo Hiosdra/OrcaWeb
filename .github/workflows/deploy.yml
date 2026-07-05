@@ -54,12 +54,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # workflow_run doesn't check out the triggering commit by default —
-          # it defaults to master's current HEAD *at trigger time*, which can
-          # already have moved past the commit build-wasm.yml actually built
-          # for. Pin explicitly so we deploy the exact engine+frontend pair
-          # that was built together, not whatever landed on master meanwhile.
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          # No explicit `ref` here (deliberately -- a previous version pinned
+          # this to `github.event.workflow_run.head_sha`, meaning to deploy the
+          # exact commit build-wasm.yml just built for). That backfired live:
+          # a ~13 min build meant several more commits could land on master in
+          # the meantime, and pinning to the stale head_sha silently checked
+          # out an OLD package.json, confusing the auto-bump step below. The
+          # engine release is always resolved as "whatever's latest published"
+          # regardless of which frontend commit is checked out (see "Download
+          # WASM artifacts"), so there's no actual pairing requirement to
+          # protect here -- default checkout behavior (current master tip for
+          # workflow_run, the pushed commit for push) is exactly what we want.
+          #
           # Full history + tags — the auto-bump step below needs to see the
           # latest vX.Y.Z release tag to decide whether to bump the patch.
           fetch-depth: 0
@@ -98,11 +104,14 @@ jobs:
 
           CURRENT_VERSION=$(jq -r .version package.json)
           # Query the remote directly rather than relying on local tag refs:
-          # actions/checkout's `ref: <sha>` above pins to a raw commit, and
-          # (unlike checking out a branch) that mode does not reliably bring
-          # tags down even with fetch-depth: 0 -- confirmed live, where this
-          # used to read no v0.7.1 tag at all and treat 0.7.1 as a "manual"
-          # bump to preserve, silently never auto-incrementing.
+          # a previous version of this checkout pinned `ref` to a raw commit
+          # SHA (see the checkout step's comment above for why that got
+          # dropped), and SHA-pinned checkouts don't reliably bring tags down
+          # even with fetch-depth: 0 -- confirmed live, where this used to
+          # read no v0.7.1 tag at all and treat 0.7.1 as a "manual" bump to
+          # preserve, silently never auto-incrementing. Kept as ls-remote
+          # regardless of the ref fix, since it's the more robust source of
+          # truth either way.
           LATEST_TAG=$(git ls-remote --tags --refs origin \
             | sed 's#.*refs/tags/##' \
             | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
@@ -128,7 +137,14 @@ jobs:
           if git diff --cached --quiet; then
             echo "No version-file changes to commit"
           else
-            git commit -m "chore(release): auto-bump to v${NEW_VERSION}"
+            # [skip ci] is load-bearing, not decoration: this push is authenticated
+            # via the SSH deploy key, not GITHUB_TOKEN, so it does NOT get GitHub's
+            # usual "don't retrigger workflows for token-authored pushes" exemption.
+            # Without this marker, the commit re-triggers deploy.yml, which bumps
+            # again, which triggers again... (confirmed live: v0.7.1 ran away to
+            # v0.7.9 in about a minute before an unrelated stale-checkout error
+            # happened to break the cycle).
+            git commit -m "chore(release): auto-bump to v${NEW_VERSION} [skip ci]"
             # A concurrent deploy could have pushed to master between our checkout
             # and this push (concurrency's cancel-in-progress narrows but doesn't
             # eliminate the window) — retry against the latest master once or
@@ -153,21 +169,32 @@ jobs:
             fi
           fi
 
-          git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
-          # Distinguish "tag already exists" (expected when nothing needed
-          # bumping) from any other push failure (auth/permissions) -- the
-          # latter must fail the job loudly, not get swallowed as if it were
-          # the same harmless case.
-          if ! git push origin "v${NEW_VERSION}" 2> push-tag.err; then
-            if grep -qi "already exists" push-tag.err; then
-              echo "Tag v${NEW_VERSION} already exists on remote, skipping"
-            else
-              cat push-tag.err >&2
-              echo "::error::Failed to push tag v${NEW_VERSION}"
-              exit 1
+          # `git tag -a` errors out (fatal, non-zero exit under `set -e`) if a
+          # local tag of that name already exists -- fetch-depth: 0 above means
+          # old tags ARE present locally, so this isn't hypothetical: it's
+          # exactly what happened live when a stale/delayed workflow_run
+          # checkout landed on an older commit than expected and tried to
+          # recreate that commit's already-existing tag. Guard it explicitly
+          # rather than relying on the tag genuinely always being new.
+          if git rev-parse -q --verify "refs/tags/v${NEW_VERSION}" >/dev/null; then
+            echo "Tag v${NEW_VERSION} already exists locally, skipping creation"
+          else
+            git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
+            # Distinguish "tag already exists" (expected when nothing needed
+            # bumping) from any other push failure (auth/permissions) -- the
+            # latter must fail the job loudly, not get swallowed as if it were
+            # the same harmless case.
+            if ! git push origin "v${NEW_VERSION}" 2> push-tag.err; then
+              if grep -qi "already exists" push-tag.err; then
+                echo "Tag v${NEW_VERSION} already exists on remote, skipping"
+              else
+                cat push-tag.err >&2
+                echo "::error::Failed to push tag v${NEW_VERSION}"
+                exit 1
+              fi
             fi
+            rm -f push-tag.err
           fi
-          rm -f push-tag.err
           echo "Deploying as v${NEW_VERSION}"
 
       # ── Node / Vite app ──────────────────────────────────────────────
