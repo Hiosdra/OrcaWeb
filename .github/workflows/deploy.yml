@@ -123,19 +123,42 @@ jobs:
             # A concurrent deploy could have pushed to master between our checkout
             # and this push (concurrency's cancel-in-progress narrows but doesn't
             # eliminate the window) — retry against the latest master once or
-            # twice rather than failing the whole deploy over a race.
+            # twice rather than failing the whole deploy over a race. Track
+            # success explicitly: silently falling through after 3 failed
+            # attempts (e.g. a read-only deploy key, an auth problem) would
+            # otherwise look like a normal deploy while never actually
+            # publishing the version bump.
+            pushed=""
             for attempt in 1 2 3; do
               if git push origin HEAD:master; then
+                pushed=1
                 break
               fi
               echo "Push rejected (attempt ${attempt}) — rebasing onto latest master and retrying"
               git fetch origin master
               git rebase origin/master
             done
+            if [ -z "$pushed" ]; then
+              echo "::error::Failed to push version-bump commit to master after 3 attempts"
+              exit 1
+            fi
           fi
 
           git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
-          git push origin "v${NEW_VERSION}" || echo "Tag v${NEW_VERSION} already exists on remote, skipping"
+          # Distinguish "tag already exists" (expected when nothing needed
+          # bumping) from any other push failure (auth/permissions) -- the
+          # latter must fail the job loudly, not get swallowed as if it were
+          # the same harmless case.
+          if ! git push origin "v${NEW_VERSION}" 2> push-tag.err; then
+            if grep -qi "already exists" push-tag.err; then
+              echo "Tag v${NEW_VERSION} already exists on remote, skipping"
+            else
+              cat push-tag.err >&2
+              echo "::error::Failed to push tag v${NEW_VERSION}"
+              exit 1
+            fi
+          fi
+          rm -f push-tag.err
           echo "Deploying as v${NEW_VERSION}"
 
       # ── Node / Vite app ──────────────────────────────────────────────
