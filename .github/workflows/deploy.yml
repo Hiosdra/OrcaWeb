@@ -3,6 +3,23 @@ name: Deploy
 on:
   push:
     branches: [master]
+    # Skip the immediate push-triggered deploy when a push touches *only* the
+    # WASM build pipeline: build-wasm.yml's own master-push trigger (see that
+    # file) is about to build and publish a fresh engine release for this
+    # exact commit, and deploying right now would just re-ship the previous
+    # release, then need a second deploy moments later anyway once
+    # workflow_run (below) fires. A push that also touches anything outside
+    # orca-wasm/ still deploys immediately as before.
+    paths-ignore:
+      - 'orca-wasm/**'
+  # Chain off build-wasm.yml so a master push that changed the engine always
+  # gets its matching deploy once the new release actually exists, instead of
+  # racing it — see paths-ignore above and 395d3fe, which shipped a new
+  # session-handle bridge API on master with no automated rebuild, so the
+  # frontend ran ahead of a matching engine release ("Engine error" incident).
+  workflow_run:
+    workflows: ["Build WASM"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -16,6 +33,13 @@ concurrency:
 
 jobs:
   deploy:
+    # workflow_run fires for every Build WASM run, including PR-validation
+    # builds (which target PR branches, not master, and never publish) and
+    # failed builds. Only actually deploy for a successful master build; for
+    # every other trigger type (push, workflow_dispatch) just proceed.
+    if: >
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master')
     runs-on: ubuntu-latest
 
     env:
@@ -29,18 +53,70 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # workflow_run doesn't check out the triggering commit by default —
+          # it defaults to master's current HEAD *at trigger time*, which can
+          # already have moved past the commit build-wasm.yml actually built
+          # for. Pin explicitly so we deploy the exact engine+frontend pair
+          # that was built together, not whatever landed on master meanwhile.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          # Full history + tags — the auto-bump step below needs to see the
+          # latest vX.Y.Z release tag to decide whether to bump the patch.
+          fetch-depth: 0
 
-      # ── Auto-tag on release commits ───────────────────────────────────
-      - name: Create release tag
-        if: "startsWith(github.event.head_commit.message, 'chore(release): bump to v')"
+      # ── Auto-bump app version ──────────────────────────────────────────
+      # Replaces the old manual /release flow (hand-editing package.json +
+      # status.md, committing "chore(release): bump to vX.Y.Z"). Every deploy
+      # now bumps the version itself: if package.json's version still matches
+      # the latest vX.Y.Z tag, nobody bumped it in this push, so auto-increment
+      # the patch number. If it already differs (someone deliberately bumped
+      # minor/major in their PR), respect that value instead of bumping again.
+      - name: Auto-bump app version
         run: |
-          VERSION=$(jq -r .version package.json)
-          TAG="v${VERSION}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "Release $TAG"
-          git push origin "$TAG" || echo "Tag $TAG already exists on remote, skipping"
-          echo "Tagged $TAG on $(git rev-parse HEAD)"
+
+          CURRENT_VERSION=$(jq -r .version package.json)
+          LATEST_TAG=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+          LATEST_VERSION=${LATEST_TAG#v}
+
+          if [ -z "$LATEST_VERSION" ] || [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+            NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+            echo "Auto-bumping ${CURRENT_VERSION} -> ${NEW_VERSION} (patch)"
+          else
+            NEW_VERSION="$CURRENT_VERSION"
+            echo "package.json already bumped to ${NEW_VERSION} manually — using as-is"
+          fi
+
+          TODAY=$(date -u +%Y-%m-%d)
+          jq --arg v "$NEW_VERSION" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
+          jq --arg v "$NEW_VERSION" '.version = $v | .packages[""].version = $v' package-lock.json > package-lock.json.tmp && mv package-lock.json.tmp package-lock.json
+          sed -i -E "s/Ostatnia aktualizacja: \*\*[0-9-]+\*\*/Ostatnia aktualizacja: **${TODAY}**/" mkdocs-docs/status.md
+          sed -i -E "s/wersja aplikacji: \*\*v[0-9]+\.[0-9]+\.[0-9]+\*\*/wersja aplikacji: **v${NEW_VERSION}**/" mkdocs-docs/status.md
+
+          git add package.json package-lock.json mkdocs-docs/status.md
+          if git diff --cached --quiet; then
+            echo "No version-file changes to commit"
+          else
+            git commit -m "chore(release): auto-bump to v${NEW_VERSION}"
+            # A concurrent deploy could have pushed to master between our checkout
+            # and this push (concurrency's cancel-in-progress narrows but doesn't
+            # eliminate the window) — retry against the latest master once or
+            # twice rather than failing the whole deploy over a race.
+            for attempt in 1 2 3; do
+              if git push origin HEAD:master; then
+                break
+              fi
+              echo "Push rejected (attempt ${attempt}) — rebasing onto latest master and retrying"
+              git fetch origin master
+              git rebase origin/master
+            done
+          fi
+
+          git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
+          git push origin "v${NEW_VERSION}" || echo "Tag v${NEW_VERSION} already exists on remote, skipping"
+          echo "Deploying as v${NEW_VERSION}"
 
       # ── Node / Vite app ──────────────────────────────────────────────
       - uses: actions/setup-node@v6

@@ -63,7 +63,14 @@ export function getWorker(): Worker {
   // __WASM_VERSION__ (not __APP_VERSION__) — tracks the WASM engine build itself,
   // so an engine-only change (bridge/API) busts the cache even without an app
   // release. See vite.config.ts and deploy.yml's "Download WASM artifacts" step.
-  worker.postMessage({ type: 'LOAD_WASM', url: `${wasmBase}/slicer.js`, version: __WASM_VERSION__ })
+  // __ORCA_ENGINE_VERSION__ is separate: a human-readable label for console
+  // diagnostics only, never used for the cache-busting URL itself.
+  worker.postMessage({
+    type: 'LOAD_WASM',
+    url: `${wasmBase}/slicer.js`,
+    version: __WASM_VERSION__,
+    engineLabel: __ORCA_ENGINE_VERSION__,
+  })
 
   return worker
 }

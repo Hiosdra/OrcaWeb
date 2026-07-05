@@ -1,8 +1,10 @@
 name: Build WASM
 
-# Trigger manually or on a tag wasm-v*.*.* that signals a new OrcaSlicer target.
+# Trigger manually, on a tag wasm-v*.*.* that signals a new OrcaSlicer target,
+# or automatically whenever a merge to master touches the WASM build pipeline.
 # The compiled artifacts are uploaded as a release asset on OrcaWeb and then
-# pulled into the deploy workflow.
+# pulled into the deploy workflow (which chains off this workflow's completion
+# via workflow_run — see deploy.yml).
 on:
   workflow_dispatch:
     inputs:
@@ -12,6 +14,17 @@ on:
         required: true
   push:
     tags: ['wasm-v*.*.*']
+    # Auto-publish a new patch release whenever a bridge/build-pipeline change
+    # lands on master, instead of relying on someone remembering to trigger
+    # workflow_dispatch — that gap (engine changed on master, nobody rebuilt
+    # the release before the next deploy) is exactly what caused the
+    # "Engine error" incident from 395d3fe. Path-filtered for the same reason
+    # as the pull_request trigger below: skip the multi-hour build on pushes
+    # that don't touch orca-wasm/.
+    branches: [master]
+    paths:
+      - 'orca-wasm/**'
+      - '.github/workflows/build-wasm.yml'
   # Run on PRs that touch the WASM build pipeline so compilation breakage is
   # caught before merge.  Path-filtered to avoid a ~3 h build on UI-only PRs.
   pull_request:
