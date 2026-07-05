@@ -64,6 +64,26 @@ jobs:
           # latest vX.Y.Z release tag to decide whether to bump the patch.
           fetch-depth: 0
 
+      # ── SSH deploy key for the release push ───────────────────────────
+      # master requires a PR for every push (branch ruleset), and the
+      # default GITHUB_TOKEN has no bypass for it. Rather than use a personal
+      # PAT (ties CI to one person's account/identity — too broad a blast
+      # radius for what this needs), push via a repo-scoped deploy key
+      # ("release_deploy_key", write-enabled) instead: deploy keys are
+      # already on the ruleset's bypass list, so no ruleset change was
+      # needed, and a leaked key only grants push access to this one repo.
+      - name: Configure SSH deploy key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          cat <<'EOF' > ~/.ssh/release_deploy_key
+          ${{ secrets.RELEASE_KEY }}
+          EOF
+          chmod 600 ~/.ssh/release_deploy_key
+          ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null
+          git config core.sshCommand "ssh -i ~/.ssh/release_deploy_key -o IdentitiesOnly=yes"
+          git remote set-url origin "git@github.com:${{ github.repository }}.git"
+
       # ── Auto-bump app version ──────────────────────────────────────────
       # Replaces the old manual /release flow (hand-editing package.json +
       # status.md, committing "chore(release): bump to vX.Y.Z"). Every deploy
