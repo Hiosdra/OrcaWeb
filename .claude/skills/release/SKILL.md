@@ -15,10 +15,25 @@ see "What's automatic now" below. This skill only covers the case where a
 human deliberately wants to jump to a *specific* version (typically a minor
 or major bump) rather than letting CI auto-increment the patch number.
 
+## Which kind of release is this?
+
+| You want to... | Do this |
+|---|---|
+| Ship whatever's on master right now | Nothing — merge as normal. deploy.yml auto-bumps the patch (`0.7.10` -> `0.7.11`) on its own. |
+| Mark a meaningful feature/release boundary (backwards-compatible) | **Minor bump**: increment MINOR, reset PATCH to `0` (e.g. `0.7.10` -> `0.8.0`). This skill. |
+| Mark a breaking change or a 1.0 milestone | **Major bump**: increment MAJOR, reset MINOR and PATCH to `0` (e.g. `0.7.10` -> `1.0.0`). This skill. |
+
+Standard semver reset rule: bumping a more-significant number always zeroes
+out everything less significant. Don't hand-pick an arbitrary PATCH for a
+minor/major release (e.g. `0.8.10` instead of `0.8.0`) — that just confuses
+the next auto-bump's starting point.
+
 ## Step 0 — determine the new version
 
 If the user passed a version as an argument (e.g. `/release 0.8.0`), use it.
-Otherwise ask: "What version? (current is X.Y.Z from package.json)"
+Otherwise ask: "What version? (current is X.Y.Z from package.json) — minor or
+major bump?" and compute it yourself per the reset rule above rather than
+asking the user to do arithmetic.
 
 Read the current version from `package.json` to confirm what you're bumping from.
 
@@ -50,7 +65,7 @@ Update any additional references you find (e.g. docs, changelogs).
 > deploy.yml's "Auto-bump app version" step on every deploy — neither needs
 > manual editing.
 
-## Step 4 — commit and push
+## Step 4 — commit and open a PR
 
 Commit just `package.json` and `package-lock.json` (plus anything else you
 updated in step 3) with a message like:
@@ -59,17 +74,24 @@ updated in step 3) with a message like:
 chore(release): bump to v0.8.0
 ```
 
-Push to master (or open a PR, per this repo's usual flow). Once it lands,
-deploy.yml's auto-bump step will see that `package.json`'s version already
-differs from the latest git tag and will respect it as-is — tagging and
-deploying `v0.8.0` — instead of incrementing the patch on top of it.
+`master` has a branch ruleset requiring every change to go through a pull
+request — a direct `git push origin master` will be rejected unless you're
+authenticated as a bypass-listed actor (repo admin, or the release deploy
+key). Open a PR and merge it rather than assuming a direct push will work.
+
+Once the merge commit lands, deploy.yml's auto-bump step will see that
+`package.json`'s version already differs from the latest git tag and will
+respect it as-is — tagging and deploying `v0.8.0` — instead of incrementing
+the patch on top of it.
 
 ## What's automatic now (no skill needed)
 
 - **App/pages patch releases**: every deploy (any push to master, or the
   chained redeploy after an engine rebuild) auto-bumps the patch version,
-  updates `mkdocs-docs/status.md`, commits, and tags — see deploy.yml's
-  "Auto-bump app version" step. Nothing to run manually for a routine patch.
+  updates `mkdocs-docs/status.md`, commits (via the `release_deploy_key`
+  deploy key, tagged `[skip ci]` so it doesn't retrigger itself), and tags —
+  see deploy.yml's "Auto-bump app version" step. Nothing to run manually for
+  a routine patch.
 - **Engine releases**: any master push touching `orca-wasm/**` (or
   `build-wasm.yml` itself) automatically triggers `build-wasm.yml`, which
   builds and publishes a new `wasm-v2.4.0-patchN` release, and deploy.yml
