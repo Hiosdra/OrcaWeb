@@ -1,4 +1,5 @@
 import type { OrcaModule, OrcaModuleFactory } from '../types'
+import { logWarn } from './log'
 
 const WASM_BASE = '/wasm'
 
@@ -37,7 +38,7 @@ export async function loadOrcaModule(): Promise<OrcaModule> {
     const module = await factory({
       wasmBinary,
       locateFile: (path: string) => `${WASM_BASE}/${path}`,
-      printErr: (msg: string) => console.warn('[OrcaWASM]', msg),
+      printErr: (msg: string) => logWarn('[OrcaWASM]', msg),
     })
 
     return module
