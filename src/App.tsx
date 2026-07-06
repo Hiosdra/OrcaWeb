@@ -912,6 +912,7 @@ function ConfigSummary({ config, fileCount }: { config: OrcaConfig; fileCount: n
     ['Layer height', `${config.layer_height ?? 0.2} mm`],
     ['Infill', `${config.sparse_infill_density ?? 15}% ${config.sparse_infill_pattern ?? 'grid'}`],
     ['Walls', String(config.wall_loops ?? 3)],
+    ['Wall generator', config.wall_generator ?? 'arachne'],
     ['Nozzle temp', `${config.nozzle_temperature ?? 220}°C`],
     ['Supports', config.enable_support ? (config.support_type ?? 'auto') : 'none'],
   ]
