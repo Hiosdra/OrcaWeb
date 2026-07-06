@@ -66,6 +66,18 @@ jobs:
             ninja-build python3 cmake pkg-config \
             m4 texinfo libssl-dev ccache
 
+      # Sanitizer flags force a ccache miss on the whole 293-target build
+      # (bigger objects, debug info) — free up runner disk headroom first.
+      # Previous run died silently near the end of the build (292/293) with
+      # "ninja: build stopped: interrupted by user" / exit 143, the classic
+      # signature of a GitHub-hosted runner running out of disk space.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL "$AGENT_TOOLSDIRECTORY" || true
+          sudo docker image prune -a -f || true
+          df -h /
+
       # Distinct cache key from build-wasm.yml's — sanitizer flags change the
       # compile command line, so ccache would miss on every object anyway;
       # keeping it separate avoids evicting the production build's cache.
@@ -157,9 +169,11 @@ jobs:
       - name: Build WASM module (UBSan instrumented)
         run: |
           source /opt/emsdk/emsdk_env.sh
+          df -h /
           emmake cmake --build orca-wasm/build-wasm --target slicer -j4
           echo "--- ccache stats ---"
           ccache -s || true
+          df -h /
 
       - name: Package WASM artifacts
         run: |
