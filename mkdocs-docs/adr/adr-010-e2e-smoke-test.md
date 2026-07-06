@@ -21,9 +21,13 @@ compile fine, pass the Node-level smoke test, and still ship broken.
 Add a Playwright E2E test (`e2e/slice.spec.ts`) that drives the real browser
 UI end-to-end against a real compiled engine:
 
-1. Load the app, upload a synthetic 12-triangle STL cube (`e2e/fixtures/cube-stl.ts`
-   — generated in memory, same no-vendored-model rationale as ADR-009's
-   icosphere generator).
+1. Load the app, upload the real **Voron Design Cube v7** STL
+   (`e2e/fixtures/voron-design-cube-v7.stl`, vendored, GPL-3.0 — see below and
+   `NOTICE.md`) — the exact model that historically triggered two production
+   crashes in the Arachne wall generator (`orca-wasm/patches/apply.py`
+   sections 8/8c–8f; also referenced in ADR-009's context). Using this real,
+   previously-crash-triggering mesh is a stronger regression guard for the UI
+   path than a trivial synthetic primitive would be.
 2. Navigate to the Slice tab and click "Slice All".
 3. Wait for the queue item to reach `Done` (cold engine load + a real slice,
    generous timeout) and assert the download button appears.
@@ -46,6 +50,29 @@ Runs against `npm run dev` (not `vite preview`) because the required
 COOP/COEP headers (`vite.config.ts`) are configured under `server`, not
 `preview`.
 
+### Why vendoring this file is safe (unlike ADR-009's synthetic mesh)
+
+ADR-009 deliberately avoided vendoring a third-party STL for
+`orca-wasm/scripts/smoke-test.mjs`, to "sidestep any question about
+redistributing someone else's model." For this E2E test we vendor the real
+Voron Design Cube v7 (`e2e/fixtures/voron-design-cube-v7.stl`) instead,
+because the actual blocker was provenance/attribution, not license
+incompatibility:
+
+- Voron Design's hardware repos (including `VoronDesign/Voron-2`, which hosts
+  this file) are licensed **GPL-3.0**.
+- This repository is **AGPL-3.0-or-later**. GPLv3 and AGPLv3 both contain a
+  clause (§13 in each) that the FSF added specifically so GPLv3-covered and
+  AGPLv3-covered works can be combined — they are not in conflict.
+- Attribution is recorded in `NOTICE.md` (source URL pinned to the commit the
+  file was fetched from, license, copyright), satisfying GPL-3.0's notice
+  requirement.
+
+`orca-wasm/scripts/smoke-test.mjs` itself is unchanged and still defaults to
+a synthetic mesh — this doesn't reopen or reverse ADR-009, it only settles
+that vendoring a compatible-licensed, properly-attributed fixture is
+different from vendoring an unknown/incompatible one.
+
 ## Consequences
 
 - **Positive:** Catches breakage in the worker/UI integration layer that the
@@ -59,3 +86,5 @@ COOP/COEP headers (`vite.config.ts`) are configured under `server`, not
   redundant).
 - **Negative:** Adds a Chromium download + a dev-server boot + one slice to
   every PR's CI — a few minutes, not the multi-hour cost of `build-wasm.yml`.
+- **Negative:** Adds a ~170 KB third-party binary (`voron-design-cube-v7.stl`)
+  to the repository, with an attribution obligation tracked in `NOTICE.md`.

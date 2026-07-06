@@ -220,11 +220,14 @@ the freshly built engine, not just a successful compile. See
 ### E2E UI smoke test
 
 `.github/workflows/e2e-smoke.yml` runs a Playwright test (`e2e/slice.spec.ts`)
-against the real UI on every PR: upload a synthetic STL, slice it through the
-actual `FileUpload` → worker → WASM path, and assert the result reaches
-`Done`. Downloads the latest *published* engine release rather than building
-one, since engine-source correctness is already gated by the WASM build
-smoke test above. See [ADR-010](adr/adr-010-e2e-smoke-test.md).
+against the real UI on every PR: upload the real Voron Design Cube v7 STL
+(`e2e/fixtures/voron-design-cube-v7.stl`, vendored under GPL-3.0 — see
+`NOTICE.md` — the same model that historically triggered two production
+crashes in the Arachne wall generator), slice it through the actual
+`FileUpload` → worker → WASM path, and assert the result reaches `Done`.
+Downloads the latest *published* engine release rather than building one,
+since engine-source correctness is already gated by the WASM build smoke
+test above. See [ADR-010](adr/adr-010-e2e-smoke-test.md).
 
 ## Coordinate systems
 

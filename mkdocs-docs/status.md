@@ -50,7 +50,7 @@ Ostatnia aktualizacja: **2026-07-07** · wersja silnika: **OrcaSlicer v2.4.0** (
 | Silnik sesyjny (`orc_session_create`/`orc_session_destroy`) | Stan silnika (config, bed, last error) przeniesiony z globalnych statyków C++ do uchwytu sesji — patrz [ADR-008](adr/adr-008-session-handle.md) |
 | Odzyskiwanie po awarii WASM | `onAbort` realnie zgłasza `WASM_ERROR` do głównego wątku; martwy Worker jest odrzucany i zastępowany świeżym przy kolejnej próbie |
 | Smoke test silnika w CI | `orca-wasm/scripts/smoke-test.mjs` — realny `orc_init`/`orc_slice(_multi)` po każdym buildzie, przed publikacją release'u — patrz [ADR-009](adr/adr-009-wasm-smoke-test.md) |
-| E2E smoke test UI w CI | Playwright (`e2e/slice.spec.ts`) — upload STL → slice → G-code przez prawdziwy silnik WASM, na każdym otwartym PR — patrz [ADR-010](adr/adr-010-e2e-smoke-test.md) |
+| E2E smoke test UI w CI | Playwright (`e2e/slice.spec.ts`) — upload prawdziwego modelu Voron Design Cube v7 → slice → G-code przez prawdziwy silnik WASM, na każdym otwartym PR — patrz [ADR-010](adr/adr-010-e2e-smoke-test.md) |
 
 ### Override approach (engine clean layer)
 
@@ -81,7 +81,7 @@ Ostatnia aktualizacja: **2026-07-07** · wersja silnika: **OrcaSlicer v2.4.0** (
 | Release WASM `wasm-v2.4.0` | ✅ `slicer.js` + `slicer.wasm` (~29 MB łącznie, z OCCT STEP) |
 | Deploy resilience | ✅ fallback na poprzedni `gh-pages` gdy release nie istnieje |
 | CI build na PRach (ścieżki orca-wasm/) | ✅ każdy PR dotykający silnika uruchamia ~12 min build |
-| E2E smoke test na PRach (e2e-smoke.yml) | ✅ każdy otwarty PR — pobiera opublikowany silnik WASM i slicuje testowy model przez prawdziwe UI (Playwright) |
+| E2E smoke test na PRach (e2e-smoke.yml) | ✅ każdy otwarty PR — pobiera opublikowany silnik WASM i slicuje Voron Design Cube v7 przez prawdziwe UI (Playwright) |
 | Auto-bump wersji aplikacji | ✅ każdy deploy sam podbija patch w `package.json`/`status.md` i taguje `vX.Y.Z` — bez ręcznej edycji (patrz `/release` tylko dla świadomego minor/major) |
 | Auto-rebuild silnika po zmianie `orca-wasm/` | ✅ push na `master` dotykający `orca-wasm/**` sam odpala `build-wasm.yml`; `deploy.yml` czeka na jego wynik (`workflow_run`) zamiast ścigać się ze starym silnikiem |
 | Strona promująca (landing) | ✅ `hiosdra.github.io/OrcaWeb/` |

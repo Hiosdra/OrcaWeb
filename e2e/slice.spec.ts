@@ -1,8 +1,19 @@
 import { test, expect } from '@playwright/test'
-import { mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { cubeStlBuffer } from './fixtures/cube-stl'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
+// Voron Design Cube v7 — a real-world calibration print, not a synthetic
+// primitive. Vendored under GPL-3.0 (see NOTICE.md); this is the exact
+// model that historically triggered two production crashes in the Arachne
+// wall generator (see orca-wasm/patches/apply.py sections 8/8c and
+// mkdocs-docs/adr/adr-009-wasm-smoke-test.md) — a stronger regression guard
+// for the UI path than a trivial synthetic mesh. See ADR-010 for why
+// vendoring it here (unlike orca-wasm/scripts/smoke-test.mjs's synthetic
+// icosphere) is safe: GPL-3.0 and this repo's AGPL-3.0-or-later are
+// FSF-designed to be combinable.
+const VORON_CUBE_STL = join(__dirname, 'fixtures', 'voron-design-cube-v7.stl')
 
 /**
  * Real-WASM-engine UI smoke test — see mkdocs-docs/adr/adr-010-e2e-smoke-test.md.
@@ -14,7 +25,7 @@ import { cubeStlBuffer } from './fixtures/cube-stl'
  * public/wasm/ — run `npm run setup` first (the CI workflow does this before
  * invoking Playwright).
  */
-test('uploads a model and slices it end-to-end through the UI', async ({ page }) => {
+test('uploads the Voron Cube and slices it end-to-end through the UI', async ({ page }) => {
   const consoleErrors: string[] = []
   page.on('console', (msg) => {
     if (msg.type() === 'error') consoleErrors.push(msg.text())
@@ -23,11 +34,7 @@ test('uploads a model and slices it end-to-end through the UI', async ({ page })
 
   await page.goto('/')
 
-  const stlDir = mkdtempSync(join(tmpdir(), 'orcaweb-e2e-'))
-  const stlPath = join(stlDir, 'smoke-cube.stl')
-  writeFileSync(stlPath, cubeStlBuffer())
-
-  await page.getByTestId('model-file-input').setInputFiles(stlPath)
+  await page.getByTestId('model-file-input').setInputFiles(VORON_CUBE_STL)
 
   await page.getByTestId('tab-slice').click()
   await page.getByTestId('slice-all-button').click()
