@@ -628,16 +628,36 @@ patch("src/libslic3r/Arachne/WallToolPaths.cpp", [
 #     intended fallbacks (or 0/false for the ones with none documented) —
 #     a normal, idiomatic fix that only changes behavior for previously-UB
 #     construction paths.
+#
+#     The four percent-of-nozzle-diameter fields (min_bead_width,
+#     min_feature_size, wall_transition_length, wall_transition_filter_
+#     deviation) were originally zeroed here — that's NOT what "no override
+#     present" means upstream. PrintConfig.cpp defines real, deliberately
+#     non-zero defaults for these (min_bead_width 85%, min_feature_size 25%,
+#     wall_transition_length 100%, wall_transition_filter_deviation 25%, all
+#     as a percentage of nozzle diameter; wall_transition_angle 10 degrees
+#     flat, not percent-based). Zero for wall_transition_length/angle in
+#     particular tells Arachne to allow a wall-count transition at every
+#     infinitesimal width change instead of upstream's intended ~1-nozzle-
+#     width/10-degree smoothing window — on simple geometry (no width
+#     variation) this is inert, but on a model with continuously-varying
+#     thin features (engraved text, tolerance-test slots — e.g. the Voron
+#     Design Cube) it makes the transition/beading graph blow up, turning a
+#     multi-second desktop slice (which always has these real defaults via
+#     its bundled profiles) into a multi-minute-or-worse one here. Every
+#     printer profile this app ships uses a 0.4mm nozzle (see
+#     src/data/orca-profiles.json), so hardcode each percent-based default
+#     as its absolute-mm equivalent for 0.4mm rather than 0.
 # =============================================================================
 patch("src/libslic3r/Arachne/WallToolPaths.hpp", [
     (
         r'float   min_bead_width;\n    float   min_feature_size;\n    float   min_length_factor;\n    float   wall_transition_length;\n    float   wall_transition_angle;\n    float   wall_transition_filter_deviation;\n    int     wall_distribution_count;\n    bool    is_top_or_bottom_layer;',
-        r'float   min_bead_width = 0.f;\n'
-        r'    float   min_feature_size = 0.f;\n'
+        r'float   min_bead_width = 0.34f;\n'
+        r'    float   min_feature_size = 0.1f;\n'
         r'    float   min_length_factor = 0.5f;\n'
-        r'    float   wall_transition_length = 0.f;\n'
-        r'    float   wall_transition_angle = 0.f;\n'
-        r'    float   wall_transition_filter_deviation = 0.f;\n'
+        r'    float   wall_transition_length = 0.4f;\n'
+        r'    float   wall_transition_angle = 10.f;\n'
+        r'    float   wall_transition_filter_deviation = 0.1f;\n'
         r'    int     wall_distribution_count = 1;\n'
         r'    bool    is_top_or_bottom_layer = false;',
         1,
@@ -645,7 +665,7 @@ patch("src/libslic3r/Arachne/WallToolPaths.hpp", [
 ])
 verify_contains(
     "src/libslic3r/Arachne/WallToolPaths.hpp",
-    "float   min_bead_width = 0.f;",
+    "float   min_bead_width = 0.34f;",
     "WallToolPathsParams default-init patch (8f) did not apply — the Arachne "
     "uninitialized-struct crash this fixes may have regressed (upstream "
     "OrcaSlicer may have reformatted this struct; update the regex above).",
