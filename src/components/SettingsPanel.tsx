@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import clsx from 'clsx'
-import type { OrcaConfig, InfillPattern, SeamPosition, SupportType, FuzzySkin } from '../types'
+import type { OrcaConfig, InfillPattern, SeamPosition, SupportType, FuzzySkin, WallGenerator } from '../types'
 import { PRESETS, PRINTER_PRESETS, FILAMENT_PRESETS, parseOrcaProfileJson } from '../lib/profiles'
 
 interface Props {
@@ -167,6 +167,17 @@ export function SettingsPanel({
             onChange={(v) => onChange({ wall_loops: v })}
           />
         </div>
+        <SelectField
+          label="Wall generator"
+          value={config.wall_generator ?? 'arachne'}
+          options={['arachne', 'classic'] as WallGenerator[]}
+          onChange={(v) => onChange({ wall_generator: v as WallGenerator })}
+          className="mt-3"
+        />
+        <p className="mt-1.5 text-xs text-slate-400 px-2">
+          Arachne gives better wall quality but can take much longer (even minutes) on models with lots
+          of small, thin features. Switch to Classic if a slice seems stuck.
+        </p>
       </Section>
 
       {/* Infill */}

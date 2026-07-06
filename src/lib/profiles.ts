@@ -85,6 +85,7 @@ const ORCA_FIELD_MAP: Record<string, { key: keyof OrcaConfig; type: 'num' | 'pct
   initial_layer_height:    { key: 'initial_layer_height',   type: 'num' },
   wall_loops:              { key: 'wall_loops',             type: 'num' },
   perimeters:              { key: 'wall_loops',             type: 'num' }, // alias
+  wall_generator:          { key: 'wall_generator',         type: 'str' },
   top_shell_layers:        { key: 'top_shell_layers',       type: 'num' },
   bottom_shell_layers:     { key: 'bottom_shell_layers',    type: 'num' },
   sparse_infill_density:   { key: 'sparse_infill_density',  type: 'pct' },

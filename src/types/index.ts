@@ -21,6 +21,7 @@ export interface OrcaConfig {
   top_shell_layers?: number
   bottom_shell_layers?: number
   wall_loops?: number
+  wall_generator?: WallGenerator
 
   // Process — infill
   sparse_infill_density?: number
@@ -65,6 +66,15 @@ export type InfillPattern =
   | 'lightning'
   | 'rectilinear'
   | 'crosshatch'
+
+// Arachne (variable-width walls) is OrcaSlicer's real default and gives
+// better wall quality, but its beading/transition algorithm can blow up in
+// runtime on models with lots of small, continuously-varying-width features
+// (e.g. calibration cubes with engraved text/tolerance slots) — sometimes
+// taking many minutes where Classic (constant-width, offset-based) finishes
+// in seconds. Exposed here so a slow/stuck slice has a user-facing escape
+// hatch without needing to touch the engine defaults.
+export type WallGenerator = 'arachne' | 'classic'
 
 export type SupportType = 'normal(auto)' | 'normal(manual)' | 'tree(auto)' | 'tree(manual)'
 
