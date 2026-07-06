@@ -1,0 +1,28 @@
+name: Extract Cache
+
+on:
+  workflow_dispatch:
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Restore dep cache
+        uses: actions/cache/restore@v4
+        with:
+          path: orca-wasm/deps-install
+          key: wasm-deps-Linux-orca-v2.4.0-occt-7.8.1-v16
+
+      - name: Verify restored files
+        run: |
+          ls -la orca-wasm/deps-install || echo "Not found"
+          ls -la orca-wasm/deps-install/lib || echo "No libs"
+
+      - name: Upload deps as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-deps-extracted
+          path: orca-wasm/deps-install/
+          retention-days: 1
