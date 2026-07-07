@@ -33,12 +33,18 @@ matching `scripts/download-wasm.mjs`'s style) that loads the just-built
 calls end-to-end:
 
 1. **default** — a representative config (Generic 0.4mm nozzle, PLA, 0.2mm
-   layers) slicing a synthetic torture-test mesh (a subdivided icosphere,
-   ~5120 triangles — deliberately generated in-memory rather than vendoring a
-   third-party STL like the Voron Cube, to sidestep any question about
-   redistributing someone else's model in this repo and to keep the script
-   runnable fully offline with zero repo bloat; `--fixture <path>` can point
-   at a real file for a closer repro of a specific historical crash).
+   layers), run against **two meshes**: a synthetic torture-test mesh (a
+   subdivided icosphere, ~5120 triangles — generated in-memory, no
+   redistribution question, runs fully offline) and the real Voron Design
+   Cube v7 (`e2e/fixtures/voron-design-cube-v7.stl`, vendored under GPL-3.0 —
+   see ADR-010 for why that's safe alongside this repo's AGPL-3.0-or-later).
+   The real mesh is not optional window-dressing: it's the exact model that
+   found both crashes in this ADR's own Context section, and later a
+   Boost.Log-amplified hang/trap that the synthetic mesh never triggered (see
+   the "disable Boost.Log core" fix in `orca-wasm/bridge/slicer.cpp`) —
+   synthetic-only coverage would have shipped that regression again.
+   `--fixture <path>` replaces both meshes with one specific file, for a
+   closer repro of a particular case.
 2. **fuzzy skin = all** — exercises the libnoise-backed FuzzySkin path (ADR
    context: `mkdocs-docs/architecture.md`'s "libnoise" section).
 3. **classic wall generator** — a regression control against the Arachne
@@ -49,6 +55,9 @@ calls end-to-end:
    assignment only; deliberately does **not** exercise a real multi-nozzle
    `nozzle_diameter` array, which remains a known, unverified crash risk — see
    `status.md`'s "Multi-ekstruder / multi-material" section).
+
+Scenarios 2–4 also run against both meshes, not just the synthetic one — every
+scenario × mesh combination is exercised (8 total by default).
 
 Each scenario asserts the return code is `0` and the resulting G-code is
 non-trivially sized and contains real `G1` extrusion moves — not just "didn't
@@ -78,4 +87,6 @@ hand-edited) and exposed as `npm run smoke-test` for ad-hoc use, e.g. after
   until the crash-class of regression (the one that has actually bitten this
   project twice) is reliably covered.
 - **Negative:** Adds Node + a few seconds of slicing to `build-wasm.yml`,
-  negligible next to the ~1–3 hour dependency build.
+  negligible next to the ~1–3 hour dependency build. Running every scenario
+  against both meshes roughly doubles this step's time — still seconds, not
+  a meaningful cost.
