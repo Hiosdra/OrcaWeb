@@ -53,6 +53,7 @@ export function FileUpload({ onFiles, loadedCount }: Props) {
         multiple
         className="hidden"
         onChange={handleChange}
+        data-testid="model-file-input"
       />
 
       {loadedCount > 0 ? (

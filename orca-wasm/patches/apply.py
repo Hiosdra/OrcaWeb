@@ -680,6 +680,60 @@ verify_contains(
 )
 
 # =============================================================================
+# 8g. Thread.cpp — stub thread naming on Emscripten instead of linking a
+#     real pthread_setname_np
+#     Thread.cpp's generic "posix" branch (the #else after the __APPLE__
+#     special-case) calls pthread_setname_np()/pthread_getname_np()
+#     unconditionally on any non-Windows/non-Apple platform, which includes
+#     Emscripten (it defines the usual posix macros). This build is
+#     single-threaded (see ADR-007 — no real pthreads), so these symbols
+#     don't exist; normal Release linking has so far gotten away with it
+#     because nothing reachable from an ordinary slice calls set_thread_name()
+#     — wasm-ld's --gc-sections silently drops the whole function, symbol and
+#     all, before it ever needs to resolve. That's fragile, not fixed: adding
+#     -fsanitize=undefined (for UBSan diagnostic builds — see
+#     .github/workflows/build-wasm-debug.yml) changes what the linker keeps
+#     live, and the same dead code becomes a real "undefined symbol:
+#     pthread_setname_np" link failure. Give Emscripten its own no-op branch
+#     (matching the existing __APPLE__ "not supported" pattern immediately
+#     above it) so the symbol is never referenced at all, regardless of what
+#     the linker decides to keep.
+# =============================================================================
+patch("src/libslic3r/Thread.cpp", [
+    (
+        r'#else\n\n// posix\nbool set_thread_name\(std::thread &thread, const char \*thread_name\)\n\{\n   \tpthread_setname_np\(thread\.native_handle\(\), thread_name\);',
+        r'#elif defined(__EMSCRIPTEN__)\n\n'
+        r'// Single-threaded WASM build (ADR-007) — no real pthread_setname_np.\n'
+        r'// Thread naming is a debugging aid only; no-op rather than link against\n'
+        r'// a symbol this build does not provide.\n'
+        r'bool set_thread_name(std::thread &thread, const char *thread_name)\n'
+        r'{\n'
+        r'\treturn false;\n'
+        r'}\n\n'
+        r'bool set_thread_name(boost::thread &thread, const char *thread_name)\n'
+        r'{\n'
+        r'\treturn false;\n'
+        r'}\n\n'
+        r'bool set_current_thread_name(const char *thread_name)\n'
+        r'{\n'
+        r'\treturn false;\n'
+        r'}\n\n'
+        r'std::optional<std::string> get_current_thread_name()\n'
+        r'{\n'
+        r'\treturn std::nullopt;\n'
+        r'}\n\n'
+        r'#else\n\n// posix\nbool set_thread_name(std::thread &thread, const char *thread_name)\n{\n   \tpthread_setname_np(thread.native_handle(), thread_name);',
+        1,
+    ),
+])
+verify_contains(
+    "src/libslic3r/Thread.cpp",
+    "defined(__EMSCRIPTEN__)",
+    "Thread.cpp Emscripten thread-naming stub (8g) did not apply — upstream "
+    "OrcaSlicer may have reformatted this file; update the regex above.",
+)
+
+# =============================================================================
 # 9. Root CMakeLists.txt — append OrcaWeb bridge + WASM link target
 # =============================================================================
 BRIDGE_INJECTION = """\

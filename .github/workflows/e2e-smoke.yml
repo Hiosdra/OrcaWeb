@@ -1,0 +1,51 @@
+name: E2E Smoke Test
+
+# Runs on every PR (no path filter, unlike build-wasm.yml) — this exercises the
+# UI/worker/WASM-loading path itself (upload -> convert -> slice -> G-code),
+# which a UI-only change can break even without touching orca-wasm/. It always
+# tests against the latest published engine release (via `npm run setup`, the
+# same script local dev uses), not a freshly built one — build-wasm.yml's own
+# Node-level smoke test (orca-wasm/scripts/smoke-test.mjs) already gates
+# engine-source changes before they're ever published.
+on:
+  pull_request:
+
+concurrency:
+  group: e2e-smoke-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Downloads slicer.js/slicer.wasm (~9 MB) from the latest published
+      # GitHub Release — a real compiled engine, not a mock.
+      - name: Download WASM engine
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run setup
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E smoke test
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
