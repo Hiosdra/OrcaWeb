@@ -26,30 +26,51 @@ of problem:
 ### Layer 1 — CMake Guards (`SLIC3R_WASM` option)
 
 `apply.py` injects a `SLIC3R_WASM OFF` CMake option into `orca/CMakeLists.txt`
-immediately after `project()`. Every heavy GUI dependency (wxWidgets, OpenGL,
-OCCT, OpenCV, Draco, noise, fontconfig, FreeType) is wrapped in
-`if(NOT SLIC3R_WASM)` guards or generator expressions. The `GUI/`, `slic3r/`,
-`OrcaSlicer/`, and `bambu_studio/` subdirectories are excluded entirely.
+immediately after `project()`. OpenCV, Draco, and OpenVDB link targets are
+wrapped in `if(NOT SLIC3R_WASM)` guards or generator expressions.
 
-Compile definitions `SLIC3R_WASM`, `SLIC3R_NO_OCCT`, `SLIC3R_NO_OPENVDB`,
-`SLIC3R_NO_OPENCV` are injected as `PUBLIC` into `libslic3r`'s
-`target_compile_definitions`, making them available to all consumers.
+wxWidgets, OpenGL, and FreeType/fontconfig are excluded a different way: they
+only get `find_package`d inside OrcaSlicer's own `if(SLIC3R_GUI)` block, and
+`orca-wasm/CMakeLists.txt` already forces `SLIC3R_GUI OFF` for WASM builds —
+so `apply.py` doesn't need (and, since a 2026-07-07 audit, no longer carries)
+its own guards for those. Likewise the `GUI/`, `slic3r/`, `OrcaSlicer/`, and
+`bambu_studio/` subdirectories are excluded by the same `SLIC3R_GUI OFF`
+switch, not by a WASM-specific guard on `add_subdirectory`. See
+[the patch audit](../orca-patch-audit.md) for the full reasoning behind
+removing those now-redundant guards.
+
+Compile definitions `SLIC3R_WASM`, `SLIC3R_NO_OPENVDB`, `SLIC3R_NO_OPENCV` are
+injected as `PUBLIC` into `libslic3r`'s `target_compile_definitions`, making
+them available to all consumers. `SLIC3R_NO_OCCT` is deliberately *not*
+injected — OCCT is compiled into the WASM engine (see Layer 2 below), so the
+real OCCT-dependent code paths are used as-is.
 
 ### Layer 2 — C++ Override Stubs (`orca-wasm/overrides/`)
 
-Source files that `#include` unavailable libraries (OCCT, OpenVDB, OpenCV,
-FreeType) are excluded from the build and replaced with minimal stubs:
+Source files that `#include` unavailable libraries (OpenVDB, OpenCV, Draco) are
+excluded from the build and replaced with minimal stubs:
 
 | Original | Replaced by stub because |
 |----------|--------------------------|
-| `Format/STEP.cpp` + `.hpp` | OCCT not available |
 | `Format/DRC.cpp` | Draco not available |
-| `Format/svg.cpp` | Depends on OCCT |
+| `Format/svg.cpp` | Depends on OCCT (kept stubbed even though OCCT itself is now compiled in — see note below) |
 | `OpenVDBUtils.cpp` + `.hpp` | OpenVDB not available |
 | `ObjColorUtils.cpp` + `.hpp` | OpenCV not available |
 | `SLA/Hollowing.cpp` | Depends on OpenVDB |
 | `Shape/TextShape.cpp` | Depends on FreeType + OCCT |
-| `Feature/FuzzySkin/FuzzySkin.cpp` | libnoise + `thread_local` unavailable |
+
+`Format/STEP.cpp` + `.hpp` are **not** in this table — OCCT is compiled into
+the WASM engine (see the "Build WASM deps — OCCT" step in
+`.github/workflows/build-wasm.yml`), so the real STEP import/export code
+compiles and runs as-is, unstubbed. `svg.cpp` depends only on OCCT + the
+bundled `nanosvg` header, so it may also be restorable now — flagged as an
+open question in [the patch audit](../orca-patch-audit.md) rather than acted
+on yet, since nothing has verified it compiles/works unstubbed.
+
+`Feature/FuzzySkin/FuzzySkin.cpp` is **not** a stub either, despite libnoise +
+`thread_local` being the original blocker — libnoise is now WASM-compiled
+(see Layer 1) and only the `thread_local` usage is patched in-place (see
+"In-Place C++ Compatibility Fixes" below).
 
 Header overrides (`.hpp`) are **physically copied** into the `orca/` source tree
 by `apply.py`. This is necessary because the C++ compiler searches the file's
@@ -84,12 +105,22 @@ suitable upstream PRs):
 
 | File | Fix |
 |------|-----|
+| `CMakeLists.txt` (libslic3r) | `TKXDESTEP TKSTEP TKSTEP209 TKSTEPAttr TKSTEPBase` → `TKDESTEP` (OCCT 7.8 consolidated these STEP toolkits; the older names fail to link against our OCCT 7.8.1) |
 | `GCode.hpp` | `size_t` narrowing from `INT64_MAX` → `static_cast<size_t>(-1)` (32-bit WASM) |
-| `Model.cpp` | Guard `read_from_step()` body with `#ifndef SLIC3R_NO_OCCT` to avoid duplicate symbol |
 | `AABBTreeLines.hpp` | Explicit template cast (`decltype(nearest_point)(origin.template cast<…>())`) for Eigen deduction |
+| `Feature/FuzzySkin/FuzzySkin.cpp` | `thread_local` → `static` (single-threaded WASM build) |
 | `Platform.cpp` | Guard unknown-platform `static_assert` with `#ifndef SLIC3R_WASM` |
 | `GCode/Thumbnails.cpp` | Replace `JCS_EXT_RGBA` (libjpeg-turbo extension) with RGBA→RGB conversion for standard IJG libjpeg |
 | `utils.cpp` | `synchronous_sink` → `unlocked_sink`; remove thread-ID log expression (Boost.Log ST mode) |
+| `Thread.cpp` | Give Emscripten its own no-op `set_thread_name()` branch instead of calling `pthread_setname_np()`, which this single-threaded build doesn't provide |
+| `Arachne/SkeletalTrapezoidation.cpp`, `Arachne/WallToolPaths.cpp`, `Arachne/WallToolPaths.hpp` | Five guards against UBSan-confirmed out-of-bounds reads/writes and integer overflow in degenerate-geometry cases (empty shapes, junction-less lines, uninitialized params) — reproducible on real meshes (Voron Design Cube, Stanford Bunny), not theoretical |
+
+Removed patches are documented inline in `apply.py` where they were deleted
+(search for `NOTE:`) rather than here, to avoid this table drifting further
+out of sync — e.g. a former `Model.cpp` guard around `read_from_step()` was
+removed once OCCT started compiling in cleanly. See
+[the patch audit](../orca-patch-audit.md) for a full audit of which current
+patches are still load-bearing.
 
 ## Adding a New Patch
 
