@@ -77,3 +77,4 @@ Use the `/release` skill to cut a new app version. It handles:
 - [ ] `mkdocs-docs/` updated if architecture or a major feature changed
 - [ ] Types pass (`npm run typecheck` or `tsc --noEmit`)
 - [ ] No console errors in the browser on the happy path
+- [ ] If you touched `FileUpload`/`App.tsx`/worker/WASM-loading code, run `npm run test:e2e` locally (needs `npm run setup` + `npx playwright install chromium` first) — this also runs on every PR via `.github/workflows/e2e-smoke.yml`

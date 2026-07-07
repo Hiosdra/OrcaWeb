@@ -50,6 +50,7 @@ nav:
   - Profiles: profiles.md
   - Building WASM: wasm-build.md
   - OrcaSlicer Patch Audit: orca-patch-audit.md
+  - 'Benchmark: G-code Compression': gcode-compression-benchmark.md
   - Architecture Decisions:
     - Overview: adr/index.md
     - 'ADR-001: Client-Side WASM': adr/adr-001-client-side-wasm.md

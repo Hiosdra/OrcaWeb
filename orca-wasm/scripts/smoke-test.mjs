@@ -16,13 +16,21 @@
  * Usage:
  *   node orca-wasm/scripts/smoke-test.mjs [--wasm-dir public/wasm] [--fixture path/to.stl]
  *
- * Without --fixture, a synthetic torture-test mesh (a subdivided
- * icosphere, ~1280 triangles) is generated in memory. Deliberately not
- * vendoring a third-party STL (e.g. Voron Design's cube) here — that
- * sidesteps any question about redistributing someone else's model inside
- * this repo, keeps the script runnable fully offline, and adds zero repo
- * bloat. Pass --fixture with a real STL for a closer repro of a specific
- * historical crash (that STL is never committed by this script either).
+ * Without --fixture, every scenario runs against TWO meshes:
+ *   1. A synthetic torture-test mesh (a subdivided icosphere, ~5120
+ *      triangles), generated in memory — no redistribution question, runs
+ *      fully offline, adds zero repo bloat.
+ *   2. The real Voron Design Cube v7 (e2e/fixtures/voron-design-cube-v7.stl,
+ *      vendored under GPL-3.0 — see NOTICE.md and ADR-010). This is the
+ *      exact real-world mesh that has repeatedly found bugs a synthetic
+ *      primitive never would (the Arachne wall-generator crash chain in
+ *      apply.py's patches 8/8c/8d/8e/8f, and the Boost.Log default-sink
+ *      hang/trap — see the "disable Boost.Log core" fix in
+ *      orca-wasm/bridge/slicer.cpp). Skipped with a warning if the fixture
+ *      file isn't present (e.g. running this script outside the repo).
+ * Pass --fixture to replace both of the above with a single specific STL,
+ * for a closer repro of one particular case (that STL is never committed
+ * by this script either).
  */
 
 import { readFileSync, existsSync } from 'node:fs'
@@ -303,6 +311,23 @@ const BASE_CONFIG = {
   bed_temperature: 55,
 }
 
+// ── test meshes ──────────────────────────────────────────────────────────────
+// Repo root — this script lives in orca-wasm/scripts/.
+const VORON_CUBE_PATH = resolve(import.meta.dirname, '../../e2e/fixtures/voron-design-cube-v7.stl')
+
+function collectMeshes(fixture) {
+  if (fixture) {
+    return [{ label: fixture, bytes: readFileSync(fixture) }]
+  }
+  const meshes = [{ label: 'synthetic icosphere (~5120 tris)', bytes: generateTortureStl() }]
+  if (existsSync(VORON_CUBE_PATH)) {
+    meshes.push({ label: 'Voron Design Cube v7 (real-world)', bytes: readFileSync(VORON_CUBE_PATH) })
+  } else {
+    console.warn(`[smoke-test] WARN: ${VORON_CUBE_PATH} not found — skipping the real-world mesh`)
+  }
+  return meshes
+}
+
 // ── main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -311,8 +336,10 @@ async function main() {
   const module = await loadModule(wasmDir)
   console.log('[smoke-test] engine loaded')
 
-  const stlBytes = fixture ? readFileSync(fixture) : generateTortureStl()
-  console.log(`[smoke-test] test mesh: ${fixture ?? '<synthetic icosphere, ~5120 tris>'} (${stlBytes.length} bytes)`)
+  const meshes = collectMeshes(fixture)
+  for (const mesh of meshes) {
+    console.log(`[smoke-test] mesh: ${mesh.label} (${mesh.bytes.length} bytes)`)
+  }
 
   const session = module._orc_session_create()
   if (!session) throw new Error('orc_session_create failed (allocation failure)')
@@ -333,41 +360,45 @@ async function main() {
   ]
 
   let failures = 0
-  for (const scenario of scenarios) {
-    process.stdout.write(`[smoke-test] ${scenario.name} ... `)
+  for (const mesh of meshes) {
+    for (const scenario of scenarios) {
+      const label = `[${mesh.label}] ${scenario.name}`
+      process.stdout.write(`[smoke-test] ${label} ... `)
+      try {
+        initSession(module, session, JSON.stringify(scenario.config))
+        const gcode = sliceOnce(module, session, mesh.bytes)
+        assertSaneGcode(gcode, label)
+        assertRestsOnBed(gcode, label, scenario.config.initial_layer_height)
+        console.log(`PASS (${gcode.length} bytes)`)
+      } catch (err) {
+        failures++
+        console.log('FAIL')
+        console.error(`  ${err.message}`)
+      }
+    }
+
+    // Multi-object plate with a per-object "extruder" override (same value on
+    // both objects — a real physical-multi-nozzle config is NOT exercised
+    // here; nozzle_diameter stays length-1, so this never enters the
+    // support_different_extruders() code path). This specifically probes the
+    // orc_slice_multi extruder_ids plumbing added alongside the session-handle
+    // refactor, not multi-nozzle machine support (see isMultiExtruderProfile()
+    // in src/lib/profiles.ts and mkdocs-docs/adr/adr-008-session-handle.md for
+    // why real multi-nozzle configs remain gated off pending a debug-build
+    // root-cause session this script cannot perform).
+    const plateLabel = `[${mesh.label}] plate: 2 objects, per-object extruder override (single nozzle)`
+    process.stdout.write(`[smoke-test] ${plateLabel} ... `)
     try {
-      initSession(module, session, JSON.stringify(scenario.config))
-      const gcode = sliceOnce(module, session, stlBytes)
-      assertSaneGcode(gcode, scenario.name)
-      assertRestsOnBed(gcode, scenario.name, scenario.config.initial_layer_height)
+      initSession(module, session, JSON.stringify(BASE_CONFIG))
+      const gcode = sliceMultiOnce(module, session, [mesh.bytes, mesh.bytes], Int32Array.from([1, 1]))
+      assertSaneGcode(gcode, plateLabel)
+      assertRestsOnBed(gcode, plateLabel, BASE_CONFIG.initial_layer_height)
       console.log(`PASS (${gcode.length} bytes)`)
     } catch (err) {
       failures++
       console.log('FAIL')
       console.error(`  ${err.message}`)
     }
-  }
-
-  // Multi-object plate with a per-object "extruder" override (same value on
-  // both objects — a real physical-multi-nozzle config is NOT exercised
-  // here; nozzle_diameter stays length-1, so this never enters the
-  // support_different_extruders() code path). This specifically probes the
-  // orc_slice_multi extruder_ids plumbing added alongside the session-handle
-  // refactor, not multi-nozzle machine support (see isMultiExtruderProfile()
-  // in src/lib/profiles.ts and mkdocs-docs/adr/adr-008-session-handle.md for
-  // why real multi-nozzle configs remain gated off pending a debug-build
-  // root-cause session this script cannot perform).
-  process.stdout.write('[smoke-test] plate: 2 objects, per-object extruder override (single nozzle) ... ')
-  try {
-    initSession(module, session, JSON.stringify(BASE_CONFIG))
-    const gcode = sliceMultiOnce(module, session, [stlBytes, stlBytes], Int32Array.from([1, 1]))
-    assertSaneGcode(gcode, 'plate/extruder-ids')
-    assertRestsOnBed(gcode, 'plate/extruder-ids', BASE_CONFIG.initial_layer_height)
-    console.log(`PASS (${gcode.length} bytes)`)
-  } catch (err) {
-    failures++
-    console.log('FAIL')
-    console.error(`  ${err.message}`)
   }
 
   module._orc_session_destroy(session)
