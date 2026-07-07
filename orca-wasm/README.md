@@ -117,6 +117,8 @@ See the [Architecture docs](https://hiosdra.github.io/OrcaWeb/docs/architecture/
 `.github/workflows/build-wasm.yml` — triggered by:
 - **Manual dispatch:** Actions → Build WASM → Run workflow (specify OrcaSlicer tag)
 - **Tag push:** `git tag wasm-v2.4.0-ow1 && git push --tags`
+- **Push to master** touching `orca-wasm/**` or the workflow itself — auto-publishes the next patch release
+- **Pull requests** touching the same paths — validation build only, nothing is published
 
 Steps:
 1. Installs Emscripten 3.1.74
@@ -128,7 +130,9 @@ Steps:
    `wasm-$ORCA_VERSION` for the first build of a given OrcaSlicer version,
    `wasm-$ORCA_VERSION-patchN` for every later fix to `orca-wasm/` targeting
    the same OrcaSlicer version — a rebuild never overwrites a previous
-   release's assets.
+   release's assets. The release description carries an auto-generated
+   changelog: the commits touching `orca-wasm/**` or the build workflow
+   since the previous `wasm-*` release.
 
 The main deploy workflow (`.github/workflows/deploy.yml`) resolves the
 highest-numbered release for the pinned OrcaSlicer version at deploy time,

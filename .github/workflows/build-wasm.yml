@@ -63,6 +63,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Full history so "Upload to GitHub Release" below can compute a
+          # changelog (git log between the previous wasm-* release tag and
+          # HEAD). Negligible next to a 1-3 h build.
+          fetch-depth: 0
 
       # ── Node (for the post-build smoke test) ─────────────────────────
       - uses: actions/setup-node@v6
@@ -607,6 +612,54 @@ jobs:
           else
             NEXT_PATCH=0
           fi
+
+          # ── Release notes with a changelog since the previous release ──
+          # The previous release is the newest existing wasm-v* release
+          # overall, not just within $BASE_TAG's family: the first build of
+          # a new upstream version should still describe what changed since
+          # the last published engine. `gh release list` sorts newest-first.
+          # Matched as "wasm-v" (not just "wasm-") to exclude sibling release
+          # families like wasm-poc-* (see build-wasm-threads-poc.yml) that
+          # would otherwise be picked up as a bogus "previous engine release".
+          PREV_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName \
+            --jq '[.[] | .tagName | select(startswith("wasm-v"))] | first // empty')
+          # Real newlines via a notes file — the previous inline
+          # --notes "...\n\n..." passed the backslash-n sequences literally,
+          # so published notes showed a verbatim "\n\n" instead of a blank line.
+          cat > release-notes.md <<EOF
+          Pre-built WASM artifacts for OrcaSlicer $ORCA_VERSION.
+
+          Used internally by the deploy workflow. Immutable — a fix to orca-wasm/ publishes a new *-patchN release rather than overwriting this one.
+          EOF
+          if [ -n "$PREV_TAG" ]; then
+            # Fetch the tag explicitly rather than trusting checkout to have
+            # brought it down — deploy.yml got burned once by assuming
+            # fetch-depth: 0 implies tags are present (see its ls-remote
+            # comment). If the fetch fails anyway, skip the section rather
+            # than mislabel the release as a no-change rebuild.
+            if git fetch --quiet origin "refs/tags/${PREV_TAG}:refs/tags/${PREV_TAG}"; then
+              # Path filter matches this workflow's own push triggers, so the
+              # list shows engine/pipeline changes only — no UI PRs, no
+              # auto-bump commits. Master is squash-merged, so subjects are PR
+              # titles whose (#NN) references GitHub auto-links in the body.
+              CHANGELOG=$(git log --format='- %s' "${PREV_TAG}..HEAD" -- orca-wasm/ .github/workflows/build-wasm.yml)
+              {
+                echo ""
+                echo "## Changes since ${PREV_TAG}"
+                echo ""
+                if [ -n "$CHANGELOG" ]; then
+                  echo "$CHANGELOG"
+                else
+                  echo "No engine changes since ${PREV_TAG} (rebuild)."
+                fi
+              } >> release-notes.md
+            else
+              echo "::warning::Could not fetch tag ${PREV_TAG} — publishing without a changelog section"
+            fi
+          fi
+          echo "── release-notes.md ──"
+          cat release-notes.md
+
           # Deleting a release does not delete its underlying git tag, and
           # GitHub refuses to reuse a tag_name that was ever used by an
           # immutable release — `gh release create` fails with "tag_name was
@@ -630,7 +683,7 @@ jobs:
             # atomically as part of creation, before that immutability applies.
             if OUTPUT=$(gh release create "$TAG" wasm-artifacts/* \
                 --title "WASM build for OrcaSlicer $ORCA_VERSION ($TAG)" \
-                --notes "Pre-built WASM artifacts for OrcaSlicer $ORCA_VERSION.\n\nUsed internally by the deploy workflow. Immutable — a fix to orca-wasm/ publishes a new *-patchN release rather than overwriting this one." \
+                --notes-file release-notes.md \
                 --repo "$GITHUB_REPOSITORY" 2>&1); then
               echo "$OUTPUT"
               echo "Published: $TAG"
