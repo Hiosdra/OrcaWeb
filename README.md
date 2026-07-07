@@ -92,4 +92,5 @@ See [`orca-wasm/README.md`](orca-wasm/README.md) for the full build guide.
 ## Licence
 
 OrcaSlicer source is © 2022 SoftFever and contributors, AGPL-3.0.  
-OrcaWeb UI, bridge, and build infrastructure are MIT.
+OrcaWeb UI, bridge, and build infrastructure are AGPL-3.0-or-later
+(see [`LICENSE`](LICENSE) and [`NOTICE.md`](NOTICE.md)).
