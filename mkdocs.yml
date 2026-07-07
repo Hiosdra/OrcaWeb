@@ -49,6 +49,7 @@ nav:
   - API Reference: api-reference.md
   - Profiles: profiles.md
   - Building WASM: wasm-build.md
+  - 'Benchmark: G-code Compression': gcode-compression-benchmark.md
   - Architecture Decisions:
     - Overview: adr/index.md
     - 'ADR-001: Client-Side WASM': adr/adr-001-client-side-wasm.md

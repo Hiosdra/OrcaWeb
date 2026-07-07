@@ -8,6 +8,7 @@ public/wasm/slicer.data
 public/wasm/slicer.cjs
 public/wasm/.wasm-release-tag
 wasm-artifacts/
+corpus/
 scripts/repro-oom.mjs
 scripts/simple_cube_30mm.stl
 scripts/repro-real-stl.mjs

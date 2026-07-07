@@ -11,6 +11,8 @@
     "setup": "node scripts/download-wasm.mjs",
     "smoke-test": "node orca-wasm/scripts/smoke-test.mjs",
     "test:e2e": "playwright test",
+    "generate-corpus": "node scripts/generate-corpus.mjs",
+    "benchmark-gcode": "node scripts/benchmark-gcode-compression.mjs",
     "generate-pwa-assets": "pwa-assets-generator --config pwa-assets.config.ts"
   },
   "dependencies": {
