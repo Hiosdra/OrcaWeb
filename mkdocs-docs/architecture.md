@@ -176,6 +176,10 @@ These replace OrcaSlicer `.cpp` (and some `.hpp`) files whose implementation dep
 
     **IGES is not supported** — OrcaSlicer's STEP reader (`STEPCAFControl_Reader`) does not read IGES, so `.iges`/`.igs` are not accepted by the UI.
 
+### Boost.Log — disabled at runtime
+
+The logging core is disabled outright (`boost::log::core::get()->set_logging_enabled(false)`) by a static initializer in `orca-wasm/bridge/slicer.cpp`. No sink is ever registered in this headless build (the file sink in `utils.cpp` requires `set_logging_file()`, which only the desktop CLI calls), so any record passing the default `warning` filter went to Boost.Log's *default* sink — which, under this single-threaded (`BOOST_LOG_NO_THREADS`) Emscripten build, non-deterministically traps with "memory access out of bounds" in `core::push_record_move()` and is extremely slow. This bit twice: the `nozzle_info.json` incident (a single `BOOST_LOG_TRIVIAL(error)` trapped every slice), and the Voron Design Cube hang — Arachne's per-edge warning storm during Voronoi-diagram repair either trapped mid-slice or spent most of the slice's CPU formatting log records nobody could see, turning a multi-second slice into a multi-minute-plus one.
+
 ### libnoise
 
 libnoise (Perlin / Billow / RidgedMulti / Voronoi noise) **is** compiled into the WASM engine and linked normally. `Feature/FuzzySkin/FuzzySkin.cpp` is not stubbed — it is patched in-place by `apply.py`: `thread_local` storage (unsupported by Emscripten in single-threaded mode) is rewritten to `static`, and the seed-fallback expression `std::hash<std::thread::id>()(std::this_thread::get_id())` is replaced with `rd()` (the `std::random_device` already in scope). Fuzzy skin effect is therefore **active** in the engine when `fuzzy_skin ≠ none`.

@@ -52,9 +52,27 @@
 #include "libslic3r/Exception.hpp"
 
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/log/core.hpp>
 
 // nlohmann/json — available as a bundled dep inside OrcaSlicer
 #include <nlohmann/json.hpp>
+
+// Boost.Log is unusable in this build: no sink is ever registered (utils.cpp's
+// file sink needs set_logging_file(), which only the desktop CLI calls), so
+// every record that passes the severity filter — left at `warning` by
+// utils.cpp's RunOnInit — goes to Boost.Log's *default* sink. Under this
+// single-threaded (BOOST_LOG_NO_THREADS) Emscripten build that path is both
+// broken and expensive: it non-deterministically traps with "memory access
+// out of bounds" inside core::push_record_move() (first seen as the
+// nozzle_info.json incident — see ensure_nozzle_info_json() below — and again
+// with the Voron Design Cube, where Arachne's per-edge warning storm during
+// Voronoi-diagram repair either traps or burns most of the slice's CPU in
+// record formatting, turning a multi-second slice into a multi-minute one).
+// The records are unobservable either way, so disable the logging core
+// outright instead of dodging individual call sites.
+static struct DisableBoostLogOnInit {
+    DisableBoostLogOnInit() { boost::log::core::get()->set_logging_enabled(false); }
+} g_disable_boost_log;
 
 // ── module state ─────────────────────────────────────────────────────────────
 // Read-only template of OrcaSlicer's built-in defaults — constructed once,
