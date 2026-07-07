@@ -26,13 +26,13 @@ Plain ASCII G-code is extremely redundant (repeated `G1 X.. Y.. E..` tokens, mon
 | F1 | ASCII G-code | **Baseline.** Output of the OrcaWeb engine as-is |
 | F2 | ASCII G-code, comments stripped | Slicer comments are large (`; feature`, config block); strip everything except the header/config needed by the firmware or ship metadata out-of-band |
 | F3 | [MeatPack](https://github.com/scottmudge/OctoPrint-MeatPack) | 4-bit packing of the 15 most common G-code characters; used by PrusaLink/OctoPrint; streams trivially |
-| F4 | [Prusa Binary G-code](https://github.com/prusa3d/libbgcode) (`.bgcode`) | Block-structured binary container. Per-block compression: `none` / `deflate` / `heatshrink 11,4` / `heatshrink 12,4`; G-code blocks additionally MeatPack-encoded. Test the default profile **and** a variant with internal compression disabled (F4ᵘ) to allow an external compressor to work on raw blocks |
+| F4 | [Prusa Binary G-code](https://github.com/prusa3d/libbgcode) (`.bgcode`) | Block-structured binary container. Per-block compression: `none` / `deflate` / `heatshrink 11,4` / `heatshrink 12,4`; G-code blocks additionally MeatPack-encoded. Test the default profile **and** a variant with internal compression disabled (F4-raw) to allow an external compressor to work on raw blocks |
 
 ### General-purpose compressors (applied on top of F1–F4)
 
 | # | Compressor | Levels to test | Browser-side encoder | Pi-side decoder |
 |---|-----------|----------------|----------------------|-----------------|
-| C1 | gzip (deflate) | 1, 6, 9 | **native** `CompressionStream('gzip')` | zlib (everywhere) |
+| C1 | gzip (deflate) | 1, 6, 9 | **native** `CompressionStream('gzip')` for the default level (no level parameter in the API, ~6); levels 1/9 via WASM/JS ([fflate](https://github.com/101arrowz/fflate) or pako) and offline | zlib (everywhere) |
 | C2 | Brotli | 5, 9, 11 | WASM ([brotli-wasm](https://github.com/httptoolkit/brotli-wasm)) | `brotli` package |
 | C3 | Zstandard | 3, 12, 19, 22 (`--ultra`) | WASM ([fzstd/zstd-wasm](https://github.com/OneIdentity/zstd-js) or similar) | `zstd` (apt) |
 | C4 | Zstandard + trained dictionary | 19 + 64 KB dict | WASM, dict shipped with the app | `zstd -D` |
@@ -48,7 +48,7 @@ The full cross-product is 4 formats × ~15 compressor configs. Prune it:
 
 - **F4 (bgcode with internal heatshrink/deflate) × C1–C5** — expect near-zero gains (already-compressed data); run one config (zstd-19) just to confirm and then drop.
 - MeatPack (F3) and bgcode (F4) exist mainly so firmware/MCU can decode them cheaply. Our decoder is a Raspberry Pi running Linux, so they only stay in the race if they *stack* well with a general compressor (F3×C2, F3×C3).
-- Main contenders expected: **F1/F2 × C2 (brotli-11), C3 (zstd-19/22), C5 (xz-9e)** vs **F4 default** vs **F4ᵘ × C3/C5**.
+- Main contenders expected: **F1/F2 × C2 (brotli-11), C3 (zstd-19/22), C5 (xz-9e)** vs **F4 default** vs **F4-raw × C3/C5**.
 
 ### Domain-specific preprocessing (phase 2, exploratory)
 
@@ -81,7 +81,8 @@ Each sliced in **two flavors**: Marlin and Klipper (different verbosity), giving
 
 ## Methodology
 
-- **Phase 1 — offline size benchmark.** Node script `scripts/benchmark-gcode-compression.mjs`: takes the corpus directory, runs every (format × compressor × level) cell via CLI tools (versions pinned in output), emits a markdown results table. Sizes are deterministic — one run each.
+- **Phase 0 — corpus generation.** Node script `scripts/generate-corpus.mjs`: reads the committed manifest (model source URL + SHA-256, profile, settings overrides, engine WASM version), downloads the models, and slices them headlessly with the pinned OrcaWeb WASM engine into a local `corpus/` directory (gitignored). `.bgcode` variants are produced from the same G-code with a pinned `libbgcode` build. This makes the corpus fully reproducible from a clean clone without committing tens of MB of G-code.
+- **Phase 1 — offline size benchmark.** Node script `scripts/benchmark-gcode-compression.mjs`: takes the `corpus/` directory produced by phase 0, runs every (format × compressor × level) cell via CLI tools (versions pinned in output), emits a markdown results table. Sizes are deterministic — one run each.
 - **Phase 2 — browser timing.** Minimal harness page (dev-only route or standalone HTML in `scripts/`) that loads each corpus file, compresses in a Worker with the deployable codecs, reports median of 5 runs.
 - **Phase 3 — Pi timing.** Shell script run over SSH on both Pi models; median of 5 runs, `time -v` for peak RSS.
 - **Phase 4 — report + decision.** Fill the tables below, write an ADR with the chosen wire format.
@@ -92,7 +93,7 @@ Environment (browser version, Node version, CPU, Pi model/OS, tool versions) is 
 
 To be confirmed or refuted (ratios from general text-compression experience with G-code-like data):
 
-- gzip-9 ≈ 3.5–4:1 — the floor any candidate must clearly beat, since it's free (native `CompressionStream`).
+- gzip at the native default level ≈ 3.5–4:1 (gzip-9 only marginally better) — the floor any candidate must clearly beat, since `CompressionStream('gzip')` is free.
 - zstd-19 ≈ 4–4.5:1, brotli-11 ≈ 4.5–5:1, xz-9e ≈ 5:1+.
 - bgcode default ≈ 2.5–3:1 — heatshrink is chosen for MCU-friendliness, not ratio; expected to **lose** to F1×brotli-11 on pure bandwidth.
 - MeatPack + zstd ≈ zstd alone — bit-packing destroys byte-level patterns the entropy coder would find anyway.
@@ -115,7 +116,7 @@ To be confirmed or refuted (ratios from general text-compression experience with
 | F2 × brotli-11 | | | | | | |
 | F3 × zstd-19 | | | | | | |
 | F4 (bgcode default) | | | | | | |
-| F4ᵘ × zstd-19 | | | | | | |
+| F4-raw × zstd-19 | | | | | | |
 | F1 × 7z-PPMd *(bound)* | | | | | | |
 
 ### Browser compression (large file)
