@@ -18,7 +18,9 @@ first build for a given OrcaSlicer version publishes `wasm-v2.4.0`; every
 later fix to `orca-wasm/` for the *same* OrcaSlicer version (not an upstream
 bump) publishes `wasm-v2.4.0-patch1`, `-patch2`, etc. as a brand-new release
 rather than overwriting the previous one — `deploy.yml` resolves whichever
-has the highest patch number at deploy time.
+has the highest patch number at deploy time. Each release's description
+includes an auto-generated changelog: the list of commits touching
+`orca-wasm/**` or the build workflow since the previous `wasm-*` release.
 
 | File | Size | Description |
 |------|------|-------------|
