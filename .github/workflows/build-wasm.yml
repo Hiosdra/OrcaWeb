@@ -614,12 +614,15 @@ jobs:
           fi
 
           # ── Release notes with a changelog since the previous release ──
-          # The previous release is the newest existing wasm-* release
+          # The previous release is the newest existing wasm-v* release
           # overall, not just within $BASE_TAG's family: the first build of
           # a new upstream version should still describe what changed since
           # the last published engine. `gh release list` sorts newest-first.
+          # Matched as "wasm-v" (not just "wasm-") to exclude sibling release
+          # families like wasm-poc-* (see build-wasm-threads-poc.yml) that
+          # would otherwise be picked up as a bogus "previous engine release".
           PREV_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName \
-            --jq '[.[] | .tagName | select(startswith("wasm-"))] | first // empty')
+            --jq '[.[] | .tagName | select(startswith("wasm-v"))] | first // empty')
           # Real newlines via a notes file — the previous inline
           # --notes "...\n\n..." passed the backslash-n sequences literally,
           # so published notes showed a verbatim "\n\n" instead of a blank line.
