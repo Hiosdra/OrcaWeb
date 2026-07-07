@@ -17,3 +17,6 @@ scripts/rocket_engine_mk4s.stl
 .env
 .claude/*
 !.claude/skills/
+playwright-report/
+test-results/
+blob-report/

@@ -390,6 +390,7 @@ export default function App() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               disabled={tab.id !== 'upload' && !hasAnyReady}
+              data-testid={`tab-${tab.id}`}
               className={clsx(
                 'flex-1 py-2 rounded-lg text-sm font-medium transition-all',
                 activeTab === tab.id
@@ -615,6 +616,7 @@ function SliceHeader({
       <button
         onClick={onSliceAll}
         disabled={!canSlice || isSlicing}
+        data-testid="slice-all-button"
         className={clsx(
           'flex items-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm transition-all shadow-sm',
           isSlicing
@@ -706,13 +708,16 @@ function QueueItemCard({
         {/* Name + status text */}
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-slate-800 truncate">{item.name}</p>
-          <p className={clsx('text-xs', {
-            'text-amber-600': item.status === 'converting',
-            'text-slate-400': item.status === 'ready',
-            'text-orca-600': item.status === 'slicing',
-            'text-green-600': item.status === 'done',
-            'text-red-500': item.status === 'error',
-          })}>
+          <p
+            data-testid="queue-item-status"
+            className={clsx('text-xs', {
+              'text-amber-600': item.status === 'converting',
+              'text-slate-400': item.status === 'ready',
+              'text-orca-600': item.status === 'slicing',
+              'text-green-600': item.status === 'done',
+              'text-red-500': item.status === 'error',
+            })}
+          >
             {item.status === 'converting' && 'Converting…'}
             {item.status === 'ready' && 'Ready to slice'}
             {item.status === 'slicing' && <SlicingLabel />}
@@ -733,6 +738,7 @@ function QueueItemCard({
             </button>
             <button
               onClick={() => downloadGcode(item.gcode!, item.gcodeFilename!)}
+              data-testid="download-gcode-button"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors"
             >
               <DownloadIcon className="w-3.5 h-3.5" />

@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "setup": "node scripts/download-wasm.mjs",
     "smoke-test": "node orca-wasm/scripts/smoke-test.mjs",
+    "test:e2e": "playwright test",
     "generate-pwa-assets": "pwa-assets-generator --config pwa-assets.config.ts"
   },
   "dependencies": {
@@ -20,6 +21,7 @@
     "three": "^0.185.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.3.2",
     "@types/node": "^26.1.0",
     "@types/react": "^19.2.17",
