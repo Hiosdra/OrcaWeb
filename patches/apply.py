@@ -640,14 +640,22 @@ patch("src/libslic3r/Arachne/WallToolPaths.cpp", [
 #     particular tells Arachne to allow a wall-count transition at every
 #     infinitesimal width change instead of upstream's intended ~1-nozzle-
 #     width/10-degree smoothing window — on simple geometry (no width
-#     variation) this is inert, but on a model with continuously-varying
-#     thin features (engraved text, tolerance-test slots — e.g. the Voron
-#     Design Cube) it makes the transition/beading graph blow up, turning a
-#     multi-second desktop slice (which always has these real defaults via
-#     its bundled profiles) into a multi-minute-or-worse one here. Every
+#     variation) this is inert, but zero values would tell Arachne to allow
+#     a wall-count transition at every infinitesimal width change instead of
+#     upstream's intended ~1-nozzle-width/10-degree smoothing window. Every
 #     printer profile this app ships uses a 0.4mm nozzle (see
 #     src/data/orca-profiles.json), so hardcode each percent-based default
 #     as its absolute-mm equivalent for 0.4mm rather than 0.
+#
+#     NOTE (2026-07-07): this patch was originally believed to also fix the
+#     Voron Design Cube multi-minute hang. It does not — the hang reproduces
+#     with these exact params passed explicitly through the config (and
+#     orc_init starts from FullPrintConfig defaults anyway, so
+#     make_paths_params() never actually sees a missing option). The real
+#     cause was Boost.Log's broken default sink amplifying Arachne's
+#     per-edge warning storm — see the DisableBoostLogOnInit comment in
+#     orca-wasm/bridge/slicer.cpp. This patch stays as defensive
+#     initialization for genuinely-uninitialized construction paths.
 # =============================================================================
 patch("src/libslic3r/Arachne/WallToolPaths.hpp", [
     (
