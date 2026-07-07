@@ -206,23 +206,19 @@ patch("src/libslic3r/CMakeLists.txt", [
         r'TKDESTEP',
         0,
     ),
-    # Wrap OpenCV link
-    (
-        r'(opencv_world)',
-        r'$<$<NOT:$<BOOL:${SLIC3R_WASM}>>:opencv_world>',
-        0,
-    ),
-    # Wrap draco find / link
-    (
-        r'(find_package\s*\(\s*draco\b[^)]*\))',
-        r'if(NOT SLIC3R_WASM)\n\1\nendif()',
-        0,
-    ),
-    (
-        r'(draco::draco)',
-        r'$<$<NOT:$<BOOL:${SLIC3R_WASM}>>:draco::draco>',
-        0,
-    ),
+    # NOTE: guards around `opencv_world` (link) and both `find_package(draco)`
+    # and `draco::draco` (find + link) formerly here were removed as redundant
+    # (audited 2026-07-07, validated by a real WASM build in this same PR —
+    # see mkdocs-docs/orca-patch-audit.md). orca-wasm/cmake/FindOpenCV.cmake
+    # and Finddraco.cmake already stub `opencv_world` and `draco::draco` as
+    # empty INTERFACE targets and set *_FOUND, so find_package(...REQUIRED)
+    # and linking those targets are no-ops under WASM with or without an
+    # explicit apply.py guard — this repo's WASM build always prepends
+    # orca-wasm/cmake to CMAKE_MODULE_PATH (orca-wasm/CMakeLists.txt), so
+    # those stubs are the only Find modules that can ever resolve here.
+    # (OpenVDB's equivalent genexpr guard is intentionally kept — see the
+    # patch audit for why that one interacts with the Layer 2 override
+    # injection in a way these two don't.)
     # Wrap OpenVDB link
     (
         r'(OpenVDB::openvdb)',
@@ -258,15 +254,16 @@ patch("src/libslic3r/CMakeLists.txt", [
 # 3c. FuzzySkin.cpp — thread_local compatibility
 #     Emscripten single-threaded mode may not support thread_local or
 #     std::this_thread without -sUSE_PTHREADS; replace with static equivalents.
+#     NOTE: a defensive "static thread_local" -> "static" variant formerly ran
+#     before this one, to avoid producing "static static" if a future
+#     OrcaSlicer version wrote "static thread_local". Removed as dead (audited
+#     2026-07-07, see mkdocs-docs/orca-patch-audit.md) — v2.4.0 has only bare
+#     `thread_local`, so it never matched anything. If OrcaSlicer ever does
+#     start writing "static thread_local", the regex below will produce
+#     "static static" and fail loudly at compile time, which is preferable to
+#     carrying speculative insurance for a case that has never occurred.
 # =============================================================================
 patch("src/libslic3r/Feature/FuzzySkin/FuzzySkin.cpp", [
-    # Handle "static thread_local" first to avoid producing "static static".
-    # (Guard against both bare and static thread_local variants.)
-    (
-        r'\bstatic\s+thread_local\b',
-        r'static',
-        0,
-    ),
     (
         r'\bthread_local\b',
         r'static',
@@ -389,19 +386,19 @@ patch("src/libslic3r/Platform.cpp", [
 
 # =============================================================================
 # 6. GCode/Thumbnails.cpp — JPEG compatibility for Emscripten
-#    6a: define JCS_EXT_RGBA if not already defined (libjpeg-turbo extension —
-#        must satisfy any compile-time references even though we don't use it)
-#    6b: replace compress_thumbnail_jpg body to strip alpha before compressing
-#        (Emscripten ships standard IJG libjpeg, not libjpeg-turbo; JCS_EXT_RGBA
-#        at value 13 is not a valid input colour space in standard libjpeg)
+#    Replace compress_thumbnail_jpg body to strip alpha before compressing
+#    (Emscripten ships standard IJG libjpeg, not libjpeg-turbo; JCS_EXT_RGBA
+#    at value 13 is not a valid input colour space in standard libjpeg).
+#    NOTE: a former 6a step defined JCS_EXT_RGBA if missing, "in case" the
+#    symbol was referenced elsewhere — removed as dead (audited 2026-07-07,
+#    see mkdocs-docs/orca-patch-audit.md): the only reference to it anywhere
+#    in this file is inside the function body the block below replaces
+#    wholesale, so nothing could ever see the guard. It was also actively
+#    risky to keep as a "just in case" fallback: if 6b's replacement regex
+#    ever stopped matching, this define would silently turn what should be a
+#    loud compile error (unknown identifier JCS_EXT_RGBA) into a runtime
+#    libjpeg rejection of colour space 13 instead.
 # =============================================================================
-patch("src/libslic3r/GCode/Thumbnails.cpp", [
-    (
-        r'(#include\s*<jpeglib\.h>)',
-        r'\1\n#ifndef JCS_EXT_RGBA\n#  define JCS_EXT_RGBA ((J_COLOR_SPACE)13)\n#endif',
-        0,
-    ),
-])
 
 _thumb_cpp = ORCA / "src/libslic3r/GCode/Thumbnails.cpp"
 if _thumb_cpp.exists():
