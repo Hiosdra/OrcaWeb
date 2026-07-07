@@ -132,15 +132,9 @@ patch("CMakeLists.txt", [
         r'\1\n\noption(SLIC3R_WASM "Build for WebAssembly with Emscripten" OFF)',
         1,
     ),
-    # NOTE: two entries formerly here were removed as dead/no-op (audited
-    # 2026-07-07, see mkdocs-docs/orca-patch-audit.md):
-    #  - a guard around find_package(wxWidgets) in this file: wxWidgets is
-    #    actually found in src/CMakeLists.txt inside `if(SLIC3R_GUI)`, which
-    #    WASM builds already force OFF (orca-wasm/CMakeLists.txt), so the
-    #    pattern here never matched anything.
-    #  - a wrap of add_subdirectory(src) into "if(NOT SLIC3R_WASM) ... endif()
-    #    if(SLIC3R_WASM) add_subdirectory(src) endif()" — src is added in both
-    #    branches, identical to the unpatched original.
+    # No guard needed for wxWidgets: it's only found() in src/CMakeLists.txt
+    # inside `if(SLIC3R_GUI)`, and orca-wasm/CMakeLists.txt already forces
+    # SLIC3R_GUI OFF for WASM builds.
     #
     # Downgrade CMP0167 so the legacy FindBoost.cmake (module mode) is used.
     # Our Boost is built with b2 which does not install BoostConfig.cmake.
@@ -152,10 +146,8 @@ patch("CMakeLists.txt", [
 ])
 
 # =============================================================================
-# NOTE: §2 (src/CMakeLists.txt GUI-subdirectory guard) was removed (audited
-# 2026-07-07, see mkdocs-docs/orca-patch-audit.md). Its pattern matched
-# add_subdirectory(slic3r), which is already inside `if(SLIC3R_GUI)` —
-# and WASM builds already force SLIC3R_GUI=OFF — so the guard was redundant.
+# No guard needed here either: add_subdirectory(slic3r) is already inside
+# `if(SLIC3R_GUI)`, which WASM builds force OFF.
 # libnoise: no longer excluded from WASM — Findlibnoise.cmake provides
 # the WASM-compiled noise::noise target via CMAKE_MODULE_PATH.
 # =============================================================================
@@ -206,19 +198,13 @@ patch("src/libslic3r/CMakeLists.txt", [
         r'TKDESTEP',
         0,
     ),
-    # NOTE: guards around `opencv_world` (link) and both `find_package(draco)`
-    # and `draco::draco` (find + link) formerly here were removed as redundant
-    # (audited 2026-07-07, validated by a real WASM build in this same PR —
-    # see mkdocs-docs/orca-patch-audit.md). orca-wasm/cmake/FindOpenCV.cmake
+    # No guard needed for `opencv_world` or draco: orca-wasm/cmake/FindOpenCV.cmake
     # and Finddraco.cmake already stub `opencv_world` and `draco::draco` as
-    # empty INTERFACE targets and set *_FOUND, so find_package(...REQUIRED)
-    # and linking those targets are no-ops under WASM with or without an
-    # explicit apply.py guard — this repo's WASM build always prepends
-    # orca-wasm/cmake to CMAKE_MODULE_PATH (orca-wasm/CMakeLists.txt), so
-    # those stubs are the only Find modules that can ever resolve here.
-    # (OpenVDB's equivalent genexpr guard is intentionally kept — see the
-    # patch audit for why that one interacts with the Layer 2 override
-    # injection in a way these two don't.)
+    # empty INTERFACE targets and set *_FOUND, and this repo's WASM build
+    # always prepends orca-wasm/cmake to CMAKE_MODULE_PATH, so those stubs are
+    # the only Find modules that can ever resolve here. (OpenVDB's genexpr
+    # guard below is kept — it interacts with the Layer 2 override injection
+    # in a way these two don't.)
     # Wrap OpenVDB link
     (
         r'(OpenVDB::openvdb)',
@@ -227,13 +213,9 @@ patch("src/libslic3r/CMakeLists.txt", [
     ),
     # JPEG: embuilder pre-builds libjpeg into the Emscripten sysroot, so
     # find_package(JPEG) finds it automatically — no WASM guard needed.
-    # NOTE: a guard around the FREETYPE_LIBRARIES link line formerly here was
-    # removed as dead (audited 2026-07-07, see mkdocs-docs/orca-patch-audit.md)
-    # — its regex never matched v2.4.0's source (a comment line sits between
-    # the `if(NOT WIN32)` and the target_link_libraries() it expected
-    # adjacent), and it was unnecessary anyway: orca-wasm/cmake/FindFreetype.cmake
-    # already stubs FREETYPE_LIBRARIES to an empty INTERFACE target, so linking
-    # it unconditionally is inert under WASM.
+    # No guard needed for FREETYPE_LIBRARIES either: orca-wasm/cmake/FindFreetype.cmake
+    # already stubs it to an empty INTERFACE target, so linking it
+    # unconditionally is inert under WASM.
     # fontconfig (Linux non-WASM only)
     (
         r'(target_link_libraries\s*\(\s*libslic3r\s+PRIVATE\s+fontconfig\s*\))',
@@ -254,14 +236,9 @@ patch("src/libslic3r/CMakeLists.txt", [
 # 3c. FuzzySkin.cpp — thread_local compatibility
 #     Emscripten single-threaded mode may not support thread_local or
 #     std::this_thread without -sUSE_PTHREADS; replace with static equivalents.
-#     NOTE: a defensive "static thread_local" -> "static" variant formerly ran
-#     before this one, to avoid producing "static static" if a future
-#     OrcaSlicer version wrote "static thread_local". Removed as dead (audited
-#     2026-07-07, see mkdocs-docs/orca-patch-audit.md) — v2.4.0 has only bare
-#     `thread_local`, so it never matched anything. If OrcaSlicer ever does
-#     start writing "static thread_local", the regex below will produce
-#     "static static" and fail loudly at compile time, which is preferable to
-#     carrying speculative insurance for a case that has never occurred.
+#     If a future OrcaSlicer version writes "static thread_local" instead of
+#     bare `thread_local`, the regex below will produce "static static" and
+#     fail loudly at compile time rather than silently miscompiling.
 # =============================================================================
 patch("src/libslic3r/Feature/FuzzySkin/FuzzySkin.cpp", [
     (
@@ -389,15 +366,6 @@ patch("src/libslic3r/Platform.cpp", [
 #    Replace compress_thumbnail_jpg body to strip alpha before compressing
 #    (Emscripten ships standard IJG libjpeg, not libjpeg-turbo; JCS_EXT_RGBA
 #    at value 13 is not a valid input colour space in standard libjpeg).
-#    NOTE: a former 6a step defined JCS_EXT_RGBA if missing, "in case" the
-#    symbol was referenced elsewhere — removed as dead (audited 2026-07-07,
-#    see mkdocs-docs/orca-patch-audit.md): the only reference to it anywhere
-#    in this file is inside the function body the block below replaces
-#    wholesale, so nothing could ever see the guard. It was also actively
-#    risky to keep as a "just in case" fallback: if 6b's replacement regex
-#    ever stopped matching, this define would silently turn what should be a
-#    loud compile error (unknown identifier JCS_EXT_RGBA) into a runtime
-#    libjpeg rejection of colour space 13 instead.
 # =============================================================================
 
 _thumb_cpp = ORCA / "src/libslic3r/GCode/Thumbnails.cpp"
