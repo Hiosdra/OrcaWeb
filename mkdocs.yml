@@ -49,6 +49,7 @@ nav:
   - API Reference: api-reference.md
   - Profiles: profiles.md
   - Building WASM: wasm-build.md
+  - OrcaSlicer Patch Audit: orca-patch-audit.md
   - 'Benchmark: G-code Compression': gcode-compression-benchmark.md
   - Architecture Decisions:
     - Overview: adr/index.md
