@@ -1,203 +1,394 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OrcaWeb — Slice STL files in your browser</title>
-  <meta name="description" content="OrcaSlicer v2.3.2 running entirely in the browser via WebAssembly. No server, no upload, 100% private." />
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --orca: #0a84ff;
-      --orca-dark: #0065cc;
-      --bg: #f8fafc;
-      --surface: #ffffff;
-      --border: #e2e8f0;
-      --text: #1e293b;
-      --muted: #64748b;
-    }
-    html { scroll-behavior: smooth; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
-    a { color: var(--orca); text-decoration: none; }
-    a:hover { text-decoration: underline; }
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OrcaWeb — The Real OrcaSlicer, Running in Your Browser</title>
+<meta name="description" content="OrcaWeb runs OrcaSlicer v2.4.0 entirely client-side via WebAssembly. Slice STL, 3MF, OBJ & STEP files with full engine parity — no server, no account, no upload." />
+<meta property="og:title" content="OrcaWeb — The Real OrcaSlicer, Running in Your Browser" />
+<meta property="og:description" content="OrcaSlicer v2.4.0 compiled to WebAssembly. Full engine parity, real G-code, 100% in your browser — files never leave your device." />
+<meta property="og:url" content="https://hiosdra.github.io/OrcaWeb/" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="OrcaWeb — The Real OrcaSlicer, Running in Your Browser" />
+<meta name="twitter:description" content="OrcaSlicer v2.4.0 compiled to WebAssembly. Full engine parity, real G-code, 100% in your browser — files never leave your device." />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    header { background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
-    .header-inner { max-width: 1000px; margin: 0 auto; padding: 0 1.5rem; height: 56px; display: flex; align-items: center; justify-content: space-between; }
-    .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.05rem; color: var(--text); text-decoration: none; }
-    .logo svg { width: 30px; height: 30px; }
-    .badge { font-size: 0.68rem; background: #f1f5f9; color: var(--muted); padding: 2px 8px; border-radius: 99px; font-weight: 500; }
-    nav { display: flex; gap: 1.5rem; align-items: center; }
-    nav a { font-size: 0.9rem; font-weight: 500; color: var(--muted); }
-    nav a:hover { color: var(--text); text-decoration: none; }
-    .nav-cta { background: var(--orca); color: #fff !important; padding: 7px 16px; border-radius: 8px; font-weight: 600 !important; }
-    .nav-cta:hover { background: var(--orca-dark); }
+  :root {
+    --bg: #0a0f1c;
+    --surface: #111a2e;
+    --surface-2: #0d1526;
+    --border: rgba(148,163,184,.16);
+    --border-strong: rgba(148,163,184,.30);
+    --text: #e6ebf2;
+    --muted: #99a8bf;
+    --muted-2: #7686a0;
+    --orca: #0a84ff;
+    --orca-light: #4da3ff;
+    --accent2: #22d3ee;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
 
-    .hero { padding: 6rem 1.5rem 5rem; text-align: center; background: linear-gradient(160deg, #f0f7ff 0%, #e8f4ff 60%, #f8fafc 100%); border-bottom: 1px solid var(--border); }
-    .hero h1 { font-size: clamp(2.2rem, 5.5vw, 4rem); font-weight: 900; letter-spacing: -0.04em; line-height: 1.1; color: var(--text); margin-bottom: 1.25rem; }
-    .hero h1 em { font-style: normal; color: var(--orca); }
-    .hero p { font-size: 1.2rem; color: var(--muted); max-width: 520px; margin: 0 auto 2.5rem; }
-    .hero-btns { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
-    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 13px 28px; border-radius: 12px; font-weight: 700; font-size: 1rem; transition: all 0.15s; letter-spacing: -0.01em; }
-    .btn-primary { background: var(--orca); color: #fff; box-shadow: 0 6px 20px rgba(10,132,255,.35); }
-    .btn-primary:hover { background: var(--orca-dark); text-decoration: none; transform: translateY(-1px); box-shadow: 0 8px 24px rgba(10,132,255,.4); }
-    .btn-secondary { background: var(--surface); color: var(--text); border: 1.5px solid var(--border); }
-    .btn-secondary:hover { border-color: var(--orca); color: var(--orca); text-decoration: none; }
-    .hero-note { margin-top: 1.5rem; font-size: 0.8rem; color: var(--muted); }
+  html { scroll-behavior: smooth; }
 
-    .section { padding: 5rem 1.5rem; }
-    .section-inner { max-width: 1000px; margin: 0 auto; }
-    .section-label { font-size: 0.75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--orca); margin-bottom: .5rem; }
-    .section h2 { font-size: clamp(1.5rem, 3vw, 2.2rem); font-weight: 800; letter-spacing: -0.03em; margin-bottom: .75rem; }
-    .section-desc { color: var(--muted); font-size: 1.05rem; max-width: 560px; margin-bottom: 3rem; }
+  body {
+    font-family: var(--sans);
+    background-color: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    background-image:
+      radial-gradient(ellipse 900px 560px at 12% -8%, rgba(10,132,255,.20), transparent 60%),
+      radial-gradient(ellipse 720px 480px at 105% 8%, rgba(34,211,238,.12), transparent 60%),
+      repeating-linear-gradient(0deg, rgba(148,163,184,.035) 0px, rgba(148,163,184,.035) 1px, transparent 1px, transparent 42px),
+      repeating-linear-gradient(90deg, rgba(148,163,184,.035) 0px, rgba(148,163,184,.035) 1px, transparent 1px, transparent 42px);
+    background-attachment: fixed, fixed, fixed, fixed;
+  }
 
-    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; }
-    .feature { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 1.75rem; }
-    .feat-icon { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; margin-bottom: 1rem; }
-    .feature h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: .4rem; }
-    .feature p { font-size: 0.88rem; color: var(--muted); line-height: 1.6; }
+  a { color: var(--orca-light); text-decoration: none; }
+  a:hover { text-decoration: underline; }
 
-    .how-section { background: #0f172a; color: #e2e8f0; border-top: 1px solid #1e293b; border-bottom: 1px solid #1e293b; }
-    .how-section .section-label { color: #60a5fa; }
-    .how-section h2 { color: #fff; }
-    .how-section .section-desc { color: #94a3b8; }
-    .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 2rem; counter-reset: steps; }
-    .step { counter-increment: steps; }
-    .step-num { width: 36px; height: 36px; border-radius: 10px; background: var(--orca); color: #fff; font-weight: 800; font-size: 0.9rem; display: flex; align-items: center; justify-content: center; margin-bottom: 1rem; }
-    .step h3 { font-size: 1rem; font-weight: 700; color: #fff; margin-bottom: .4rem; }
-    .step p { font-size: 0.87rem; color: #94a3b8; }
+  :focus-visible { outline: 2px solid var(--orca-light); outline-offset: 3px; border-radius: 4px; }
 
-    .cta-section { text-align: center; padding: 5rem 1.5rem; background: linear-gradient(135deg, #f0f7ff, #e8f4ff); border-top: 1px solid var(--border); }
-    .cta-section h2 { font-size: clamp(1.6rem, 3vw, 2.4rem); font-weight: 800; letter-spacing: -0.03em; margin-bottom: 1rem; }
-    .cta-section p { color: var(--muted); font-size: 1.05rem; margin-bottom: 2rem; }
+  img, svg { max-width: 100%; display: block; }
 
-    footer { padding: 2rem 1.5rem; border-top: 1px solid var(--border); text-align: center; color: var(--muted); font-size: 0.83rem; }
-    footer a { color: var(--muted); }
-    footer a:hover { color: var(--text); }
+  /* ---------- header ---------- */
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(10,15,28,.72);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .header-inner {
+    max-width: 1120px; margin: 0 auto; padding: 0 1.5rem;
+    height: 60px; display: flex; align-items: center; justify-content: space-between;
+  }
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.05rem; color: var(--text); text-decoration: none; }
+  .logo svg { width: 30px; height: 30px; flex-shrink: 0; }
+  .logo:hover { text-decoration: none; }
+  .badge { font-size: .66rem; background: rgba(10,132,255,.12); border: 1px solid rgba(10,132,255,.28); color: var(--orca-light); padding: 2px 8px; border-radius: 99px; font-weight: 600; letter-spacing: .01em; }
+  nav { display: flex; gap: 1.75rem; align-items: center; }
+  nav a { font-size: .9rem; font-weight: 500; color: var(--muted); }
+  nav a:hover { color: var(--text); text-decoration: none; }
+  .nav-cta { background: var(--orca); color: #fff !important; padding: 8px 16px; border-radius: 8px; font-weight: 600 !important; transition: background .15s, transform .15s; }
+  .nav-cta:hover { background: var(--orca-light); transform: translateY(-1px); }
 
-    @media (max-width: 600px) {
-      .hero { padding: 4rem 1.25rem; }
-      nav .hide-mobile { display: none; }
-    }
-  </style>
+  /* ---------- buttons ---------- */
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 13px 26px; border-radius: 10px; font-weight: 700; font-size: 1rem; letter-spacing: -0.01em; transition: transform .15s, box-shadow .15s, background .15s, border-color .15s, color .15s; cursor: pointer; border: 1.5px solid transparent; }
+  .btn-primary { background: var(--orca); color: #fff; box-shadow: 0 8px 24px rgba(10,132,255,.30); }
+  .btn-primary:hover { background: var(--orca-light); text-decoration: none; transform: translateY(-1px); box-shadow: 0 10px 28px rgba(10,132,255,.40); }
+  .btn-secondary { background: transparent; color: var(--text); border-color: var(--border-strong); }
+  .btn-secondary:hover { border-color: var(--orca-light); color: var(--orca-light); text-decoration: none; }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 5rem 1.5rem 3rem; }
+  .hero-inner { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: 1.05fr .95fr; gap: 3rem; align-items: center; }
+  .hero-inner > *, .features > *, .steps > * { min-width: 0; }
+  .eyebrow { font-family: var(--mono); font-size: .78rem; letter-spacing: .06em; color: var(--accent2); margin-bottom: 1rem; text-transform: uppercase; }
+  .hero h1 { font-size: clamp(2.1rem, 4.4vw, 3.4rem); font-weight: 800; letter-spacing: -0.03em; line-height: 1.12; color: var(--text); margin-bottom: 1.25rem; }
+  .hero h1 .accent { color: var(--orca-light); }
+  .hero-sub { font-size: 1.1rem; color: var(--muted); max-width: 480px; margin-bottom: 2.25rem; }
+  .hero-btns { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+  .hero-note { font-size: .82rem; color: var(--muted-2); }
+
+  .hero-visual-wrap {
+    position: relative; border-radius: 20px; border: 1px solid var(--border);
+    background: linear-gradient(180deg, var(--surface-2), var(--surface));
+    padding: 1.25rem;
+  }
+  .hero-visual { width: 100%; height: auto; }
+
+  /* hero visual animation */
+  .hero-visual .layer { stroke: var(--orca-light); stroke-width: 4; stroke-linecap: round; opacity: 0; animation: layerFill 4.8s ease-in-out infinite; }
+  .hero-visual .sweep { fill: var(--accent2); opacity: .9; animation: sweepUp 4.8s linear infinite; transform-box: fill-box; transform-origin: center; }
+  @keyframes layerFill {
+    0%   { opacity: 0; }
+    8%   { opacity: 1; }
+    72%  { opacity: 1; }
+    90%  { opacity: 0; }
+    100% { opacity: 0; }
+  }
+  @keyframes sweepUp {
+    0%   { transform: translateY(0); opacity: 1; }
+    92%  { opacity: 1; }
+    100% { transform: translateY(-258px); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-visual .layer { animation: none; opacity: 1; }
+    .hero-visual .sweep { animation: none; opacity: 0; }
+  }
+
+  /* ---------- spec strip ---------- */
+  .spec-strip { padding: 0 1.5rem 4.5rem; }
+  .spec-strip-inner { max-width: 1120px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: .75rem; }
+  .chip { display: inline-flex; align-items: center; gap: .4em; font-size: .82rem; color: var(--muted); border: 1px solid var(--border); background: rgba(255,255,255,.02); padding: 7px 14px; border-radius: 99px; }
+  .chip .mono { font-family: var(--mono); color: var(--text); font-size: .8rem; }
+
+  /* ---------- sections ---------- */
+  .section { padding: 5rem 1.5rem; }
+  .section-inner { max-width: 1120px; margin: 0 auto; }
+  .section-label { font-family: var(--mono); font-size: .76rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--orca-light); margin-bottom: .6rem; }
+  .section h2 { font-size: clamp(1.6rem, 3vw, 2.3rem); font-weight: 800; letter-spacing: -0.03em; margin-bottom: .75rem; color: var(--text); }
+  .section-desc { color: var(--muted); font-size: 1.05rem; max-width: 580px; margin-bottom: 3rem; }
+
+  /* ---------- features ---------- */
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1.25rem; }
+  .feature { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 1.75rem; transition: transform .18s, border-color .18s, background .18s; }
+  .feature:hover { transform: translateY(-3px); border-color: rgba(10,132,255,.45); background: var(--surface-2); }
+  .feat-icon { width: 42px; height: 42px; border-radius: 11px; display: flex; align-items: center; justify-content: center; margin-bottom: 1rem; background: rgba(10,132,255,.10); border: 1px solid rgba(10,132,255,.22); }
+  .feat-icon svg { width: 22px; height: 22px; color: var(--orca-light); }
+  .feature h3 { font-size: 1.02rem; font-weight: 700; margin-bottom: .45rem; color: var(--text); }
+  .feature p { font-size: .88rem; color: var(--muted); line-height: 1.6; }
+
+  /* ---------- how it works ---------- */
+  .how-section { background: var(--surface-2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 2rem; }
+  .step-num { width: 34px; height: 34px; border-radius: 10px; background: rgba(10,132,255,.14); border: 1px solid rgba(10,132,255,.35); color: var(--orca-light); font-family: var(--mono); font-weight: 700; font-size: .92rem; display: flex; align-items: center; justify-content: center; margin-bottom: 1rem; }
+  .step h3 { font-size: 1rem; font-weight: 700; color: var(--text); margin-bottom: .4rem; }
+  .step p { font-size: .87rem; color: var(--muted); }
+
+  /* ---------- under the hood ---------- */
+  .hood-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: center; }
+  .hood-grid > * { min-width: 0; }
+  .hood-text p { color: var(--muted); font-size: 1rem; margin-bottom: 1rem; max-width: 460px; }
+  .hood-link { display: inline-flex; align-items: center; gap: .4em; font-weight: 600; color: var(--orca-light); }
+  .arch-diagram { font-family: var(--mono); font-size: .84rem; line-height: 1.9; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.5rem 1.75rem; color: var(--text); overflow-x: auto; }
+  .arch-diagram .tree { color: var(--accent2); }
+  .arch-diagram .dim { color: var(--muted-2); }
+
+  /* ---------- final cta ---------- */
+  .cta-section { text-align: center; padding: 5.5rem 1.5rem; border-top: 1px solid var(--border); }
+  .cta-section h2 { font-size: clamp(1.7rem, 3.2vw, 2.5rem); font-weight: 800; letter-spacing: -0.03em; margin-bottom: 1rem; color: var(--text); }
+  .cta-section p { color: var(--muted); font-size: 1.05rem; margin-bottom: 2.25rem; }
+
+  /* ---------- footer ---------- */
+  footer { padding: 2.5rem 1.5rem; border-top: 1px solid var(--border); text-align: center; color: var(--muted-2); font-size: .83rem; }
+  footer a { color: var(--muted); }
+  footer a:hover { color: var(--text); }
+  footer p + p { margin-top: .4rem; }
+
+  /* ---------- reveal-on-scroll (progressive enhancement) ---------- */
+  .reveal { opacity: 1; transform: none; }
+  html.js .reveal { opacity: 0; transform: translateY(18px); transition: opacity .6s ease, transform .6s ease; }
+  html.js .reveal.in-view { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    html.js .reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
+  }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 900px) {
+    .hero-inner { grid-template-columns: 1fr; }
+    .hero-visual-wrap { order: -1; max-width: 420px; margin: 0 auto; width: 100%; }
+    .hood-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 640px) {
+    nav .hide-mobile { display: none; }
+    .hero { padding: 3rem 1.25rem 2rem; }
+    .section { padding: 3.5rem 1.25rem; }
+    .spec-strip { padding: 0 1.25rem 3rem; }
+  }
+  @media (max-width: 420px) {
+    .features, .steps { grid-template-columns: 1fr; }
+  }
+</style>
 </head>
 <body>
 
 <header>
   <div class="header-inner">
     <a class="logo" href=".">
-      <svg viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="#0a84ff"/><path d="M8 22 L16 8 L24 22" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M11 18 L21 18" stroke="white" stroke-width="2.5" stroke-linecap="round"/></svg>
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0a84ff"/><path d="M8 22 L16 8 L24 22" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M11 18 L21 18" stroke="white" stroke-width="2.5" stroke-linecap="round"/></svg>
       OrcaWeb
       <span class="badge">Browser Slicer</span>
     </a>
-    <nav>
+    <nav aria-label="Primary">
+      <a class="hide-mobile" href="#features">Features</a>
+      <a class="hide-mobile" href="#how">How it works</a>
       <a class="hide-mobile" href="./docs/">Docs</a>
-      <a class="hide-mobile" href="https://github.com/Hiosdra/OrcaWeb" target="_blank">GitHub</a>
+      <a class="hide-mobile" href="https://github.com/Hiosdra/OrcaWeb" target="_blank" rel="noopener noreferrer">GitHub</a>
       <a class="nav-cta" href="./app/">Launch Slicer →</a>
     </nav>
   </div>
 </header>
 
 <section class="hero">
-  <h1>Slice STL files<br/><em>in your browser</em></h1>
-  <p>OrcaSlicer v2.3.2 compiled to WebAssembly. Your files never leave your device — no server, no account, no upload.</p>
-  <div class="hero-btns">
-    <a class="btn btn-primary" href="./app/">
-      <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
-      Launch Slicer
-    </a>
-    <a class="btn btn-secondary" href="./docs/">
-      Read the docs
-    </a>
+  <div class="hero-inner">
+    <div class="hero-copy">
+      <p class="eyebrow">OrcaSlicer 2.4.0 · WebAssembly</p>
+      <h1>The real OrcaSlicer engine.<br><span class="accent">Running in your browser.</span></h1>
+      <p class="hero-sub">No server. No account. No upload — your models and your G-code never leave this device.</p>
+      <div class="hero-btns">
+        <a class="btn btn-primary" href="./app/">
+          <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
+          Launch Slicer
+        </a>
+        <a class="btn btn-secondary" href="https://github.com/Hiosdra/OrcaWeb" target="_blank" rel="noopener noreferrer">View on GitHub</a>
+      </div>
+      <p class="hero-note">Free &amp; open source · ~29 MB one-time download, cached for offline use</p>
+    </div>
+
+    <div class="hero-visual-wrap">
+      <svg class="hero-visual" viewBox="0 0 400 400" role="img" aria-label="Animated illustration of a 3D model being printed layer by layer on a virtual print bed">
+        <defs>
+          <pattern id="bedGrid" width="20" height="20" patternUnits="userSpaceOnUse">
+            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(148,163,184,.14)" stroke-width="1"/>
+          </pattern>
+        </defs>
+        <rect x="20" y="20" width="360" height="360" fill="url(#bedGrid)"/>
+        <rect x="55" y="340" width="290" height="4" rx="2" fill="rgba(148,163,184,.30)"/>
+        <g>
+          <line class="layer" style="animation-delay:0.00s" x1="130" y1="336" x2="270" y2="336"/>
+          <line class="layer" style="animation-delay:0.28s" x1="135" y1="313.5" x2="265" y2="313.5"/>
+          <line class="layer" style="animation-delay:0.56s" x1="140" y1="291" x2="260" y2="291"/>
+          <line class="layer" style="animation-delay:0.84s" x1="145" y1="268.5" x2="255" y2="268.5"/>
+          <line class="layer" style="animation-delay:1.12s" x1="150" y1="246" x2="250" y2="246"/>
+          <line class="layer" style="animation-delay:1.40s" x1="155" y1="223.5" x2="245" y2="223.5"/>
+          <line class="layer" style="animation-delay:1.68s" x1="160" y1="201" x2="240" y2="201"/>
+          <line class="layer" style="animation-delay:1.96s" x1="165" y1="178.5" x2="235" y2="178.5"/>
+          <line class="layer" style="animation-delay:2.24s" x1="170" y1="156" x2="230" y2="156"/>
+          <line class="layer" style="animation-delay:2.52s" x1="175" y1="133.5" x2="225" y2="133.5"/>
+          <line class="layer" style="animation-delay:2.80s" x1="180" y1="111" x2="220" y2="111"/>
+          <line class="layer" style="animation-delay:3.08s" x1="185" y1="88.5" x2="215" y2="88.5"/>
+        </g>
+        <rect class="sweep" x="55" y="330" width="290" height="2.5"/>
+      </svg>
+    </div>
   </div>
-  <p class="hero-note">First load downloads ~150 MB of WASM data and caches it locally.</p>
 </section>
 
-<section class="section">
+<div class="spec-strip">
+  <div class="spec-strip-inner">
+    <span class="chip">Engine · <span class="mono">OrcaSlicer v2.4.0</span></span>
+    <span class="chip">Formats · <span class="mono">STL · 3MF · OBJ · STEP</span></span>
+    <span class="chip">Download · <span class="mono">~29 MB, one-time</span></span>
+    <span class="chip">Privacy · <span class="mono">100% client-side</span></span>
+    <span class="chip">License · <span class="mono">open source</span></span>
+  </div>
+</div>
+
+<section class="section" id="features">
   <div class="section-inner">
-    <div class="section-label">Features</div>
-    <h2>Everything you need,<br/>nothing leaves your machine</h2>
-    <p class="section-desc">OrcaWeb brings the full power of OrcaSlicer to the browser with no compromises on privacy.</p>
+    <div class="section-label reveal">Features</div>
+    <h2 class="reveal">Everything the desktop app does,<br>nothing leaves your machine</h2>
+    <p class="section-desc reveal">OrcaWeb ships the same slicing engine that powers the desktop app — compiled to WebAssembly, no compromises.</p>
     <div class="features">
-      <div class="feature">
-        <div class="feat-icon" style="background:#f0f7ff">🔒</div>
-        <h3>100% Private</h3>
-        <p>Your STL files are processed entirely in your browser. No data ever reaches a server.</p>
+      <div class="feature reveal">
+        <div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+        <h3>100% private</h3>
+        <p>Every model, profile, and G-code file is processed entirely in your browser. Nothing is ever uploaded to a server.</p>
       </div>
-      <div class="feature">
-        <div class="feat-icon" style="background:#f0fdf4">⚡</div>
-        <h3>Real OrcaSlicer Engine</h3>
-        <p>OrcaSlicer v2.3.2 core compiled to WebAssembly. Same slicing quality as the desktop app.</p>
+      <div class="feature reveal">
+        <div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg></div>
+        <h3>Real OrcaSlicer engine</h3>
+        <p>OrcaSlicer v2.4.0 with full feature parity — fuzzy skin, every infill pattern, supports, every parameter. Same G-code quality as desktop.</p>
       </div>
-      <div class="feature">
-        <div class="feat-icon" style="background:#fdf4ff">🎨</div>
-        <h3>G-code Visualiser</h3>
-        <p>Layer-by-layer toolpath preview rendered in Three.js. Model and G-code aligned in the same coordinate system.</p>
+      <div class="feature reveal">
+        <div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3h6l5 5v11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M14 3v5h5"/></svg></div>
+        <h3>STL, 3MF, OBJ &amp; STEP</h3>
+        <p>CAD-native STEP import runs on OCCT, compiled straight into the engine — no separate conversion step, no round trip.</p>
       </div>
-      <div class="feature">
-        <div class="feat-icon" style="background:#fff7ed">📦</div>
-        <h3>Profile Import</h3>
-        <p>Drag in any OrcaSlicer machine, filament, or process JSON profile from your desktop installation.</p>
+      <div class="feature reveal">
+        <div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 8 12 14 22 8 12 2"/><polyline points="2 14 12 20 22 14"/></svg></div>
+        <h3>G-code visualiser</h3>
+        <p>Layer-by-layer toolpaths rendered in Three.js, alongside the 3D model preview, in one shared coordinate system.</p>
       </div>
-      <div class="feature">
-        <div class="feat-icon" style="background:#fef2f2">🖨️</div>
-        <h3>Printer Presets</h3>
-        <p>Bambu Lab P1S & X1C, Prusa MK4, Creality Ender 3, Voron 2.4, and generic 0.4/0.6 mm nozzle.</p>
+      <div class="feature reveal">
+        <div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="15" cy="12" r="2"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="7" cy="18" r="2"/></svg></div>
+        <h3>Your profiles, your presets</h3>
+        <p>Import machine, filament, and process JSON profiles straight from a desktop OrcaSlicer install, or start from built-in presets for Bambu Lab P1S/X1C, Prusa MK4, Ender 3, and Voron 2.4.</p>
       </div>
-      <div class="feature">
-        <div class="feat-icon" style="background:#f0fdf4">💻</div>
-        <h3>CLI Tool</h3>
-        <p>Node.js command-line interface for batch slicing, headless pipelines, and CI/CD workflows.</p>
+      <div class="feature reveal">
+        <div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg></div>
+        <h3>Installable &amp; offline</h3>
+        <p>A proper PWA — after the first ~29 MB load, everything is cached, so OrcaWeb keeps slicing with no connection at all.</p>
       </div>
     </div>
   </div>
 </section>
 
-<section class="section how-section">
+<section class="section how-section" id="how">
   <div class="section-inner">
-    <div class="section-label">How it works</div>
-    <h2>Simple three-step workflow</h2>
-    <p class="section-desc">Upload, configure, slice. No installation required.</p>
+    <div class="section-label reveal">How it works</div>
+    <h2 class="reveal">Model to G-code, four steps</h2>
+    <p class="section-desc reveal">No install, no account creation — open the app and go.</p>
     <div class="steps">
-      <div class="step">
-        <div class="step-num">1</div>
-        <h3>Upload STL</h3>
-        <p>Drag & drop your STL file. A 3D preview appears instantly on the virtual print bed.</p>
+      <div class="step reveal">
+        <div class="step-num">01</div>
+        <h3>Drop a model</h3>
+        <p>STL, 3MF, OBJ, or STEP — drag it in for an instant 3D preview on a real-scale print bed.</p>
       </div>
-      <div class="step">
-        <div class="step-num">2</div>
+      <div class="step reveal">
+        <div class="step-num">02</div>
         <h3>Configure</h3>
-        <p>Choose printer, material, and quality preset. Import your OrcaSlicer profiles for exact settings.</p>
+        <p>Pick a built-in printer preset, or import your own machine, filament, and process profiles.</p>
       </div>
-      <div class="step">
-        <div class="step-num">3</div>
+      <div class="step reveal">
+        <div class="step-num">03</div>
         <h3>Slice</h3>
-        <p>Click Slice. OrcaSlicer WASM runs locally in a Web Worker and returns G-code in milliseconds.</p>
+        <p>The engine runs in a Web Worker and returns G-code in seconds. The UI never freezes.</p>
       </div>
-      <div class="step">
-        <div class="step-num">4</div>
-        <h3>Inspect & download</h3>
-        <p>Browse layers in the G-code visualiser, then download the file ready for your printer.</p>
+      <div class="step reveal">
+        <div class="step-num">04</div>
+        <h3>Inspect &amp; download</h3>
+        <p>Scrub through layers in the G-code visualiser, then download a file that's ready for your printer.</p>
       </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-inner hood-grid">
+    <div class="hood-text reveal">
+      <div class="section-label">Under the hood</div>
+      <h2>Built from the real thing</h2>
+      <p>OrcaWeb compiles the actual C++ OrcaSlicer core to WebAssembly with Emscripten — it isn't a reimplementation. The engine runs off the main thread in a Web Worker, and there's no 200 MB resource preload: the whole engine, OCCT included, is roughly 29 MB.</p>
+      <a class="hood-link" href="./docs/">Read the architecture docs →</a>
+    </div>
+    <div class="reveal">
+      <pre class="arch-diagram"><code>Browser
+<span class="tree">├─</span> React UI            <span class="dim">(main thread)</span>
+<span class="tree">└─</span> Web Worker
+   <span class="tree">└─</span> slicer.wasm       <span class="dim">~29 MB, incl. OCCT</span></code></pre>
     </div>
   </div>
 </section>
 
 <section class="cta-section">
-  <h2>Ready to slice?</h2>
-  <p>No sign-up. No installation. Works in any modern browser.</p>
-  <a class="btn btn-primary" href="./app/" style="display:inline-flex">
-    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
-    Launch OrcaWeb
+  <h2>Your printer is waiting.</h2>
+  <p>No sign-up. No install. Any modern desktop browser.</p>
+  <a class="btn btn-primary" href="./app/">
+    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
+    Launch Slicer
   </a>
 </section>
 
 <footer>
+  <p>Engine: <a href="https://github.com/SoftFever/OrcaSlicer" target="_blank" rel="noopener noreferrer">OrcaSlicer</a> © SoftFever &amp; contributors, AGPL-3.0 · UI: MIT</p>
   <p>
-    Powered by <a href="https://github.com/SoftFever/OrcaSlicer" target="_blank">OrcaSlicer</a> v2.3.2 ·
-    <a href="https://github.com/Hiosdra/OrcaWeb" target="_blank">github.com/Hiosdra/OrcaWeb</a> ·
+    <a href="https://github.com/Hiosdra/OrcaWeb" target="_blank" rel="noopener noreferrer">github.com/Hiosdra/OrcaWeb</a> ·
     <a href="./docs/">Documentation</a>
   </p>
 </footer>
+
+<script>
+  (function () {
+    document.documentElement.classList.add('js');
+    var prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (prefersReduced || !('IntersectionObserver' in window)) return;
+    var targets = document.querySelectorAll('.reveal');
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('in-view');
+          io.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
+    targets.forEach(function (t) { io.observe(t); });
+  })();
+</script>
 
 </body>
 </html>
