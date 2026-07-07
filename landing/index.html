@@ -193,6 +193,15 @@
     .features, .steps { grid-template-columns: 1fr; }
   }
 </style>
+<script>
+  // Gate the reveal-on-scroll enhancement before first paint: the `js` class
+  // is added only when the observer can actually run, so content never ends
+  // up permanently hidden (no IntersectionObserver / reduced motion) and
+  // never flashes visible-then-hidden (class set in <head>, not at </body>).
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches && 'IntersectionObserver' in window) {
+    document.documentElement.classList.add('js');
+  }
+</script>
 </head>
 <body>
 
@@ -365,7 +374,7 @@
 </section>
 
 <footer>
-  <p>Engine: <a href="https://github.com/SoftFever/OrcaSlicer" target="_blank" rel="noopener noreferrer">OrcaSlicer</a> © SoftFever &amp; contributors, AGPL-3.0 · UI: MIT</p>
+  <p>Engine: <a href="https://github.com/SoftFever/OrcaSlicer" target="_blank" rel="noopener noreferrer">OrcaSlicer</a> © SoftFever &amp; contributors, AGPL-3.0 · UI: AGPL-3.0-or-later</p>
   <p>
     <a href="https://github.com/Hiosdra/OrcaWeb" target="_blank" rel="noopener noreferrer">github.com/Hiosdra/OrcaWeb</a> ·
     <a href="./docs/">Documentation</a>
@@ -374,9 +383,7 @@
 
 <script>
   (function () {
-    document.documentElement.classList.add('js');
-    var prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReduced || !('IntersectionObserver' in window)) return;
+    if (!document.documentElement.classList.contains('js')) return;
     var targets = document.querySelectorAll('.reveal');
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
