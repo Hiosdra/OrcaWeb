@@ -98,13 +98,6 @@ Ostatnia aktualizacja: **2026-07-07** · wersja silnika: **OrcaSlicer v2.4.0** (
 |---------|-----------|
 | Zakres temperatur niezweryfikowany | Presety printer+filament mogą być niespójne dla egzotycznych kombinacji |
 
-### Importowanie profili
-
-| Problem | Szczegóły |
-|---------|-----------|
-| Mapowanie niekompletne | ~~Tylko ~30 pól z OrcaSlicera~~ Wszystkie pola trafiają do WASM (passthrough) — **naprawione w PR #14** |
-| Profile maszyny ignorowane | ~~Pola z sekcji `machine_settings` nie są przekazywane do WASM~~ — **naprawione w PR #14** |
-
 ### Inne UI
 
 | Problem | Szczegóły |
