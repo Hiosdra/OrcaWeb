@@ -75,8 +75,10 @@ runtime justification:
   available", but OCCT is now compiled into the engine (see the note above
   §3b in `apply.py`). The real `svg.cpp` depends only on OCCT + bundled
   `nanosvg`; SVG import may work unstubbed today. Needs verification, and if
-  restored, ADR-006's table needs updating (it and the FuzzySkin stub are
-  currently listed as still-stubbed, which is stale either way).
+  restored, ADR-006's table needs updating (it, the FuzzySkin stub, and the
+  `Format/STEP.cpp`/`Format/STEP.hpp` entries are currently listed as
+  still-stubbed, which is stale — `apply.py` already notes both are no longer
+  stubbed now that OCCT is compiled into the engine).
 
 ## Recommended next step
 
