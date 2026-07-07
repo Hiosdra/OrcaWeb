@@ -132,18 +132,16 @@ patch("CMakeLists.txt", [
         r'\1\n\noption(SLIC3R_WASM "Build for WebAssembly with Emscripten" OFF)',
         1,
     ),
-    # Skip wxWidgets & OpenGL in WASM mode
-    (
-        r'(find_package\s*\(\s*wxWidgets\b[^)]*\))',
-        r'if(NOT SLIC3R_WASM)\n\1\nendif()',
-        0,
-    ),
-    # Guard the main slicer executable against WASM builds
-    (
-        r'(add_subdirectory\s*\(\s*src\s*\))',
-        r'if(NOT SLIC3R_WASM)\n\1\nendif()\nif(SLIC3R_WASM)\n  add_subdirectory(src)\nendif()',
-        0,
-    ),
+    # NOTE: two entries formerly here were removed as dead/no-op (audited
+    # 2026-07-07, see mkdocs-docs/orca-patch-audit.md):
+    #  - a guard around find_package(wxWidgets) in this file: wxWidgets is
+    #    actually found in src/CMakeLists.txt inside `if(SLIC3R_GUI)`, which
+    #    WASM builds already force OFF (orca-wasm/CMakeLists.txt), so the
+    #    pattern here never matched anything.
+    #  - a wrap of add_subdirectory(src) into "if(NOT SLIC3R_WASM) ... endif()
+    #    if(SLIC3R_WASM) add_subdirectory(src) endif()" — src is added in both
+    #    branches, identical to the unpatched original.
+    #
     # Downgrade CMP0167 so the legacy FindBoost.cmake (module mode) is used.
     # Our Boost is built with b2 which does not install BoostConfig.cmake.
     (
@@ -154,18 +152,12 @@ patch("CMakeLists.txt", [
 ])
 
 # =============================================================================
-# 2. src/CMakeLists.txt — skip GUI subdirectory in WASM builds
-# =============================================================================
-patch("src/CMakeLists.txt", [
-    (
-        r'(add_subdirectory\s*\(\s*(?:GUI|slic3r|OrcaSlicer|bambu_studio)\s*\))',
-        r'if(NOT SLIC3R_WASM)\n\1\nendif()',
-        0,
-    ),
-    # libnoise: no longer excluded from WASM — Findlibnoise.cmake provides
-    # the WASM-compiled noise::noise target via CMAKE_MODULE_PATH.
-])
-
+# NOTE: §2 (src/CMakeLists.txt GUI-subdirectory guard) was removed (audited
+# 2026-07-07, see mkdocs-docs/orca-patch-audit.md). Its pattern matched
+# add_subdirectory(slic3r), which is already inside `if(SLIC3R_GUI)` —
+# and WASM builds already force SLIC3R_GUI=OFF — so the guard was redundant.
+# libnoise: no longer excluded from WASM — Findlibnoise.cmake provides
+# the WASM-compiled noise::noise target via CMAKE_MODULE_PATH.
 # =============================================================================
 # 3. GCode.hpp — fix narrowing in LayerResult::make_nop_layer_result
 #    On 32-bit WASM, size_t is uint32_t; std::numeric_limits<coord_t>::max()
@@ -239,12 +231,13 @@ patch("src/libslic3r/CMakeLists.txt", [
     ),
     # JPEG: embuilder pre-builds libjpeg into the Emscripten sysroot, so
     # find_package(JPEG) finds it automatically — no WASM guard needed.
-    # Freetype is linked for non-WIN32; Emscripten is non-WIN32, so guard it
-    (
-        r'(if\s*\(\s*NOT\s+WIN32\s*\)\s*\n\s*)(target_link_libraries\s*\(\s*libslic3r\s+PRIVATE\s+\$\{FREETYPE_LIBRARIES\}\s*\))',
-        r'if(NOT WIN32 AND NOT SLIC3R_WASM)\n    \2',
-        0,
-    ),
+    # NOTE: a guard around the FREETYPE_LIBRARIES link line formerly here was
+    # removed as dead (audited 2026-07-07, see mkdocs-docs/orca-patch-audit.md)
+    # — its regex never matched v2.4.0's source (a comment line sits between
+    # the `if(NOT WIN32)` and the target_link_libraries() it expected
+    # adjacent), and it was unnecessary anyway: orca-wasm/cmake/FindFreetype.cmake
+    # already stubs FREETYPE_LIBRARIES to an empty INTERFACE target, so linking
+    # it unconditionally is inert under WASM.
     # fontconfig (Linux non-WASM only)
     (
         r'(target_link_libraries\s*\(\s*libslic3r\s+PRIVATE\s+fontconfig\s*\))',
