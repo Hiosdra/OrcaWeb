@@ -26,18 +26,18 @@ of problem:
 ### Layer 1 — CMake Guards (`SLIC3R_WASM` option)
 
 `apply.py` injects a `SLIC3R_WASM OFF` CMake option into `orca/CMakeLists.txt`
-immediately after `project()`. OpenCV, Draco, and OpenVDB link targets are
-wrapped in `if(NOT SLIC3R_WASM)` guards or generator expressions.
+immediately after `project()`. Only `OpenVDB::openvdb`'s link is wrapped in a
+`if(NOT SLIC3R_WASM)` generator expression.
 
-wxWidgets, OpenGL, and FreeType/fontconfig are excluded a different way: they
-only get `find_package`d inside OrcaSlicer's own `if(SLIC3R_GUI)` block, and
-`orca-wasm/CMakeLists.txt` already forces `SLIC3R_GUI OFF` for WASM builds —
-so `apply.py` doesn't need (and, since a 2026-07-07 audit, no longer carries)
-its own guards for those. Likewise the `GUI/`, `slic3r/`, `OrcaSlicer/`, and
-`bambu_studio/` subdirectories are excluded by the same `SLIC3R_GUI OFF`
-switch, not by a WASM-specific guard on `add_subdirectory`. See
-[the patch audit](../orca-patch-audit.md) for the full reasoning behind
-removing those now-redundant guards.
+wxWidgets, OpenGL, FreeType/fontconfig, OpenCV, and Draco are all excluded a
+different way: they're either only `find_package`d inside OrcaSlicer's own
+`if(SLIC3R_GUI)` block (which `orca-wasm/CMakeLists.txt` forces `OFF` for
+WASM builds), or resolve unconditionally through the stub `Find*.cmake`
+modules in `orca-wasm/cmake/` (which `orca-wasm/CMakeLists.txt` always
+prepends to `CMAKE_MODULE_PATH`, taking priority over anything OrcaSlicer's
+own `CMakeLists.txt` appends to that path later) — either way `apply.py`
+doesn't need its own guard. See [the patch audit](../orca-patch-audit.md) for
+the full reasoning and how each was verified.
 
 Compile definitions `SLIC3R_WASM`, `SLIC3R_NO_OPENVDB`, `SLIC3R_NO_OPENCV` are
 injected as `PUBLIC` into `libslic3r`'s `target_compile_definitions`, making

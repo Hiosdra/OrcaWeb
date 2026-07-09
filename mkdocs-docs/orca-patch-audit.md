@@ -17,7 +17,15 @@ guarded CMake targets against the stub `Find*.cmake` modules in
 
 **Status:** items 1–4 were removed and validated in
 [#92](https://github.com/Hiosdra/OrcaWeb/pull/92) (full `build-wasm.yml` CI
-build + E2E smoke test, both green). Items 5–8 are still open.
+build + E2E smoke test, both green). Items 5–8 are being removed in
+[#95](https://github.com/Hiosdra/OrcaWeb/pull/95); items 5–6 (the `opencv_world`
+and draco guards) were additionally verified with an isolated CMake configure
+test — a minimal project reproducing the exact unguarded `find_package(OpenCV
+REQUIRED core)` / `find_package(draco REQUIRED)` calls, with
+`orca-wasm/cmake` on `CMAKE_MODULE_PATH` — confirming both resolve via the
+stub `Find*.cmake` modules (`OpenCV_FOUND`/`draco_FOUND` both `TRUE`,
+`opencv_world`/`draco::draco` both linkable) independent of the full
+`build-wasm.yml` run, which #95 also triggers for final confirmation.
 
 ## Summary
 
@@ -27,15 +35,16 @@ build + E2E smoke test, both green). Items 5–8 are still open.
 | 2 | Root: wrap `add_subdirectory(src)` | **Removed (#92)** | Replacement added `src` in both the WASM and non-WASM branches — identical to the unpatched original |
 | 3 | `src/CMakeLists.txt`: guard GUI subdirs | **Removed (#92)** | Matched `add_subdirectory(slic3r)`, already inside the disabled `if(SLIC3R_GUI)` block |
 | 4 | `libslic3r/CMakeLists.txt`: FreeType guard | **Removed (#92)** | Regex never matched (a comment line breaks it); harmless anyway since `FindFreetype.cmake` stubs `FREETYPE_LIBRARIES` to an empty INTERFACE target |
-| 5 | `libslic3r/CMakeLists.txt`: `opencv_world` genexpr | **Open — likely redundant** | `FindOpenCV.cmake` already stubs `opencv_world` as an empty INTERFACE target; linking it unconditionally is a no-op. Verify with a test build before removing |
-| 6 | `libslic3r/CMakeLists.txt`: draco guard + `draco::draco` genexpr | **Open — likely redundant** | Duplicates `Finddraco.cmake`. Currently the patch disables `find_package(draco)` under WASM, which makes the stub module dead code — pick one mechanism, not both |
-| 7 | `Thumbnails.cpp`: `JCS_EXT_RGBA` define | **Open — unused & risky as fallback** | The only use site is inside the function body §6b fully replaces; as a "fallback" it would silently downgrade a compile error into a runtime libjpeg rejection |
-| 8 | `FuzzySkin.cpp`: `static thread_local` variant | **Open — defensive, 0 matches** | v2.4.0 has only bare `thread_local` (3 occurrences); this is anti-"static static" insurance with no current target |
+| 5 | `libslic3r/CMakeLists.txt`: `opencv_world` genexpr | **Removed (#95)** | `FindOpenCV.cmake` already stubs `opencv_world` as an empty INTERFACE target; linking it unconditionally is a no-op — confirmed with an isolated CMake configure test, plus `build-wasm.yml` |
+| 6 | `libslic3r/CMakeLists.txt`: draco guard + `draco::draco` genexpr | **Removed (#95)** | Duplicates `Finddraco.cmake`; OrcaSlicer's own `list(APPEND CMAKE_MODULE_PATH ...)` (in `orca/CMakeLists.txt`) runs after `orca-wasm`'s `list(PREPEND ...)`, so it can't shadow the stub — confirmed with the same CMake configure test |
+| 7 | `Thumbnails.cpp`: `JCS_EXT_RGBA` define | **Removed (#95)** | The only use site was inside the function body §6b fully replaces; as a "fallback" it would silently downgrade a compile error into a runtime libjpeg rejection |
+| 8 | `FuzzySkin.cpp`: `static thread_local` variant | **Removed (#95)** | v2.4.0 has only bare `thread_local` (3 occurrences); this was anti-"static static" insurance with no current target |
 
 Items 1–4 changed no build output — CI confirmed OrcaSlicer v2.4.0 still
 compiles and the WASM engine still passes its E2E smoke test with those
-guards gone. Items 5–8 are believed equally safe by the same reasoning but
-haven't been through a build yet.
+guards gone. Items 5–8 are expected to be equally inert, backed by static
+analysis plus the isolated CMake test above; final confirmation is
+`build-wasm.yml` on #95.
 
 ## Confirmed load-bearing (do not touch)
 
@@ -88,6 +97,7 @@ true once OCCT started compiling into the engine, and mischaracterized the
 
 ## Recommended next step
 
-Validate items 5–6 with a real WASM build (same process used for items 1–4
-in #92) before removing them; items 7–8 are safe to drop without a build
-since they're either unreachable or actively risky as written.
+All eight items from the original audit are now removed or in flight (#95).
+What remains open is the "worth a closer look" list above — the `OpenVDB`
+genexpr guard and the `svg.cpp` stub — both deferred pending further
+investigation rather than acted on.
