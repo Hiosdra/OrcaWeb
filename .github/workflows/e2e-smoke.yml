@@ -7,6 +7,12 @@ name: E2E Smoke Test
 # same script local dev uses), not a freshly built one — build-wasm.yml's own
 # Node-level smoke test (orca-wasm/scripts/smoke-test.mjs) already gates
 # engine-source changes before they're ever published.
+#
+# If a PR bumps ORCA_VERSION before build-wasm.yml has ever published a
+# release for the new version (unavoidable for the PR that does the bump),
+# `npm run setup` falls back to the newest available wasm-v* release instead
+# of failing outright — this check only needs *some* real published engine to
+# drive the UI against, not specifically the one currently pinned.
 on:
   pull_request:
 
