@@ -132,15 +132,9 @@ patch("CMakeLists.txt", [
         r'\1\n\noption(SLIC3R_WASM "Build for WebAssembly with Emscripten" OFF)',
         1,
     ),
-    # NOTE: two entries formerly here were removed as dead/no-op (audited
-    # 2026-07-07, see mkdocs-docs/orca-patch-audit.md):
-    #  - a guard around find_package(wxWidgets) in this file: wxWidgets is
-    #    actually found in src/CMakeLists.txt inside `if(SLIC3R_GUI)`, which
-    #    WASM builds already force OFF (orca-wasm/CMakeLists.txt), so the
-    #    pattern here never matched anything.
-    #  - a wrap of add_subdirectory(src) into "if(NOT SLIC3R_WASM) ... endif()
-    #    if(SLIC3R_WASM) add_subdirectory(src) endif()" — src is added in both
-    #    branches, identical to the unpatched original.
+    # No guard needed for wxWidgets: it's only found() in src/CMakeLists.txt
+    # inside `if(SLIC3R_GUI)`, and orca-wasm/CMakeLists.txt already forces
+    # SLIC3R_GUI OFF for WASM builds.
     #
     # Downgrade CMP0167 so the legacy FindBoost.cmake (module mode) is used.
     # Our Boost is built with b2 which does not install BoostConfig.cmake.
@@ -152,10 +146,8 @@ patch("CMakeLists.txt", [
 ])
 
 # =============================================================================
-# NOTE: §2 (src/CMakeLists.txt GUI-subdirectory guard) was removed (audited
-# 2026-07-07, see mkdocs-docs/orca-patch-audit.md). Its pattern matched
-# add_subdirectory(slic3r), which is already inside `if(SLIC3R_GUI)` —
-# and WASM builds already force SLIC3R_GUI=OFF — so the guard was redundant.
+# No guard needed here either: add_subdirectory(slic3r) is already inside
+# `if(SLIC3R_GUI)`, which WASM builds force OFF.
 # libnoise: no longer excluded from WASM — Findlibnoise.cmake provides
 # the WASM-compiled noise::noise target via CMAKE_MODULE_PATH.
 # =============================================================================
@@ -206,23 +198,13 @@ patch("src/libslic3r/CMakeLists.txt", [
         r'TKDESTEP',
         0,
     ),
-    # Wrap OpenCV link
-    (
-        r'(opencv_world)',
-        r'$<$<NOT:$<BOOL:${SLIC3R_WASM}>>:opencv_world>',
-        0,
-    ),
-    # Wrap draco find / link
-    (
-        r'(find_package\s*\(\s*draco\b[^)]*\))',
-        r'if(NOT SLIC3R_WASM)\n\1\nendif()',
-        0,
-    ),
-    (
-        r'(draco::draco)',
-        r'$<$<NOT:$<BOOL:${SLIC3R_WASM}>>:draco::draco>',
-        0,
-    ),
+    # No guard needed for `opencv_world` or draco: orca-wasm/cmake/FindOpenCV.cmake
+    # and Finddraco.cmake already stub `opencv_world` and `draco::draco` as
+    # empty INTERFACE targets and set *_FOUND, and this repo's WASM build
+    # always prepends orca-wasm/cmake to CMAKE_MODULE_PATH, so those stubs are
+    # the only Find modules that can ever resolve here. (OpenVDB's genexpr
+    # guard below is kept — it interacts with the Layer 2 override injection
+    # in a way these two don't.)
     # Wrap OpenVDB link
     (
         r'(OpenVDB::openvdb)',
@@ -231,13 +213,9 @@ patch("src/libslic3r/CMakeLists.txt", [
     ),
     # JPEG: embuilder pre-builds libjpeg into the Emscripten sysroot, so
     # find_package(JPEG) finds it automatically — no WASM guard needed.
-    # NOTE: a guard around the FREETYPE_LIBRARIES link line formerly here was
-    # removed as dead (audited 2026-07-07, see mkdocs-docs/orca-patch-audit.md)
-    # — its regex never matched v2.4.0's source (a comment line sits between
-    # the `if(NOT WIN32)` and the target_link_libraries() it expected
-    # adjacent), and it was unnecessary anyway: orca-wasm/cmake/FindFreetype.cmake
-    # already stubs FREETYPE_LIBRARIES to an empty INTERFACE target, so linking
-    # it unconditionally is inert under WASM.
+    # No guard needed for FREETYPE_LIBRARIES either: orca-wasm/cmake/FindFreetype.cmake
+    # already stubs it to an empty INTERFACE target, so linking it
+    # unconditionally is inert under WASM.
     # fontconfig (Linux non-WASM only)
     (
         r'(target_link_libraries\s*\(\s*libslic3r\s+PRIVATE\s+fontconfig\s*\))',
@@ -258,15 +236,11 @@ patch("src/libslic3r/CMakeLists.txt", [
 # 3c. FuzzySkin.cpp — thread_local compatibility
 #     Emscripten single-threaded mode may not support thread_local or
 #     std::this_thread without -sUSE_PTHREADS; replace with static equivalents.
+#     If a future OrcaSlicer version writes "static thread_local" instead of
+#     bare `thread_local`, the regex below will produce "static static" and
+#     fail loudly at compile time rather than silently miscompiling.
 # =============================================================================
 patch("src/libslic3r/Feature/FuzzySkin/FuzzySkin.cpp", [
-    # Handle "static thread_local" first to avoid producing "static static".
-    # (Guard against both bare and static thread_local variants.)
-    (
-        r'\bstatic\s+thread_local\b',
-        r'static',
-        0,
-    ),
     (
         r'\bthread_local\b',
         r'static',
@@ -389,19 +363,10 @@ patch("src/libslic3r/Platform.cpp", [
 
 # =============================================================================
 # 6. GCode/Thumbnails.cpp — JPEG compatibility for Emscripten
-#    6a: define JCS_EXT_RGBA if not already defined (libjpeg-turbo extension —
-#        must satisfy any compile-time references even though we don't use it)
-#    6b: replace compress_thumbnail_jpg body to strip alpha before compressing
-#        (Emscripten ships standard IJG libjpeg, not libjpeg-turbo; JCS_EXT_RGBA
-#        at value 13 is not a valid input colour space in standard libjpeg)
+#    Replace compress_thumbnail_jpg body to strip alpha before compressing
+#    (Emscripten ships standard IJG libjpeg, not libjpeg-turbo; JCS_EXT_RGBA
+#    at value 13 is not a valid input colour space in standard libjpeg).
 # =============================================================================
-patch("src/libslic3r/GCode/Thumbnails.cpp", [
-    (
-        r'(#include\s*<jpeglib\.h>)',
-        r'\1\n#ifndef JCS_EXT_RGBA\n#  define JCS_EXT_RGBA ((J_COLOR_SPACE)13)\n#endif',
-        0,
-    ),
-])
 
 _thumb_cpp = ORCA / "src/libslic3r/GCode/Thumbnails.cpp"
 if _thumb_cpp.exists():
