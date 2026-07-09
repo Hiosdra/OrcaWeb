@@ -2,7 +2,7 @@
 
 Ten dokument opisuje aktualny stan projektu: zaimplementowane funkcje, znane ograniczenia i planowane ulepszenia.
 
-Ostatnia aktualizacja: **2026-07-09** · wersja silnika: **OrcaSlicer v2.4.0** (własny build, wdrożony na produkcji) · wersja aplikacji: **v0.7.29**
+Ostatnia aktualizacja: **2026-07-09** · wersja silnika: **OrcaSlicer v2.4.0** (własny build, wdrożony na produkcji) · wersja aplikacji: **v0.7.30**
 
 ---
 
