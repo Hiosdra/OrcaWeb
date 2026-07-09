@@ -6,7 +6,7 @@ OrcaWeb embeds a WebAssembly build of **OrcaSlicer** (https://github.com/SoftFev
 
 - License: GNU Affero General Public License v3.0 (AGPL-3.0)
 - Copyright: SoftFever and OrcaSlicer contributors
-- Source of the version used: https://github.com/SoftFever/OrcaSlicer/tree/v2.4.0
+- Source of the version used: https://github.com/SoftFever/OrcaSlicer/tree/v2.4.2
 - Modifications applied for the WASM build: see `orca-wasm/patches/apply.py` in this repository
 
 Per AGPL-3.0 §13, the full source for this modified build (including all patches) is available at:

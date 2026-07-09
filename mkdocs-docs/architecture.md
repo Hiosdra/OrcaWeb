@@ -40,9 +40,9 @@ The React web UI is a temporary proof-of-concept to demonstrate the engine. It i
 │   └──────────────────┬─────────────────────────────┘    │
 │                      │ fetch                             │
 │   ┌──────────────────▼─────────────────────────────┐    │
-│   │  GitHub Releases: wasm-v2.4.0                  │    │
+│   │  GitHub Releases: wasm-v2.4.2                  │    │
 │   │  ├── slicer.js    ~210 KB  Emscripten glue     │    │
-│   │  └── slicer.wasm  ~29 MB   OrcaSlicer v2.4.0   │    │
+│   │  └── slicer.wasm  ~29 MB   OrcaSlicer v2.4.2   │    │
 │   │                   (incl. OCCT STEP engine)      │    │
 │   └────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────┘
@@ -305,18 +305,18 @@ File drop
 === "Production (GitHub Pages)"
     ```bash
     # Triggered automatically on push to master
-    # deploy.yml downloads slicer.js + slicer.wasm from release wasm-v2.4.0
+    # deploy.yml downloads slicer.js + slicer.wasm from release wasm-v2.4.2
     # and embeds them in the gh-pages branch under app/wasm/
     ```
 
 === "Build WASM engine"
     ```bash
     # GitHub Actions → Build WASM → Run workflow
-    # Or: git tag v2.4.0-ow1 && git push --tags
+    # Or: git tag v2.4.2-ow1 && git push --tags
     # Produces: slicer.js (~210 KB) + slicer.wasm (~29 MB)
     # Runs orca-wasm/scripts/smoke-test.mjs before publishing (ADR-009) —
     # a build that fails the smoke test never reaches the release step
-    # Published as GitHub Release wasm-v2.4.0
+    # Published as GitHub Release wasm-v2.4.2
     ```
 
 ## Stack
@@ -327,6 +327,6 @@ File drop
 | Styling | Tailwind CSS v4 | Custom `orca-*` colour scale |
 | 3D | Three.js 0.184 | STLLoader, OrbitControls, LineSegments2 (fat lines) |
 | Bundler | Vite 8 | Worker ES format, configurable base |
-| WASM | OrcaSlicer **v2.4.0** | Emscripten, single-threaded, self-built |
+| WASM | OrcaSlicer **v2.4.2** | Emscripten, single-threaded, self-built |
 | Worker | Web Worker (ES module) | Blob URL for dynamic import |
 | License | AGPL-3.0-or-later | Source link in UI footer per §13 |

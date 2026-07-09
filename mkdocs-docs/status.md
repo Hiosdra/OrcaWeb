@@ -2,7 +2,7 @@
 
 Ten dokument opisuje aktualny stan projektu: zaimplementowane funkcje, znane ograniczenia i planowane ulepszenia.
 
-Ostatnia aktualizacja: **2026-07-09** · wersja silnika: **OrcaSlicer v2.4.0** (własny build, wdrożony na produkcji) · wersja aplikacji: **v0.7.30**
+Ostatnia aktualizacja: **2026-07-09** · wersja silnika: **OrcaSlicer v2.4.2** (własny build, wdrożony na produkcji) · wersja aplikacji: **v0.7.30**
 
 ---
 
@@ -37,7 +37,7 @@ Ostatnia aktualizacja: **2026-07-09** · wersja silnika: **OrcaSlicer v2.4.0** (
 | Funkcja | Uwagi |
 |---------|-------|
 | Slicowanie STL → G-code | W Web Workerze, nie blokuje UI |
-| Własny build OrcaSlicer **v2.4.0** | Zbudowany przez `orca-wasm/` + Emscripten; artefakty w release `wasm-v2.4.0` |
+| Własny build OrcaSlicer **v2.4.2** | Zbudowany przez `orca-wasm/` + Emscripten; artefakty w release `wasm-v2.4.2` |
 | `orc_obj_to_stl` | Nowy eksport WASM: konwersja OBJ → binary STL bez potrzeby `orc_init`; wynik zwracany jako `ArrayBuffer` do workera |
 | `orc_slice_multi` | Wiele STL → jeden G-code: auto-arrange przez `arrange_objects()` (libnest2d + NLopt); wynik identyczny jak `orc_slice` |
 | Brak `slicer.data` | Headless flat-config slicer nie czyta `orca/resources` → plik danych zredukowany **200 MB → 0** |
@@ -78,7 +78,7 @@ Ostatnia aktualizacja: **2026-07-09** · wersja silnika: **OrcaSlicer v2.4.0** (
 |--------|--------|
 | GitHub Actions CI (deploy.yml) | ✅ buduje i deployuje na każdy push do `master` |
 | Serwowanie WASM z tej samej origin | ✅ brak CORS — pliki w `gh-pages/app/wasm/` |
-| Release WASM `wasm-v2.4.0` | ✅ `slicer.js` + `slicer.wasm` (~29 MB łącznie, z OCCT STEP) |
+| Release WASM `wasm-v2.4.2` | ✅ `slicer.js` + `slicer.wasm` (~29 MB łącznie, z OCCT STEP) |
 | Deploy resilience | ✅ fallback na poprzedni `gh-pages` gdy release nie istnieje |
 | CI build na PRach (ścieżki orca-wasm/) | ✅ każdy PR dotykający silnika uruchamia ~12 min build |
 | E2E smoke test na PRach (e2e-smoke.yml) | ✅ każdy otwarty PR — pobiera opublikowany silnik WASM i slicuje Voron Design Cube v7 przez prawdziwe UI (Playwright) |
@@ -191,7 +191,7 @@ orca-wasm/                 ✅ aktywny pipeline buildowy
 ├── overrides/             ✅ C++ stuby (OCCT/OpenVDB/OpenCV/Draco)
 └── patches/apply.py       ✅ patcher CMake + bugfixów
 
-public/wasm/               ✅ artefakty z release wasm-v2.4.0 (slicer.js + slicer.wasm)
+public/wasm/               ✅ artefakty z release wasm-v2.4.2 (slicer.js + slicer.wasm)
 ```
 
 Brak katalogu `cli/` jest świadomy — CLI zostało zaimplementowane, a następnie w całości usunięte (`chore: remove CLI` — frontend → bridge → engine only). Nie jest to cel projektu.

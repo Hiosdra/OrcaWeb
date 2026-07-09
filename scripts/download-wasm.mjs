@@ -17,7 +17,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const WASM_DIR = join(__dirname, '../public/wasm')
 // Must match build-wasm.yml's/deploy.yml's ORCA_VERSION default — bump all
 // three together when upgrading the upstream OrcaSlicer version.
-const ORCA_VERSION = 'v2.4.0'
+const ORCA_VERSION = 'v2.4.2'
 const REPO = 'Hiosdra/OrcaWeb'
 
 // approxSize is only used to estimate the download progress bar's total
@@ -73,8 +73,25 @@ async function resolveLatestWasmTag() {
       best = tag
     }
   }
-  if (!best) throw new Error(`No release found matching ${baseTag}(-patchN)`)
-  return best
+  if (best) return best
+
+  // No release published yet for the currently pinned ORCA_VERSION — e.g.
+  // right after bumping it in a PR, before build-wasm.yml has ever run for
+  // it. deploy.yml already handles this identical gap (falls back to the
+  // previous gh-pages deploy) for the same reason: a version bump landing
+  // shouldn't hard-block every other PR/local dev just because the new
+  // engine hasn't been built and published yet. Fall back to whichever
+  // wasm-v* release is newest overall (the GitHub API returns releases
+  // newest-first) — for local dev that's a working, if not-yet-current,
+  // engine; for e2e-smoke.yml it's still a real published binary to drive
+  // the UI against, which is all that check needs (see ADR-010 — it
+  // validates the UI/worker glue, not the pinned engine version itself).
+  const fallback = releases.find(r => r.tag_name.startsWith('wasm-v'))
+  if (!fallback) {
+    throw new Error(`No release found matching ${baseTag}(-patchN), and no other wasm-v* release exists to fall back to`)
+  }
+  console.warn(`  ⚠ No release found matching ${baseTag}(-patchN) — falling back to latest published release: ${fallback.tag_name}\n`)
+  return fallback.tag_name
 }
 
 function formatBytes(bytes) {

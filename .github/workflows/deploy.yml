@@ -49,7 +49,7 @@ jobs:
       # is resolved at deploy time in "Download WASM artifacts" below, since
       # releases are immutable (wasm-$ORCA_VERSION, then wasm-$ORCA_VERSION-
       # patch1, -patch2, ... for later fixes — see build-wasm.yml).
-      ORCA_VERSION: v2.4.0
+      ORCA_VERSION: v2.4.2
 
     steps:
       - uses: actions/checkout@v7

@@ -65,7 +65,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
     try {
       const wasmBase = msg.url.replace(/\/slicer\.js$/, '')
       // slicer.js/slicer.wasm are served under a fixed, unhashed filename
-      // (they're downloaded from the wasm-v2.4.0 GitHub Release at deploy
+      // (they're downloaded from the wasm-v2.4.2 GitHub Release at deploy
       // time, not processed by Vite's asset pipeline, so they get no
       // content-hash filename the way JS/CSS bundles do). The PWA service
       // worker caches them with a CacheFirst strategy (vite.config.ts) that
@@ -114,7 +114,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         URL.revokeObjectURL(blobUrl)
       }
 
-      // The v2.4.0 engine has no slicer.data (the orca/resources preload was
+      // The v2.4.2 engine has no slicer.data (the orca/resources preload was
       // dropped — verified that headless slicing never reads /resources), so
       // there is nothing to fetch or reassemble here.
 

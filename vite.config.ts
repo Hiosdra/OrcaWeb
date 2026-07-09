@@ -15,15 +15,15 @@ const RELEASE_DATE = process.env.VITE_RELEASE_DATE ?? new Date().toISOString().s
 // app release. Falls back to the app version for local dev, where there's no
 // deploy-time WASM_TAG and the PWA service worker is disabled anyway.
 const WASM_VERSION = process.env.VITE_WASM_VERSION ?? version
-// The actually-resolved WASM release tag (e.g. "v2.4.0-patch2") — a
+// The actually-resolved WASM release tag (e.g. "v2.4.2-patch2") — a
 // human-readable label for the UI, distinct from WASM_VERSION above (which is
 // a cache-busting key, not something worth showing anyone). Set by deploy.yml
 // from $ENGINE_LABEL, which reflects the specific release it downloaded, not
-// just the upstream OrcaSlicer target family ($ORCA_VERSION stays "v2.4.0"
+// just the upstream OrcaSlicer target family ($ORCA_VERSION stays "v2.4.2"
 // across every patch, so it can't tell you which bridge build is live — see
 // the "Download WASM artifacts" step). The fallback here is for local dev
 // only, where there's no resolved release to report.
-const ORCA_ENGINE_VERSION = process.env.VITE_ORCA_VERSION ?? 'v2.4.0 (local)'
+const ORCA_ENGINE_VERSION = process.env.VITE_ORCA_VERSION ?? 'v2.4.2 (local)'
 
 export default defineConfig({
   define: {
