@@ -118,7 +118,10 @@ function parseGcode(gcode: string): ParseResult {
   // comments — authoritative even in spiral/vase mode, where Z rises
   // continuously and no two extrusions share a Z value. Third-party G-code
   // without markers falls back to bucketing by each move's starting Z.
-  const hasLayerMarkers = /^;\s*(LAYER_CHANGE|CHANGE_LAYER)/im.test(gcode)
+  // Probe only the head: the first marker sits right after the header +
+  // start G-code (well under 256 KB even with large object-definition
+  // preambles), and this avoids a full scan of marker-less multi-MB files.
+  const hasLayerMarkers = /^;\s*(LAYER_CHANGE|CHANGE_LAYER)/im.test(gcode.slice(0, 262_144))
 
   const markerLayers: LayerAcc[] = []
   const layerMap = new Map<number, LayerAcc>()

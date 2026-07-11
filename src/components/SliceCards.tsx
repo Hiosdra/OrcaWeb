@@ -48,7 +48,9 @@ function downloadAllAsZip(queue: QueueItem[]) {
   }
   // G-code is highly repetitive; level 6 halves the archive at negligible cost
   const zipped = zipSync(files, { level: 6 })
-  downloadBlob(new Blob([zipped.buffer as ArrayBuffer], { type: 'application/zip' }), 'orcaweb-gcode.zip')
+  // Pass the view, not .buffer — Blob respects the view's offset/length,
+  // while a raw buffer would leak padding if the array were ever a subarray.
+  downloadBlob(new Blob([zipped as Uint8Array<ArrayBuffer>], { type: 'application/zip' }), 'orcaweb-gcode.zip')
 }
 
 // ── Slice header ──────────────────────────────────────────────────────────────
