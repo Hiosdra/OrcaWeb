@@ -344,6 +344,11 @@ File drop
     # and Content-Type: application/wasm) and the engine loads cross-origin.
     # The GitHub Pages deploy therefore remains the source of truth for the
     # engine binary — a Cloudflare-only deploy cannot ship a new engine.
+    #
+    # Cache key + header label come from app/wasm/engine-version.json,
+    # published by deploy.yml alongside the wasm files (fallbacks: GitHub
+    # Releases API, then the app version — the API is rate-limited from
+    # Cloudflare's shared build IPs, so the manifest is the reliable path).
     ```
 
 === "Build WASM engine"

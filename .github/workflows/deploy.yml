@@ -272,6 +272,19 @@ jobs:
           WASM_VERSION=$(sha256sum public/wasm/slicer.wasm | cut -c1-16)
           echo "WASM_VERSION=$WASM_VERSION" >> "$GITHUB_ENV"
           echo "Using WASM cache key: $WASM_VERSION"
+          # Engine manifest, deployed next to the wasm files (public/ flows
+          # into dist/ and then gh-pages under app/wasm/). Consumed by
+          # scripts/cf-build.mjs: the Cloudflare mirror build reads it to get
+          # the same cache-busting key and header label as this deploy —
+          # crucially describing the exact bytes gh-pages is serving (works
+          # in the restore-fallback path above too). cf-build used to resolve
+          # this via the GitHub Releases API instead, but Cloudflare's shared
+          # build egress IPs hit the unauthenticated rate limit (observed
+          # live: the first CF build shipped an "unresolved" label and fell
+          # back to the app version as the cache key); a static file on
+          # GitHub Pages has no such limit.
+          jq -n --arg label "$ENGINE_LABEL" --arg version "$WASM_VERSION" \
+            '{label: $label, version: $version}' > public/wasm/engine-version.json
 
       # ── Build Vite app ───────────────────────────────────────────────
       - name: Build Vite app
