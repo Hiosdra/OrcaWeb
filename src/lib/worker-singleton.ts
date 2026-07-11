@@ -9,14 +9,25 @@ const listeners = new Set<Listener>()
 
 export type WasmStatus = 'idle' | 'loading' | 'ready' | 'error'
 let wasmStatus: WasmStatus = 'idle'
-let wasmError = ''
 
 export function getWasmStatus(): WasmStatus { return wasmStatus }
-export function getWasmError(): string { return wasmError }
 
 export function addWorkerListener(fn: Listener): () => void {
   listeners.add(fn)
   return () => listeners.delete(fn)
+}
+
+/**
+ * Hard-stop the current worker (user-initiated cancel). The WASM slice loop
+ * is synchronous inside the worker, so terminating the worker is the only
+ * way to abort a running slice. The next getWorker() call spawns a fresh
+ * worker and reloads the engine (served from the service-worker cache after
+ * the first load, so the restart is cheap).
+ */
+export function terminateWorker(): void {
+  worker?.terminate()
+  worker = null
+  wasmStatus = 'idle'
 }
 
 export function getWorker(): Worker {
@@ -33,7 +44,6 @@ export function getWorker(): Worker {
       wasmStatus = 'ready'
     } else if (msg.type === 'WASM_ERROR') {
       wasmStatus = 'error'
-      wasmError = msg.message
       // Whether the module failed to load or aborted mid-session, this
       // worker's WASM instance is unusable from here on (Emscripten has no
       // "reload after abort" path). Drop it so the next getWorker() call
@@ -48,10 +58,9 @@ export function getWorker(): Worker {
 
   worker.onerror = (e) => {
     wasmStatus = 'error'
-    wasmError = e.message ?? 'Worker crashed'
     worker?.terminate()
     worker = null
-    const msg: WorkerOutMessage = { type: 'WASM_ERROR', message: wasmError }
+    const msg: WorkerOutMessage = { type: 'WASM_ERROR', message: e.message ?? 'Worker crashed' }
     listeners.forEach((fn) => fn(msg))
   }
 

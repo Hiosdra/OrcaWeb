@@ -89,6 +89,27 @@ export interface SlicePreset {
   config: Partial<OrcaConfig>
 }
 
+// --- Slice queue ---
+
+export type QueueItemStatus = 'converting' | 'ready' | 'slicing' | 'done' | 'error'
+
+export interface QueueItem {
+  id: string
+  name: string
+  originalSize: number
+  /** Original uploaded file — kept so a conversion can be re-sent if the
+   *  worker holding the in-flight request is terminated (user cancel). */
+  sourceFile: File
+  stlFile: File | null
+  status: QueueItemStatus
+  gcode?: string
+  gcodeFilename?: string
+  /** Set when the config changed after this item was sliced — its G-code no
+   *  longer reflects the current settings and Slice re-runs it. */
+  stale?: boolean
+  error?: string
+}
+
 // --- Worker message protocol ---
 
 export type WorkerInMessage =
@@ -106,51 +127,36 @@ export type WorkerInMessage =
       // = inherit default). See orc_slice_multi in orca-wasm/bridge/slicer.cpp.
       extruderIds?: number[]
     }
-  | { type: 'OBJ_TO_STL'; obj: ArrayBuffer; filename: string }
-  | { type: 'CAD_TO_STL'; cad: ArrayBuffer; filename: string }
+  // requestId is opaque to the worker — echoed back verbatim on the matching
+  // *_COMPLETE/*_ERROR so the main thread can correlate responses (it uses
+  // the queue item id).
+  | { type: 'OBJ_TO_STL'; obj: ArrayBuffer; requestId: string }
+  | { type: 'CAD_TO_STL'; cad: ArrayBuffer; requestId: string }
 
 export type WorkerOutMessage =
-  | { type: 'WORKER_READY' }
   | { type: 'WASM_LOADED' }
   | { type: 'WASM_ERROR'; message: string }
   | { type: 'SLICE_COMPLETE'; gcode: string }
   | { type: 'SLICE_ERROR'; code: number; message: string }
   | { type: 'SLICE_MULTI_COMPLETE'; gcode: string }
   | { type: 'SLICE_MULTI_ERROR'; code: number; message: string }
-  | { type: 'OBJ_STL_COMPLETE'; stl: ArrayBuffer; filename: string }
-  | { type: 'OBJ_STL_ERROR'; message: string; filename: string }
-  | { type: 'CAD_STL_COMPLETE'; stl: ArrayBuffer; filename: string }
-  | { type: 'CAD_STL_ERROR'; message: string; filename: string }
+  | { type: 'OBJ_STL_COMPLETE'; stl: ArrayBuffer; requestId: string }
+  | { type: 'OBJ_STL_ERROR'; message: string; requestId: string }
+  | { type: 'CAD_STL_COMPLETE'; stl: ArrayBuffer; requestId: string }
+  | { type: 'CAD_STL_ERROR'; message: string; requestId: string }
 
 // --- G-code statistics ---
 
 export interface GcodeStats {
-  /** Total bytes in the G-code file */
-  bytes: number
-  /** Total number of lines */
-  lines: number
   /** Total layer count (from slicer comment) */
   layers?: number
   /** Estimated print time string, e.g. "1h 2m 5s" */
   printTime?: string
   /** Total filament length in mm */
   filamentMm?: number
-  /** Total filament volume in cm³ */
-  filamentCm3?: number
   /** Total filament weight in grams */
   filamentG?: number
 }
-
-// --- App state ---
-
-export type AppStep = 'upload' | 'settings' | 'slice'
-
-export type SliceStatus =
-  | { phase: 'idle' }
-  | { phase: 'loading-wasm' }
-  | { phase: 'slicing' }
-  | { phase: 'done'; gcode: string; filename: string }
-  | { phase: 'error'; message: string }
 
 export interface OrcaModule {
   _malloc(size: number): number
@@ -206,7 +212,12 @@ export interface OrcaModule {
 }
 
 export interface OrcaModuleOptions {
-  wasmBinary?: ArrayBuffer
+  /** Emscripten hook: caller supplies the compiled+instantiated wasm instance
+   *  via successCallback (lets us use WebAssembly.compileStreaming). */
+  instantiateWasm?: (
+    imports: WebAssembly.Imports,
+    successCallback: (instance: WebAssembly.Instance) => void,
+  ) => Record<string, never>
   locateFile?: (path: string) => string
   printErr?: (msg: string) => void
   onAbort?: (msg: string) => void

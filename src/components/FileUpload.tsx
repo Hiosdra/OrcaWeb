@@ -1,90 +1,104 @@
-import { useRef, useState, useCallback } from 'react'
+import { useRef, useState, useEffect, useCallback } from 'react'
 import clsx from 'clsx'
+import { UploadIcon } from './icons'
 
 interface Props {
   onFiles: (files: File[]) => void
   loadedCount: number
 }
 
+const isAccepted = (f: File) => /\.(stl|3mf|obj|step|stp)$/i.test(f.name)
+
 export function FileUpload({ onFiles, loadedCount }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
+  // Counter instead of a boolean: dragging over child elements fires
+  // dragleave on the parent, which made the highlight flicker.
+  const dragDepth = useRef(0)
   const [dragging, setDragging] = useState(false)
+  const [rejected, setRejected] = useState<string[]>([])
 
-  const isAccepted = (f: File) =>
-    /\.(stl|3mf|obj|step|stp)$/i.test(f.name)
+  useEffect(() => {
+    if (rejected.length === 0) return
+    const id = setTimeout(() => setRejected([]), 5000)
+    return () => clearTimeout(id)
+  }, [rejected])
+
+  const takeFiles = useCallback((files: File[]) => {
+    const accepted = files.filter(isAccepted)
+    setRejected(files.filter((f) => !isAccepted(f)).map((f) => f.name))
+    if (accepted.length > 0) onFiles(accepted)
+  }, [onFiles])
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault()
+      dragDepth.current = 0
       setDragging(false)
-      const dropped = Array.from(e.dataTransfer.files).filter(isAccepted)
-      if (dropped.length > 0) onFiles(dropped)
+      takeFiles(Array.from(e.dataTransfer.files))
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [onFiles],
+    [takeFiles],
   )
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const picked = Array.from(e.target.files ?? []).filter(isAccepted)
-    if (picked.length > 0) onFiles(picked)
+    takeFiles(Array.from(e.target.files ?? []))
     e.target.value = ''
   }
 
   return (
-    <div
-      onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={handleDrop}
-      onClick={() => inputRef.current?.click()}
-      className={clsx(
-        'relative flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed cursor-pointer transition-all select-none',
-        'h-40 sm:h-52',
-        dragging
-          ? 'border-orca-500 bg-orca-50 scale-[1.01]'
-          : loadedCount > 0
-          ? 'border-orca-400 bg-orca-50'
-          : 'border-slate-300 bg-slate-50 hover:border-orca-400 hover:bg-orca-50',
-      )}
-    >
-      <input
-        ref={inputRef}
-        type="file"
-        accept=".stl,.3mf,.obj,.step,.stp"
-        multiple
-        className="hidden"
-        onChange={handleChange}
-        data-testid="model-file-input"
-      />
+    <div>
+      <div
+        onDragEnter={(e) => { e.preventDefault(); dragDepth.current++; setDragging(true) }}
+        onDragOver={(e) => e.preventDefault()}
+        onDragLeave={() => { dragDepth.current--; if (dragDepth.current <= 0) { dragDepth.current = 0; setDragging(false) } }}
+        onDrop={handleDrop}
+        onClick={() => inputRef.current?.click()}
+        className={clsx(
+          'relative flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed cursor-pointer transition-all select-none',
+          'h-40 sm:h-52',
+          dragging
+            ? 'border-orca-500 bg-orca-50 scale-[1.01]'
+            : loadedCount > 0
+            ? 'border-orca-400 bg-orca-50'
+            : 'border-slate-300 bg-slate-50 hover:border-orca-400 hover:bg-orca-50',
+        )}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".stl,.3mf,.obj,.step,.stp"
+          multiple
+          className="hidden"
+          onChange={handleChange}
+          data-testid="model-file-input"
+        />
 
-      {loadedCount > 0 ? (
-        <>
-          <UploadIcon className="w-10 h-10 text-orca-500" />
-          <div className="text-center">
-            <p className="font-semibold text-slate-800">
-              {loadedCount} {loadedCount === 1 ? 'file' : 'files'} loaded
-            </p>
-            <p className="text-sm text-slate-500 mt-1">Click or drop to add more</p>
-          </div>
-        </>
-      ) : (
-        <>
-          <UploadIcon className="w-12 h-12 text-slate-400" />
-          <div className="text-center">
-            <p className="font-semibold text-slate-700">Drop your models here</p>
-            <p className="text-sm text-slate-500 mt-1">or click to browse · multiple files supported</p>
-          </div>
-          <p className="text-xs text-slate-400">.stl · .3mf · .obj · .step</p>
-        </>
+        {loadedCount > 0 ? (
+          <>
+            <UploadIcon className="w-10 h-10 text-orca-500" />
+            <div className="text-center">
+              <p className="font-semibold text-slate-800">
+                {loadedCount} {loadedCount === 1 ? 'file' : 'files'} loaded
+              </p>
+              <p className="text-sm text-slate-500 mt-1">Click or drop to add more</p>
+            </div>
+          </>
+        ) : (
+          <>
+            <UploadIcon className="w-12 h-12 text-slate-400" />
+            <div className="text-center">
+              <p className="font-semibold text-slate-700">Drop your models here</p>
+              <p className="text-sm text-slate-500 mt-1">or click to browse · multiple files supported</p>
+            </div>
+            <p className="text-xs text-slate-400">.stl · .3mf · .obj · .step</p>
+          </>
+        )}
+      </div>
+
+      {rejected.length > 0 && (
+        <p className="mt-2 text-xs text-red-500 px-2">
+          Unsupported file type{rejected.length !== 1 ? 's' : ''} skipped: {rejected.join(', ')} — supported: .stl, .3mf, .obj, .step
+        </p>
       )}
     </div>
-  )
-}
-
-function UploadIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round"
-        d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-    </svg>
   )
 }

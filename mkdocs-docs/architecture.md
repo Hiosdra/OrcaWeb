@@ -16,14 +16,16 @@ The React web UI is a temporary proof-of-concept to demonstrate the engine. It i
 │   ┌────────────────────────────────────────────────┐    │
 │   │  React 19 + TypeScript + Tailwind CSS v4        │    │
 │   │                                                │    │
-│   │  App.tsx                                       │    │
+│   │  App.tsx            layout, tabs, settings     │    │
 │   │  ├── FileUpload     drag & drop STL/3MF/STEP/OBJ│    │
 │   │  ├── ModelViewer    Three.js, real mm scale    │    │
 │   │  ├── SettingsPanel  presets + profile import   │    │
 │   │  ├── GcodeViewer    toolpaths, layer slider    │    │
-│   │  └── (slice UI inline: SliceHeader, QueueItem- │    │
-│   │       Card, PlateResultCard, ConfigSummary)    │    │
+│   │  └── SliceCards     SliceHeader, QueueItemCard,│    │
+│   │       PlateResultCard, ConfigSummary           │    │
 │   │                                                │    │
+│   │  hooks/useSliceQueue.ts (queue state machine:  │    │
+│   │    reducer + worker protocol + cancel/stale)   │    │
 │   │  worker-singleton.ts (module-level singleton)  │    │
 │   └──────────────────┬─────────────────────────────┘    │
 │                      │ postMessage (ArrayBuffer)         │
@@ -62,13 +64,19 @@ sequenceDiagram
     M->>S: preloadWasm()
     S->>W: new Worker(slicer.worker.ts)
     S->>W: postMessage(LOAD_WASM, url)
-    W->>R: fetch slicer.js  (~210 KB)
-    W->>R: fetch slicer.wasm (~29 MB) [parallel]
+    W->>R: fetch + WebAssembly.compileStreaming(slicer.wasm ~29 MB)
+    W->>R: fetch slicer.js (~210 KB) [parallel]
     W->>W: blob URL trick (add ES default export)
-    W->>W: import(blobUrl) → factory({ wasmBinary })
+    W->>W: import(blobUrl) → factory({ instantiateWasm })
     W->>S: postMessage(WASM_LOADED)
     S-->>M: listener → wasmStatus = 'ready'
 ```
+
+`slicer.wasm` is compiled with `WebAssembly.compileStreaming` while it downloads
+(and while `slicer.js` is still being fetched), overlapping download and
+compilation; the compiled module is handed to Emscripten through the
+`instantiateWasm` hook. When the server mislabels the Content-Type the worker
+falls back to buffered `WebAssembly.compile`.
 
 Total cold load: ~29 MB (down from ~152 MB with the old v2.3.1 + slicer.data engine). The increase over the original ~9 MB comes from OCCT being compiled directly into `slicer.wasm` — no separate download, no extra WASM file, no third-party dependency.
 
@@ -205,10 +213,25 @@ If the WASM module aborts at runtime (an unreachable trap, OOM), `onAbort`
 reports a `WASM_ERROR` to the main thread and the worker refuses further work
 instead of calling into the dead module. `worker-singleton.ts` terminates and
 drops that worker on any `WASM_ERROR` (load failure or runtime crash alike);
-the next `getWorker()` call — including the one `App.tsx` triggers when
-retrying a slice after an `'error'` status — spawns a fresh worker and reloads
-the engine from scratch, so a mid-session crash is recoverable without a full
-page reload.
+the next `getWorker()` call spawns a fresh worker and reloads the engine from
+scratch, so a mid-session crash is recoverable without a full page reload.
+On `WASM_ERROR` the queue (`useSliceQueue`) fails every in-flight item —
+the current slice, queued OBJ/STEP conversions, and a running plate slice —
+so nothing is left spinning on work the dead worker can no longer deliver.
+
+### Slice queue state machine
+
+`src/hooks/useSliceQueue.ts` owns all queue/slicing state in a single
+`useReducer` state machine. Worker responses are correlated explicitly: each
+OBJ/STEP conversion carries a `requestId` (the queue item id) echoed back on
+the matching `*_COMPLETE`/`*_ERROR`, and single slices are gated by a
+`currentId` so only one `SLICE` is ever in flight. A `configEpoch` counter
+marks finished results **stale** when the settings change after they were
+sliced — the UI flags them and the Slice button becomes *Re-slice*.
+User-initiated **cancel** terminates the worker (the synchronous WASM slice
+loop cannot be interrupted any other way), re-posts any queued conversions
+from their retained source `File`s to the fresh worker, and lets the engine
+reload lazily on the next request.
 
 ### WASM build smoke test
 

@@ -2,7 +2,7 @@
 
 Ten dokument opisuje aktualny stan projektu: zaimplementowane funkcje, znane ograniczenia i planowane ulepszenia.
 
-Ostatnia aktualizacja: **2026-07-09** · wersja silnika: **OrcaSlicer v2.4.2** (własny build, wdrożony na produkcji) · wersja aplikacji: **v0.7.32**
+Ostatnia aktualizacja: **2026-07-11** · wersja silnika: **OrcaSlicer v2.4.2** (własny build, wdrożony na produkcji) · wersja aplikacji: **v0.7.32**
 
 ---
 
@@ -25,9 +25,14 @@ Ostatnia aktualizacja: **2026-07-09** · wersja silnika: **OrcaSlicer v2.4.2** (
 | Zakładki Model / Settings / Slice | Płynna nawigacja, zakładki zablokowane do momentu wczytania pliku |
 | Panel ustawień | Wybór drukarki, filamentu, jakości |
 | Podgląd G-code (warstwa po warstwie) | Slider warstw, kolorowanie wg typu ruchu (perimeter/infill/support/travel), grube linie 3D, kursor warstwy — od PR #16 |
-| Statystyki G-code | Czas druku, warstwy, filament (mm/g), rozmiar pliku — parsowane z nagłówka G-code |
+| Podgląd G-code — oba dialekty komentarzy | Warstwy wg markerów `;LAYER_CHANGE` / `; CHANGE_LAYER`, typy ruchów z `;TYPE:` **i** `; FEATURE:` (dialekt Bambu — wcześniej kolory typów nie działały dla drukarek BBL), tesselacja łuków `G2`/`G3`, poprawny render trybu wazy/spirali |
+| Statystyki G-code | Czas druku, warstwy, filament (mm/g) na karcie pliku — parsowane z nagłówka i końcówki G-code (oba dialekty komentarzy czasu) |
 | Widok model + G-code obok siebie | Po slicowaniu — synchronizowany układ obok siebie |
-| Pobieranie G-code | Przycisk „Download .gcode" z poprawną nazwą pliku |
+| Pobieranie G-code | Przycisk „Download" z poprawną nazwą pliku; „Download All (.zip)" pakuje wszystkie wyniki do jednego archiwum |
+| Anulowanie slicowania | Przycisk „Cancel" — restart Workera (synchronicznej pętli WASM nie da się przerwać inaczej); oczekujące konwersje OBJ/STEP są ponawiane automatycznie |
+| Wykrywanie nieaktualnych wyników | Zmiana ustawień po slicingu oznacza wynik jako „Sliced with previous settings", przycisk zmienia się w „Re-slice" |
+| Zapamiętywanie ustawień | Drukarka, filament, preset jakości i nadpisania trzymane w `localStorage`, przywracane przy kolejnej wizycie |
+| Kolejka jako maszyna stanów | `useSliceQueue` (reducer) — korelacja odpowiedzi Workera po `requestId`, błąd silnika ubija wszystkie wiszące elementy zamiast zostawiać wieczne spinnery |
 | Status silnika (badge) | „Loading engine…" / „Engine error" w nagłówku |
 | Wersja silnika w nagłówku | `v{app} · {data} · engine v{orca}` pod logo — ten sam tekst na każdej szerokości ekranu (mobile/tablet/desktop) |
 | Stopka — link do źródeł (AGPL) | Widoczny link „Source (AGPL-3.0)" → repo GitHub |
@@ -44,6 +49,7 @@ Ostatnia aktualizacja: **2026-07-09** · wersja silnika: **OrcaSlicer v2.4.2** (
 | Singleton Worker | Jeden Worker przez cały czas sesji |
 | Obsługa błędów | Kody błędów `-1`…`-9`, czytelne komunikaty |
 | Wczytanie WASM gdy slicowanie w trakcie | Kolejkowanie żądania `SLICE` gdy WASM jeszcze się ładuje |
+| Streaming compile WASM | `WebAssembly.compileStreaming` kompiluje `slicer.wasm` równolegle z pobieraniem (i z pobieraniem `slicer.js`); fallback na buforowane `compile` przy złym Content-Type |
 | JPEG miniatury G-code | Prawdziwy JPEG (RGBA→RGB, standard libjpeg) — od PR #13 |
 | Licznik czasu slicowania | Przycisk pokazuje `Slicing… (12s)` — rzetelna informacja bez fikcyjnych etapów — od PR #15 |
 | PWA / tryb offline | Service Worker (Workbox) pre-cache'uje wszystkie assety + WASM przy pierwszej wizycie; instalacja jako aplikacja natywna |
