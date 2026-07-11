@@ -1,0 +1,18 @@
+// Cloudflare Workers (static assets) deployment — the secondary mirror of the
+// GitHub Pages deploy. Pure static hosting: no Worker script (`main`), just
+// the Vite `dist/` output. The WASM engine is deliberately NOT part of these
+// assets — slicer.wasm (~36 MB) exceeds Cloudflare's 25 MiB per-asset limit,
+// so the app loads it cross-origin from GitHub Pages instead (CORS `*` is
+// already served there). See scripts/cf-build.mjs, which is what the
+// Cloudflare "build command" must run (`npm run build:cf`).
+{
+  "name": "orcaweb-cf-pages",
+  "compatibility_date": "2026-07-11",
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}

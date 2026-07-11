@@ -332,6 +332,20 @@ File drop
     # and embeds them in the gh-pages branch under app/wasm/
     ```
 
+=== "Mirror (Cloudflare Workers)"
+    ```bash
+    # Cloudflare Workers Builds (Git integration), on push to master
+    # Build command:  npm run build:cf   (scripts/cf-build.mjs)
+    # Deploy command: npx wrangler deploy   (wrangler.jsonc, static assets)
+    #
+    # Cloudflare serves only the app shell: slicer.wasm (~36 MB) exceeds
+    # the 25 MiB per-asset limit, so cf-build.mjs sets VITE_WASM_BASE_URL
+    # to the GitHub Pages copy (served with Access-Control-Allow-Origin: *
+    # and Content-Type: application/wasm) and the engine loads cross-origin.
+    # The GitHub Pages deploy therefore remains the source of truth for the
+    # engine binary — a Cloudflare-only deploy cannot ship a new engine.
+    ```
+
 === "Build WASM engine"
     ```bash
     # GitHub Actions → Build WASM → Run workflow
