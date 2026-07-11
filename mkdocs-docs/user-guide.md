@@ -20,12 +20,9 @@ When you load a `.3mf` file, OrcaWeb automatically:
 
 1. Extracts the mesh geometry and converts it to binary STL for the slicer
 2. Reads any OrcaSlicer profile metadata bundled inside the archive (`Metadata/*.json` / `.config`)
-3. Applies the embedded settings — printer model, nozzle diameter, bed size, filament temperatures, process parameters — as overrides on the Settings panel
+3. Merges the embedded settings — printer model, nozzle diameter, bed size, filament temperatures, process parameters — on top of your current overrides, and shows a notice telling you how many settings were applied
 
 If the 3MF contains a machine profile with a `printable_area` field the bed visualisation updates to match.
-
-!!! note
-    Loading a plain STL after a 3MF clears the extracted overrides so you start fresh.
 
 #### OBJ files
 
@@ -123,20 +120,39 @@ Alternatively, load a **3MF file** — profiles embedded in the archive are extr
 
 → [Profile format details](profiles.md)
 
+Settings (printer, filament, quality preset, and any overrides) are saved in
+your browser's local storage and restored on the next visit.
+
 ### Slice tab
 
-After clicking **Slice model**:
+Each uploaded file appears as a queue item. Click **Slice** (or **Slice All**)
+to slice every ready file one after another:
 
 1. The STL is passed to the Web Worker running OrcaSlicer WASM
-2. Slicing takes ~50–500 ms depending on model complexity
-3. On completion, two panels appear side-by-side:
+2. Slicing takes ~50–500 ms for small models, up to minutes for complex ones
+3. Each finished card shows the print time, filament use, and layer count,
+   plus **Download** and an eye icon that expands a side-by-side preview:
    - **Model** — your original STL on the print bed
    - **G-code** — rendered toolpaths with a layer slider
 
+While a slice is running a **Cancel** button appears — cancelling restarts
+the slicer engine, so the next slice reloads it (from cache, a few seconds).
+
+With two or more ready files, **One plate** arranges them all on a single bed
+and produces one combined G-code file, and **Download All (.zip)** bundles
+every finished G-code into a single ZIP archive.
+
+!!! note "Changing settings after slicing"
+    If you change any setting after a file was sliced, its result is marked
+    **"Sliced with previous settings"** and the Slice button turns into
+    **Re-slice** — the previous G-code stays downloadable until you re-slice.
+
 #### G-code viewer
 
-- **Feature-type colours** — when the G-code contains OrcaSlicer `;TYPE:` comments each feature type (outer wall, inner wall, infill, support, bridge, etc.) is rendered in a distinct colour. A legend overlay in the top-right corner shows the colour key.
-- **Height gradient** — plain G-code without `;TYPE:` comments is coloured blue (bottom) → orange (top).
+- **Feature-type colours** — when the G-code contains OrcaSlicer `;TYPE:` (generic flavor) or `; FEATURE:` (Bambu flavor) comments each feature type (outer wall, inner wall, infill, support, bridge, etc.) is rendered in a distinct colour. A legend overlay in the top-right corner shows the colour key.
+- **Layer detection** — layers follow the engine's `;LAYER_CHANGE` / `; CHANGE_LAYER` markers, so spiral/vase-mode prints and Z-hop moves are displayed correctly; G-code without markers falls back to grouping by Z height.
+- **Arc moves** — `G2`/`G3` arcs (arc-fitting profiles) are tessellated and rendered like ordinary moves.
+- **Height gradient** — plain G-code without feature comments is coloured blue (bottom) → orange (top).
 - **Thick extrusion lines** — rendered with `LineSegments2` + `LineMaterial` (1.6 px screen-space width) for a solid, 3D-looking result. WebGL's `linewidth` is ignored above 1 px on most drivers.
 - **Travel moves** — non-extruding rapid moves are shown as dim grey lines when the **Travels** toggle in the control bar is on (off by default).
 - **Layer cursor** — a semi-transparent plane marks the height of the currently selected layer.
@@ -145,21 +161,21 @@ After clicking **Slice model**:
 
 #### G-code statistics
 
-After slicing, a stats panel shows key metrics parsed from the G-code output:
+Each finished queue card shows key metrics parsed from the G-code output:
 
 | Stat | Source |
 |------|--------|
-| Print time | `; estimated printing time` comment |
-| Layers | `; total layers count` comment, or `;LAYER_CHANGE` marker count as fallback |
-| Filament | `; total filament used [mm]` comment |
-| Weight | `; total filament weight [g]` comment |
-| G-code size | byte count of the output file (always shown) |
+| Print time | `; total estimated time` / `; model printing time` (Bambu flavor) or `; estimated printing time =` comment |
+| Filament | `; filament used [g]` comment, falling back to `; filament used [mm]` |
+| Layers | `; total layer number` comment |
 
-Stats are searched in both the beginning and end of the G-code file, as OrcaSlicer may write them in either location.
+Stats are searched in the head and tail of the G-code file, as OrcaSlicer writes them in both locations.
 
 #### Downloading G-code
 
-Click **Download G-code** to save the output as `<filename>.gcode`.
+Click **Download** on a queue card to save that file's output as
+`<filename>.gcode`. With several finished files, **Download All (.zip)**
+saves them together as one ZIP archive.
 
 ## Performance notes
 

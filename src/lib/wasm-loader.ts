@@ -1,51 +1,7 @@
-import type { OrcaModule, OrcaModuleFactory } from '../types'
-import { logWarn } from './log'
-
-const WASM_BASE = '/wasm'
-
-let modulePromise: Promise<OrcaModule> | null = null
-
-export async function loadOrcaModule(): Promise<OrcaModule> {
-  if (modulePromise) return modulePromise
-
-  modulePromise = (async () => {
-    const [wasmBinary, jsText] = await Promise.all([
-      fetch(`${WASM_BASE}/slicer.wasm`).then((r) => {
-        if (!r.ok) throw new Error(`Failed to fetch slicer.wasm: ${r.status}`)
-        return r.arrayBuffer()
-      }),
-      fetch(`${WASM_BASE}/slicer.js`).then((r) => {
-        if (!r.ok) throw new Error(`Failed to fetch slicer.js: ${r.status}`)
-        return r.text()
-      }),
-    ])
-
-    // Wrap CommonJS module as ES default export for dynamic import
-    const blob = new Blob(
-      [`${jsText}\nexport default OrcaModule;`],
-      { type: 'application/javascript' },
-    )
-    const url = URL.createObjectURL(blob)
-
-    let factory: OrcaModuleFactory
-    try {
-      const mod = await import(/* @vite-ignore */ url)
-      factory = mod.default as OrcaModuleFactory
-    } finally {
-      URL.revokeObjectURL(url)
-    }
-
-    const module = await factory({
-      wasmBinary,
-      locateFile: (path: string) => `${WASM_BASE}/${path}`,
-      printErr: (msg: string) => logWarn('[OrcaWASM]', msg),
-    })
-
-    return module
-  })()
-
-  return modulePromise
-}
+// Loading/instantiating the WASM module lives in src/workers/slicer.worker.ts
+// (the only caller) — this file holds the pure call helpers around the
+// orc_* bridge exports plus their error decoding.
+import type { OrcaModule } from '../types'
 
 export function sliceStl(
   module: OrcaModule,

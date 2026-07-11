@@ -20,6 +20,37 @@ export const FILAMENT_PRESETS: Record<string, Partial<OrcaConfig>> = orcaProfile
 // printer was selected.
 export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = orcaProfiles.printerPresets
 
+// UI display fallbacks for config fields a preset may leave unset. Display
+// only — deliberately NOT merged into the engine config (an unset field must
+// keep falling back to the engine's own default, which may differ). Having
+// one table keeps every surface (settings inputs, config summary, 3D bed
+// viewers) quoting the same number instead of each hardcoding its own.
+export const DISPLAY_DEFAULTS = {
+  printer_model: 'Generic',
+  bed_size_x: 256,
+  bed_size_y: 256,
+  bed_shape: 'rectangle',
+  filament_type: 'PLA',
+  nozzle_temperature: 220,
+  bed_temperature: 60,
+  layer_height: 0.2,
+  wall_loops: 3,
+  wall_generator: 'arachne',
+  sparse_infill_density: 15,
+  sparse_infill_pattern: 'grid',
+  default_speed: 100,
+  outer_wall_speed: 60,
+  initial_layer_speed: 30,
+  travel_speed: 150,
+  seam_position: 'aligned',
+  fuzzy_skin: 'none',
+  fuzzy_skin_thickness: 0.3,
+  fuzzy_skin_point_dist: 0.8,
+  enable_support: false,
+  support_type: 'normal(auto)',
+  brim_width: 0,
+} as const satisfies OrcaConfig
+
 export function buildConfig(
   printer: string,
   filament: string,

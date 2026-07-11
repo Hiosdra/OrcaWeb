@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
@@ -81,10 +81,12 @@ function buildBed(
 
 export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangle' }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
     const el = mountRef.current
     if (!el) return
+    setLoadError(null)
 
     const w = el.clientWidth
     const h = el.clientHeight
@@ -126,7 +128,13 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
     file.arrayBuffer().then((buffer) => {
       if (cancelled) return
 
-      const geometry = loader.parse(buffer)
+      let geometry: THREE.BufferGeometry
+      try {
+        geometry = loader.parse(buffer)
+      } catch {
+        setLoadError('Could not read this model file')
+        return
+      }
       geometry.computeBoundingBox()
       const box = geometry.boundingBox!
       const size = box.getSize(new THREE.Vector3())
@@ -151,6 +159,8 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
       camera.position.set(dist * 0.6, -dist, dist * 0.7)
       controls.target.set(0, 0, size.z / 2)
       controls.update()
+    }).catch(() => {
+      if (!cancelled) setLoadError('Could not read this model file')
     })
 
     let animId: number
@@ -193,10 +203,17 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
   }, [file, bedX, bedY, bedShape])
 
   return (
-    <div
-      ref={mountRef}
-      className="w-full h-full min-h-48 rounded-xl overflow-hidden"
-      style={{ touchAction: 'none' }}
-    />
+    <div className="relative w-full h-full min-h-48">
+      <div
+        ref={mountRef}
+        className="w-full h-full rounded-xl overflow-hidden"
+        style={{ touchAction: 'none' }}
+      />
+      {loadError && (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-50/80 text-sm text-slate-500">
+          {loadError}
+        </div>
+      )}
+    </div>
   )
 }

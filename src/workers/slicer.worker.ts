@@ -1,4 +1,4 @@
-import type { OrcaModule, WorkerInMessage, WorkerOutMessage } from '../types'
+import type { OrcaConfig, OrcaModuleFactory, OrcaModule, WorkerInMessage, WorkerOutMessage } from '../types'
 import { sliceStl, sliceMultiStl, objToStl, cadToStl, OrcaSliceError } from '../lib/wasm-loader'
 import { toEngineConfig } from '../lib/profiles'
 import { logInfo, logWarn, logError } from '../lib/log'
@@ -20,16 +20,14 @@ let loadingWasm = false
 let wasmCrashed = false
 // Slice request that arrived before WASM was ready — last-wins (UI disables
 // the Slice button while loading, so only one request can queue in practice)
-let pendingSlice: { stl: ArrayBuffer; config: Record<string, unknown> } | null = null
-let pendingPlate: { stls: ArrayBuffer[]; config: Record<string, unknown>; extruderIds?: number[] } | null = null
-const pendingObjConvertQueue: { obj: ArrayBuffer; filename: string }[] = []
-const pendingCadConvertQueue: { cad: ArrayBuffer; filename: string }[] = []
+let pendingSlice: { stl: ArrayBuffer; config: OrcaConfig } | null = null
+let pendingPlate: { stls: ArrayBuffer[]; config: OrcaConfig; extruderIds?: number[] } | null = null
+const pendingObjConvertQueue: { obj: ArrayBuffer; requestId: string }[] = []
+const pendingCadConvertQueue: { cad: ArrayBuffer; requestId: string }[] = []
 
 function send(msg: WorkerOutMessage) {
   self.postMessage(msg)
 }
-
-send({ type: 'WORKER_READY' })
 
 self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) => {
   const msg = event.data
@@ -40,10 +38,13 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
   // on the resulting *_ERROR and spawns a fresh one on the next request.
   if (wasmCrashed) {
     const crashMsg = 'Slicer engine crashed and cannot continue — reload to restart it'
-    if (msg.type === 'SLICE') send({ type: 'SLICE_ERROR', code: -9, message: crashMsg })
-    else if (msg.type === 'SLICE_MULTI') send({ type: 'SLICE_MULTI_ERROR', code: -9, message: crashMsg })
-    else if (msg.type === 'OBJ_TO_STL') send({ type: 'OBJ_STL_ERROR', message: crashMsg, filename: msg.filename })
-    else if (msg.type === 'CAD_TO_STL') send({ type: 'CAD_STL_ERROR', message: crashMsg, filename: msg.filename })
+    switch (msg.type) {
+      case 'SLICE': send({ type: 'SLICE_ERROR', code: -9, message: crashMsg }); break
+      case 'SLICE_MULTI': send({ type: 'SLICE_MULTI_ERROR', code: -9, message: crashMsg }); break
+      case 'OBJ_TO_STL': send({ type: 'OBJ_STL_ERROR', message: crashMsg, requestId: msg.requestId }); break
+      case 'CAD_TO_STL': send({ type: 'CAD_STL_ERROR', message: crashMsg, requestId: msg.requestId }); break
+      case 'LOAD_WASM': send({ type: 'WASM_ERROR', message: crashMsg }); break
+    }
     return
   }
 
@@ -80,21 +81,30 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       // it as a fresh entry instead of reusing a stale, API-mismatched one.
       const v = `?v=${encodeURIComponent(msg.version)}`
 
-      // Fetch slicer.js text and wasm binary in parallel
-      const [jsText, wasmBinary] = await Promise.all([
-        fetch(`${wasmBase}/slicer.js${v}`).then((r) => {
-          if (!r.ok) throw new Error(`HTTP ${r.status} fetching slicer.js`)
-          return r.text()
-        }),
-        fetch(`${wasmBase}/slicer.wasm${v}`).then((r) => {
-          if (!r.ok) throw new Error(`HTTP ${r.status} fetching slicer.wasm`)
-          return r.arrayBuffer()
-        }),
-      ])
+      // Compile slicer.wasm while slicer.js is still downloading.
+      // compileStreaming overlaps download and compilation (a measurable win
+      // on a ~29 MB binary over slow links); it requires an
+      // `application/wasm` Content-Type, so fall back to buffered
+      // WebAssembly.compile when a server (or a proxy) mislabels the file.
+      const wasmModulePromise = (async () => {
+        const res = await fetch(`${wasmBase}/slicer.wasm${v}`)
+        if (!res.ok) throw new Error(`HTTP ${res.status} fetching slicer.wasm`)
+        if (
+          typeof WebAssembly.compileStreaming === 'function'
+          && res.headers.get('content-type')?.includes('application/wasm')
+        ) {
+          return WebAssembly.compileStreaming(res)
+        }
+        return WebAssembly.compile(await res.arrayBuffer())
+      })()
+
+      const jsText = await fetch(`${wasmBase}/slicer.js${v}`).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status} fetching slicer.js`)
+        return r.text()
+      })
       logInfo(
         `[OrcaWASM] fetched slicer.js (${(jsText.length / 1024).toFixed(0)} KB) `
-        + `+ slicer.wasm (${(wasmBinary.byteLength / 1e6).toFixed(1)} MB) `
-        + `in ${Math.round(performance.now() - loadStartedAt)}ms`,
+        + `in ${Math.round(performance.now() - loadStartedAt)}ms (wasm compiling in parallel)`,
       )
 
       // Wrap Emscripten CommonJS output as an ES module default export.
@@ -106,9 +116,9 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       )
       const blobUrl = URL.createObjectURL(blob)
 
-      let factory: (opts: unknown) => Promise<OrcaModule>
+      let factory: OrcaModuleFactory
       try {
-        const mod = await import(/* @vite-ignore */ blobUrl) as { default: (opts: unknown) => Promise<OrcaModule> }
+        const mod = await import(/* @vite-ignore */ blobUrl) as { default: OrcaModuleFactory }
         factory = mod.default
       } finally {
         URL.revokeObjectURL(blobUrl)
@@ -118,16 +128,32 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       // dropped — verified that headless slicing never reads /resources), so
       // there is nothing to fetch or reassemble here.
 
-      orcaModule = await factory({
-        wasmBinary,
-        locateFile: (path: string) => `${wasmBase}/${path}${v}`,
-        printErr: (m: string) => logWarn('[OrcaWASM]', m),
-        onAbort: (m: string) => {
-          logError('[OrcaWASM abort]', m)
-          wasmCrashed = true
-          send({ type: 'WASM_ERROR', message: `Slicer engine crashed: ${m}` })
-        },
-      })
+      // Emscripten's instantiateWasm hook has no error channel: if the
+      // supplied promise rejects and successCallback is never called, the
+      // factory promise simply never settles. Race it against our own
+      // rejection so a failed fetch/compile surfaces as WASM_ERROR instead
+      // of hanging the load forever.
+      let failInstantiate: (err: unknown) => void
+      const instantiateFailed = new Promise<never>((_, reject) => { failInstantiate = reject })
+      orcaModule = await Promise.race([
+        factory({
+          instantiateWasm: (imports, successCallback) => {
+            wasmModulePromise
+              .then((module) => WebAssembly.instantiate(module, imports))
+              .then((instance) => successCallback(instance))
+              .catch((err) => failInstantiate(err))
+            return {} // instance is delivered asynchronously via successCallback
+          },
+          locateFile: (path: string) => `${wasmBase}/${path}${v}`,
+          printErr: (m: string) => logWarn('[OrcaWASM]', m),
+          onAbort: (m: string) => {
+            logError('[OrcaWASM abort]', m)
+            wasmCrashed = true
+            send({ type: 'WASM_ERROR', message: `Slicer engine crashed: ${m}` })
+          },
+        }),
+        instantiateFailed,
+      ])
 
       session = orcaModule._orc_session_create()
       if (!session) {
@@ -146,11 +172,11 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
 
       // Fire any requests that queued up during loading
       for (const pending of pendingObjConvertQueue) {
-        doObjToStl(pending.obj, pending.filename)
+        doObjToStl(pending.obj, pending.requestId)
       }
       pendingObjConvertQueue.length = 0
       for (const pending of pendingCadConvertQueue) {
-        doCadToStl(pending.cad, pending.filename)
+        doCadToStl(pending.cad, pending.requestId)
       }
       pendingCadConvertQueue.length = 0
       if (pendingSlice) {
@@ -177,43 +203,44 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
     return
   }
 
-  if (msg.type === 'SLICE') {
-    if (!orcaModule) {
-      pendingSlice = { stl: msg.stl, config: msg.config as Record<string, unknown> }
+  switch (msg.type) {
+    case 'SLICE':
+      if (!orcaModule) {
+        pendingSlice = { stl: msg.stl, config: msg.config }
+        return
+      }
+      doSlice(msg.stl, msg.config)
       return
-    }
-    doSlice(msg.stl, msg.config as Record<string, unknown>)
-  }
-
-  if (msg.type === 'SLICE_MULTI') {
-    if (!orcaModule) {
-      pendingPlate = { stls: msg.stls, config: msg.config as Record<string, unknown>, extruderIds: msg.extruderIds }
+    case 'SLICE_MULTI':
+      if (!orcaModule) {
+        pendingPlate = { stls: msg.stls, config: msg.config, extruderIds: msg.extruderIds }
+        return
+      }
+      doSliceMulti(msg.stls, msg.config, msg.extruderIds)
       return
-    }
-    doSliceMulti(msg.stls, msg.config as Record<string, unknown>, msg.extruderIds)
-  }
-
-  if (msg.type === 'OBJ_TO_STL') {
-    if (!orcaModule) {
-      pendingObjConvertQueue.push({ obj: msg.obj, filename: msg.filename })
+    case 'OBJ_TO_STL':
+      if (!orcaModule) {
+        pendingObjConvertQueue.push({ obj: msg.obj, requestId: msg.requestId })
+        return
+      }
+      doObjToStl(msg.obj, msg.requestId)
       return
-    }
-    doObjToStl(msg.obj, msg.filename)
-  }
-
-  if (msg.type === 'CAD_TO_STL') {
-    if (!orcaModule) {
-      pendingCadConvertQueue.push({ cad: msg.cad, filename: msg.filename })
+    case 'CAD_TO_STL':
+      if (!orcaModule) {
+        pendingCadConvertQueue.push({ cad: msg.cad, requestId: msg.requestId })
+        return
+      }
+      doCadToStl(msg.cad, msg.requestId)
       return
-    }
-    doCadToStl(msg.cad, msg.filename)
+    default:
+      msg satisfies never
   }
 })
 
 // A handful of settings that most affect print time/quality, picked to match
 // what ConfigSummary (App.tsx) already shows users — not an exhaustive dump of
 // the config, just enough to tell slices apart from each other in the console.
-function summarizeConfig(config: Record<string, unknown>): string {
+function summarizeConfig(config: OrcaConfig): string {
   const parts: string[] = []
   if (config.layer_height != null) parts.push(`layer ${config.layer_height}mm`)
   if (config.filament_type != null) parts.push(String(config.filament_type))
@@ -223,18 +250,18 @@ function summarizeConfig(config: Record<string, unknown>): string {
   return parts.length ? parts.join(', ') : '(defaults)'
 }
 
-function doObjToStl(obj: ArrayBuffer, filename: string) {
+function doObjToStl(obj: ArrayBuffer, requestId: string) {
   if (!orcaModule) return
   try {
     const stl = objToStl(orcaModule, new Uint8Array(obj))
     const stlBuffer = stl.buffer as ArrayBuffer
-    self.postMessage({ type: 'OBJ_STL_COMPLETE', stl: stlBuffer, filename }, [stlBuffer])
+    self.postMessage({ type: 'OBJ_STL_COMPLETE', stl: stlBuffer, requestId }, [stlBuffer])
   } catch (err) {
-    send({ type: 'OBJ_STL_ERROR', message: err instanceof Error ? err.message : String(err), filename })
+    send({ type: 'OBJ_STL_ERROR', message: err instanceof Error ? err.message : String(err), requestId })
   }
 }
 
-function doSliceMulti(stls: ArrayBuffer[], config: Record<string, unknown>, extruderIds?: number[]) {
+function doSliceMulti(stls: ArrayBuffer[], config: OrcaConfig, extruderIds?: number[]) {
   if (!orcaModule) return
   const startedAt = performance.now()
   const totalMB = stls.reduce((sum, s) => sum + s.byteLength, 0) / 1e6
@@ -243,7 +270,7 @@ function doSliceMulti(stls: ArrayBuffer[], config: Record<string, unknown>, extr
     + `${summarizeConfig(config)}${extruderIds ? `, extruders [${extruderIds.join(',')}]` : ''}`,
   )
   try {
-    const { _passthrough, ...rest } = config as Record<string, unknown> & { _passthrough?: Record<string, string> }
+    const { _passthrough, ...rest } = config
     const engineRest = toEngineConfig(rest)
     const flat = _passthrough ? { ...engineRest, ..._passthrough } : engineRest
     const configJson = JSON.stringify(flat)
@@ -282,23 +309,23 @@ function doSliceMulti(stls: ArrayBuffer[], config: Record<string, unknown>, extr
   }
 }
 
-function doCadToStl(cad: ArrayBuffer, filename: string) {
+function doCadToStl(cad: ArrayBuffer, requestId: string) {
   if (!orcaModule) return
   try {
     const stl = cadToStl(orcaModule, new Uint8Array(cad))
     const stlBuffer = stl.buffer as ArrayBuffer
-    self.postMessage({ type: 'CAD_STL_COMPLETE', stl: stlBuffer, filename }, [stlBuffer])
+    self.postMessage({ type: 'CAD_STL_COMPLETE', stl: stlBuffer, requestId }, [stlBuffer])
   } catch (err) {
-    send({ type: 'CAD_STL_ERROR', message: err instanceof Error ? err.message : String(err), filename })
+    send({ type: 'CAD_STL_ERROR', message: err instanceof Error ? err.message : String(err), requestId })
   }
 }
 
-function doSlice(stl: ArrayBuffer, config: Record<string, unknown>) {
+function doSlice(stl: ArrayBuffer, config: OrcaConfig) {
   if (!orcaModule) return
   const startedAt = performance.now()
   logInfo(`[OrcaWASM] slice start — STL ${(stl.byteLength / 1e6).toFixed(2)} MB, ${summarizeConfig(config)}`)
   try {
-    const { _passthrough, ...rest } = config as Record<string, unknown> & { _passthrough?: Record<string, string> }
+    const { _passthrough, ...rest } = config
     const engineRest = toEngineConfig(rest)
     const flat = _passthrough ? { ...engineRest, ..._passthrough } : engineRest
     const configJson = JSON.stringify(flat)

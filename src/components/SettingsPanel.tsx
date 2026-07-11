@@ -2,6 +2,7 @@ import { useState, useRef } from 'react'
 import clsx from 'clsx'
 import type { OrcaConfig, InfillPattern, SeamPosition, SupportType, FuzzySkin, WallGenerator } from '../types'
 import { PRESETS, PRINTER_PRESETS, FILAMENT_PRESETS, parseOrcaProfileJson } from '../lib/profiles'
+import { UploadIcon, ChevronIcon } from './icons'
 
 interface Props {
   config: OrcaConfig
@@ -396,6 +397,18 @@ function NumberField({
   step: number
   onChange: (v: number) => void
 }) {
+  // Buffer keystrokes locally and only clamp/commit on blur (or Enter).
+  // Clamping on every keystroke made the field impossible to type into:
+  // it couldn't be cleared, and entering "15" in a min-10 field went
+  // 1 → clamped to 10 → "105".
+  const [draft, setDraft] = useState<string | null>(null)
+
+  const commit = (raw: string) => {
+    setDraft(null)
+    const n = parseFloat(raw)
+    if (!isNaN(n)) onChange(Math.min(max, Math.max(min, n)))
+  }
+
   return (
     <div>
       <label className="block text-xs font-medium text-slate-600 mb-1">
@@ -404,14 +417,13 @@ function NumberField({
       <div className="flex items-center gap-1">
         <input
           type="number"
-          value={value}
+          value={draft ?? String(value)}
           min={min}
           max={max}
           step={step}
-          onChange={(e) => {
-            const n = parseFloat(e.target.value)
-            if (!isNaN(n)) onChange(Math.min(max, Math.max(min, n)))
-          }}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={(e) => commit(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
           className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-orca-400"
         />
         <span className="text-xs text-slate-400 whitespace-nowrap">{unit}</span>
@@ -454,24 +466,3 @@ function ToggleField({
   )
 }
 
-function UploadIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-    </svg>
-  )
-}
-
-function ChevronIcon({ open }: { open: boolean }) {
-  return (
-    <svg
-      className={clsx('w-4 h-4 transition-transform', open && 'rotate-180')}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-    </svg>
-  )
-}
