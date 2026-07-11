@@ -81,6 +81,9 @@ if (result.error) {
   process.exit(1)
 }
 if (result.status !== 0) {
+  if (result.signal) {
+    console.error(`cf-build: vite build was terminated by signal: ${result.signal}`)
+  }
   process.exit(result.status ?? 1)
 }
 
@@ -92,6 +95,6 @@ if (result.status !== 0) {
 // cross-origin from GitHub Pages. Without this, a local `wrangler deploy`
 // run against such a checkout would ship slicer.wasm (~36 MB) and blow past
 // Cloudflare's 25 MiB per-asset limit.
-for (const name of ['slicer.js', 'slicer.wasm', 'slicer.data', 'slicer.cjs', '.wasm-release-tag']) {
+for (const name of ['slicer.js', 'slicer.wasm', 'slicer.data', 'slicer.cjs', '.wasm-release-tag', 'engine-version.json']) {
   rmSync(new URL(`../dist/wasm/${name}`, import.meta.url), { force: true })
 }
