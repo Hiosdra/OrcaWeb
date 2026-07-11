@@ -26,7 +26,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { ORCA_VERSION, REPO, resolveLatestWasmTag } from './lib/wasm-release.mjs'
 
 const [owner, repo] = REPO.split('/')
@@ -76,4 +76,22 @@ const result = spawnSync('npx vite build', {
     VITE_ORCA_VERSION: engineLabel,
   },
 })
-process.exit(result.status ?? 1)
+if (result.error) {
+  console.error(`cf-build: failed to spawn vite build: ${result.error.message}`)
+  process.exit(1)
+}
+if (result.status !== 0) {
+  process.exit(result.status ?? 1)
+}
+
+// Vite copies public/ verbatim into dist/, including the engine binaries if
+// a local checkout has run `npm run setup` (they're gitignored, so a fresh
+// Cloudflare build never has them — but a local `npm run build:cf` run
+// against a dev checkout would). Strip them here so dist/ always matches
+// what Cloudflare actually receives: app shell only, engine loaded
+// cross-origin from GitHub Pages. Without this, a local `wrangler deploy`
+// run against such a checkout would ship slicer.wasm (~36 MB) and blow past
+// Cloudflare's 25 MiB per-asset limit.
+for (const name of ['slicer.js', 'slicer.wasm', 'slicer.data', 'slicer.cjs', '.wasm-release-tag']) {
+  rmSync(new URL(`../dist/wasm/${name}`, import.meta.url), { force: true })
+}

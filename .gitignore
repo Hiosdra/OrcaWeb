@@ -7,6 +7,7 @@ public/wasm/slicer.wasm
 public/wasm/slicer.data
 public/wasm/slicer.cjs
 public/wasm/.wasm-release-tag
+public/wasm/engine-version.json
 wasm-artifacts/
 corpus/
 scripts/repro-oom.mjs
