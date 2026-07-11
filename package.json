@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:cf": "tsc -b && node scripts/cf-build.mjs",
     "preview": "vite preview",
     "setup": "node scripts/download-wasm.mjs",
     "smoke-test": "node orca-wasm/scripts/smoke-test.mjs",

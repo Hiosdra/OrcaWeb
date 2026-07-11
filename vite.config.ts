@@ -65,6 +65,27 @@ export default defineConfig({
               cacheableResponse: { statuses: [200] },
             },
           },
+          {
+            // Same engine files fetched CROSS-origin — the Cloudflare mirror
+            // deploy loads them from GitHub Pages (scripts/cf-build.mjs sets
+            // VITE_WASM_BASE_URL; slicer.wasm exceeds Cloudflare's 25 MiB
+            // per-asset limit so it can't be served same-origin there).
+            // A separate, origin-anchored pattern is required: Workbox only
+            // applies RegExp routes to cross-origin requests when the match
+            // starts at the first character of the URL, so the same-origin
+            // pattern above never fires for these (verified live — the
+            // wasm-assets cache stayed empty on a cf-build until this entry
+            // was added). Without it every cold visit on the mirror
+            // re-downloads the ~36 MB binary (GitHub Pages caps HTTP caching
+            // at max-age=600).
+            urlPattern: /^https:\/\/[^/]+\.github\.io\/.*\/wasm\/slicer\.(js|wasm)(\?.*)?$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'wasm-assets',
+              expiration: { maxEntries: 2, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
         ],
       },
       manifest: {

@@ -50,6 +50,11 @@ In CI the WASM artifacts are downloaded from the latest immutable
 the GitHub Pages deployment, so they are served from the **same origin** as the app —
 no CORS issues.
 
+The Cloudflare Workers mirror deploy cannot host the engine itself
+(`slicer.wasm` ~36 MB > Cloudflare's 25 MiB per-asset limit), so its build
+(`npm run build:cf`, see `scripts/cf-build.mjs`) points `VITE_WASM_BASE_URL`
+at the GitHub Pages copy, which is served with `Access-Control-Allow-Origin: *`.
+
 ### Self-contained WASM build (v2.4.2)
 
 `orca-wasm/` contains a clean-room Emscripten build pipeline targeting
@@ -87,7 +92,7 @@ See [`orca-wasm/README.md`](orca-wasm/README.md) for the full build guide.
 | Bundler | Vite 8 |
 | WASM | OrcaSlicer v2.4.2 via Emscripten (own build) |
 | Docs | Material for MkDocs |
-| CI/CD | GitHub Actions → GitHub Pages |
+| CI/CD | GitHub Actions → GitHub Pages (primary), Cloudflare Workers (mirror) |
 
 ## Licence
 

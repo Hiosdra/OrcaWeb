@@ -21,3 +21,6 @@ scripts/rocket_engine_mk4s.stl
 playwright-report/
 test-results/
 blob-report/
+
+# wrangler (Cloudflare) local state
+.wrangler
