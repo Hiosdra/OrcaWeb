@@ -52,6 +52,7 @@
 #include "libslic3r/ModelArrange.hpp"
 #include "libslic3r/Print.hpp"
 #include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/Preset.hpp"
 #include "libslic3r/Format/STL.hpp"
 #include "libslic3r/Format/OBJ.hpp"
 #include "libslic3r/Format/STEP.hpp"
@@ -152,6 +153,25 @@ struct ModelBackupPathGuard {
     ~ModelBackupPathGuard() { model.remove_backup_path_if_exist(); }
     ModelBackupPathGuard(const ModelBackupPathGuard&) = delete;
     ModelBackupPathGuard& operator=(const ModelBackupPathGuard&) = delete;
+};
+
+// load_bbs_3mf() transfers ownership of imported plate data and embedded
+// presets to its output vectors. Keep both behind one guard so partial loads
+// and exceptions release the same allocations as OrcaSlicer's GUI callers.
+struct Loaded3mfResourcesGuard {
+    Slic3r::PlateDataPtrs& plate_data;
+    std::vector<Slic3r::Preset*>& project_presets;
+
+    Loaded3mfResourcesGuard(Slic3r::PlateDataPtrs& plates, std::vector<Slic3r::Preset*>& presets)
+        : plate_data(plates), project_presets(presets) {}
+    ~Loaded3mfResourcesGuard() {
+        Slic3r::release_PlateData_list(plate_data);
+        for (Slic3r::Preset* preset : project_presets)
+            delete preset;
+        project_presets.clear();
+    }
+    Loaded3mfResourcesGuard(const Loaded3mfResourcesGuard&) = delete;
+    Loaded3mfResourcesGuard& operator=(const Loaded3mfResourcesGuard&) = delete;
 };
 
 // Reads an entire file into a malloc'd buffer. Returns nullptr on any
@@ -1016,6 +1036,7 @@ int orc_read_3mf(const void* mf_data, int mf_len,
         Slic3r::ConfigSubstitutionContext substitutions(Slic3r::ForwardCompatibilitySubstitutionRule::EnableSilent);
         Slic3r::PlateDataPtrs plate_data_list;
         std::vector<Slic3r::Preset*> project_presets;
+        Loaded3mfResourcesGuard loaded_resources(plate_data_list, project_presets);
         Slic3r::Semver file_version;
 
         bool ok = Slic3r::load_bbs_3mf(
@@ -1023,8 +1044,6 @@ int orc_read_3mf(const void* mf_data, int mf_len,
             &plate_data_list, &project_presets,
             nullptr, nullptr, &file_version, nullptr,
             Slic3r::LoadStrategy::AddDefaultInstances | Slic3r::LoadStrategy::LoadModel | Slic3r::LoadStrategy::LoadConfig);
-
-        Slic3r::release_PlateData_list(plate_data_list);
 
         if (!ok) {
             record_error("3MF load failed");
@@ -1065,6 +1084,7 @@ int orc_read_3mf(const void* mf_data, int mf_len,
             record_error(std::string("STL export ") + stl_err);
             return stl_oom ? -9 : -8;
         }
+        std::unique_ptr<char, decltype(&std::free)> stl_owner(stl_buf, &std::free);
         int stl_len = static_cast<int>(stl_sz);
 
         // Serialize every config key the file actually had set — matches
@@ -1079,14 +1099,13 @@ int orc_read_3mf(const void* mf_data, int mf_len,
 
         char* json_buf = static_cast<char*>(std::malloc(json_str.size() + 1));
         if (!json_buf) {
-            std::free(stl_buf);
             record_error("out of memory");
             return -9;
         }
         std::memcpy(json_buf, json_str.data(), json_str.size());
         json_buf[json_str.size()] = '\0';
 
-        *out_stl = stl_buf;
+        *out_stl = stl_owner.release();
         *out_stl_len = stl_len;
         *out_config_json = json_buf;
         *out_config_len = static_cast<int>(json_str.size());

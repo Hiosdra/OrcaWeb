@@ -70,6 +70,8 @@ const INITIAL_STATE: QueueState = {
   plateStartEpoch: 0,
 }
 
+class ItemRemovedError extends Error {}
+
 function toGcodeFilename(name: string): string {
   return name.replace(/\.(stl|3mf|obj|step|stp)$/i, '') + '.gcode'
 }
@@ -281,7 +283,7 @@ export function useSliceQueue(
       for (const [requestId, entry] of resolvers) {
         if (entry.itemId !== itemId) continue
         resolvers.delete(requestId)
-        entry.reject(new Error(message))
+        entry.reject(new ItemRemovedError(message))
       }
     }
   }, [])
@@ -453,7 +455,11 @@ export function useSliceQueue(
         onSettingsImportedRef.current(profileConfig, f.name)
       }
       dispatch({ type: 'CONVERSION_DONE', id: item.id, stl })
-    } catch {
+    } catch (err) {
+      // Removal is cancellation, not an engine-read failure. Falling back
+      // here would parse the deleted file and still apply its embedded
+      // settings globally after the queue item disappeared.
+      if (err instanceof ItemRemovedError) return
       // Engine reader unavailable (WASM crashed/still loading and got
       // cancelled) or rejected this archive — fall back to the JS
       // walker rather than lose 3MF import entirely. `buf` above may
