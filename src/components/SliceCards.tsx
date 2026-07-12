@@ -255,17 +255,23 @@ export function QueueItemCard({
             <button
               onClick={handleExport3mf}
               disabled={exporting3mf}
-              title="Export mesh + settings as a .3mf, re-openable in desktop OrcaSlicer"
+              title={
+                item.stale
+                  ? 'Exports current settings, which differ from the ones used for the G-code above — re-slice first to keep both in sync'
+                  : 'Export mesh + settings as a .3mf, re-openable in desktop OrcaSlicer'
+              }
               data-testid="export-3mf-button"
               className={clsx(
                 'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
                 exporting3mf
                   ? 'border-slate-200 text-slate-400 cursor-wait'
+                  : item.stale
+                  ? 'border-amber-300 text-amber-600 hover:border-amber-400'
                   : 'border-slate-300 text-slate-600 hover:border-orca-300 hover:text-orca-600',
               )}
             >
               {exporting3mf ? <SpinnerIcon className="w-3.5 h-3.5 animate-spin" /> : <DownloadIcon className="w-3.5 h-3.5" />}
-              {exporting3mf ? 'Exporting…' : '.3mf'}
+              {exporting3mf ? 'Exporting…' : item.stale ? '.3mf*' : '.3mf'}
             </button>
           </div>
         )}
