@@ -272,13 +272,19 @@ function extractMoves(gcode) {
   const moves = []
   let x, y, z, e
   for (const line of gcode.split('\n')) {
-    const m = line.match(/^(G[01])\s+(.*)/)
+    const cleanLine = line.split(';', 1)[0].trim()
+    const m = cleanLine.match(/^(G[01])\s+(.*)/)
     if (!m) continue
     const [, cmd, rest] = m
-    const xm = rest.match(/X(-?[0-9.]+)/); if (xm) x = parseFloat(xm[1])
-    const ym = rest.match(/Y(-?[0-9.]+)/); if (ym) y = parseFloat(ym[1])
-    const zm = rest.match(/Z(-?[0-9.]+)/); if (zm) z = parseFloat(zm[1])
-    const em = rest.match(/E(-?[0-9.]+)/); if (em) e = parseFloat(em[1])
+    const xm = rest.match(/X(-?[0-9.]+)/)
+    const ym = rest.match(/Y(-?[0-9.]+)/)
+    const zm = rest.match(/Z(-?[0-9.]+)/)
+    const em = rest.match(/E(-?[0-9.]+)/)
+    if (!xm && !ym && !zm && !em) continue
+    if (xm) x = parseFloat(xm[1])
+    if (ym) y = parseFloat(ym[1])
+    if (zm) z = parseFloat(zm[1])
+    if (em) e = parseFloat(em[1])
     moves.push({ cmd, x, y, z, e })
   }
   return moves
@@ -308,7 +314,10 @@ function compareGcode(stGcode, mtGcode, tolerance) {
     if (a.cmd !== b.cmd) return `move ${i}: command differs (st=${a.cmd} mt=${b.cmd})`
     for (const axis of ['x', 'y', 'z', 'e']) {
       const av = a[axis], bv = b[axis]
-      if (av === undefined || bv === undefined) continue
+      if ((av === undefined) !== (bv === undefined)) {
+        return `move ${i} (${a.cmd}): ${axis.toUpperCase()} presence differs`
+      }
+      if (av === undefined) continue
       const delta = Math.abs(av - bv)
       if (delta > tolerance) {
         return `move ${i} (${a.cmd}): ${axis.toUpperCase()} differs beyond tolerance ` +

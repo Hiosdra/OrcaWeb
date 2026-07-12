@@ -12,7 +12,11 @@ target_link_libraries(slicer PRIVATE orca_web_bridge)
 # src/lib/wasm-loader.ts can pick one at runtime without either
 # overwriting the other in public/wasm/.
 if(NOT DEFINED ORCA_WEB_WASM_OUTPUT_NAME)
-  set(ORCA_WEB_WASM_OUTPUT_NAME "slicer")
+  if(SLIC3R_WASM_MT)
+    set(ORCA_WEB_WASM_OUTPUT_NAME "slicer-mt")
+  else()
+    set(ORCA_WEB_WASM_OUTPUT_NAME "slicer")
+  endif()
 endif()
 
 # ── Emscripten link flags ────────────────────────────────────────────────────

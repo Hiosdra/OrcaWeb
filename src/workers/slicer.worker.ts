@@ -109,9 +109,22 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       let variant: 'slicer' | 'slicer-mt' = 'slicer'
       if (canUseThreads) {
         try {
-          const probe = await fetch(`${wasmBase}/slicer-mt.js${v}`, { method: 'HEAD' })
+          let probe: Response
+          try {
+            probe = await fetch(`${wasmBase}/slicer-mt.js${v}`, { method: 'HEAD' })
+            if (!probe.ok) {
+              probe = await fetch(`${wasmBase}/slicer-mt.js${v}`, {
+                headers: { Range: 'bytes=0-0' },
+              })
+            }
+          } catch {
+            probe = await fetch(`${wasmBase}/slicer-mt.js${v}`, {
+              headers: { Range: 'bytes=0-0' },
+            })
+          }
           const contentType = probe.headers.get('content-type') ?? ''
           if (probe.ok && !contentType.includes('text/html')) variant = 'slicer-mt'
+          await probe.body?.cancel()
         } catch {
           // Network error probing — fall back to the ST engine.
         }
