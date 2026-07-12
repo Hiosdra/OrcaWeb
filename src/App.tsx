@@ -111,7 +111,7 @@ export default function App() {
   }, [importNotice])
 
   const {
-    items: queue, plate, wasmStatus, addFiles, removeItem, sliceAll, slicePlate, cancel,
+    items: queue, plate, wasmStatus, addFiles, removeItem, sliceAll, slicePlate, cancel, export3mf,
   } = useSliceQueue(config, handleSettingsImported)
 
   const bedX = config.bed_size_x ?? DISPLAY_DEFAULTS.bed_size_x
@@ -314,6 +314,7 @@ export default function App() {
                   bedX={bedX}
                   bedY={bedY}
                   bedShape={bedShape}
+                  onExport3mf={export3mf}
                 />
               ))}
             </div>

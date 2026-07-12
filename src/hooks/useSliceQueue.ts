@@ -228,6 +228,8 @@ export interface SliceQueue {
   slicePlate: () => void
   /** Abort the running slice — terminates the worker and restarts the engine. */
   cancel: () => void
+  /** Export one item's current model + live config as a .3mf (no plate/gcode data). */
+  export3mf: (item: QueueItem) => Promise<ArrayBuffer>
 }
 
 export function useSliceQueue(
@@ -243,6 +245,14 @@ export function useSliceQueue(
 
   const onSettingsImportedRef = useRef(onSettingsImported)
   useEffect(() => { onSettingsImportedRef.current = onSettingsImported }, [onSettingsImported])
+
+  // WRITE_3MF is a one-off request/response, not part of the queue state
+  // machine (it doesn't change item.status) — resolved directly against the
+  // promise the caller is awaiting, keyed by the same requestId the worker
+  // echoes back.
+  const export3mfResolvers = useRef(
+    new Map<string, { resolve: (data: ArrayBuffer) => void; reject: (err: Error) => void }>(),
+  )
 
   // Mark results stale whenever the effective config changes after they were
   // produced (skip the mount run — nothing has been sliced yet).
@@ -289,6 +299,22 @@ export function useSliceQueue(
         case 'CAD_STL_ERROR':
           dispatch({ type: 'PATCH_ITEM', id: msg.requestId, patch: { status: 'error', error: `CAD conversion failed: ${msg.message}` } })
           return
+        case 'WRITE_3MF_COMPLETE': {
+          const resolver = export3mfResolvers.current.get(msg.requestId)
+          if (resolver) {
+            export3mfResolvers.current.delete(msg.requestId)
+            resolver.resolve(msg.data)
+          }
+          return
+        }
+        case 'WRITE_3MF_ERROR': {
+          const resolver = export3mfResolvers.current.get(msg.requestId)
+          if (resolver) {
+            export3mfResolvers.current.delete(msg.requestId)
+            resolver.reject(new Error(msg.message))
+          }
+          return
+        }
         default:
           msg satisfies never
       }
@@ -420,6 +446,26 @@ export function useSliceQueue(
     dispatch({ type: 'RUN_QUEUE' })
   }, [])
 
+  // Exports one queue item's current STL + the live config as a .3mf.
+  // Independent of slicing — works on any item with STL data, sliced or not.
+  const export3mf = useCallback((item: QueueItem): Promise<ArrayBuffer> => {
+    if (!item.stlFile) return Promise.reject(new Error('No model data for this item'))
+    return new Promise<ArrayBuffer>((resolve, reject) => {
+      const requestId = crypto.randomUUID()
+      export3mfResolvers.current.set(requestId, { resolve, reject })
+      void (async () => {
+        try {
+          const stl = await item.stlFile!.arrayBuffer()
+          if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
+          getWorker().postMessage({ type: 'WRITE_3MF', stl, config: configRef.current, requestId }, [stl])
+        } catch (err) {
+          export3mfResolvers.current.delete(requestId)
+          reject(err instanceof Error ? err : new Error(String(err)))
+        }
+      })()
+    })
+  }, [])
+
   const slicePlate = useCallback(() => {
     if (state.plate.slicing) return
     const readyItems = state.items.filter((i) => i.status === 'ready' && i.stlFile != null)
@@ -447,5 +493,6 @@ export function useSliceQueue(
     sliceAll,
     slicePlate,
     cancel,
+    export3mf,
   }
 }

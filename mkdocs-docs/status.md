@@ -29,6 +29,7 @@ Ostatnia aktualizacja: **2026-07-11** · wersja silnika: **OrcaSlicer v2.4.2** (
 | Statystyki G-code | Czas druku, warstwy, filament (mm/g) na karcie pliku — parsowane z nagłówka i końcówki G-code (oba dialekty komentarzy czasu) |
 | Widok model + G-code obok siebie | Po slicowaniu — synchronizowany układ obok siebie |
 | Pobieranie G-code | Przycisk „Download" z poprawną nazwą pliku; „Download All (.zip)" pakuje wszystkie wyniki do jednego archiwum |
+| Eksport pliku .3mf | Przycisk „.3mf" na sliced karcie — silnik zapisuje siatkę + wbudowane ustawienia OrcaSlicera (`orc_write_3mf`); bez danych stołu/G-code/miniatur (patrz niżej) |
 | Anulowanie slicowania | Przycisk „Cancel" — restart Workera (synchronicznej pętli WASM nie da się przerwać inaczej); oczekujące konwersje OBJ/STEP są ponawiane automatycznie |
 | Wykrywanie nieaktualnych wyników | Zmiana ustawień po slicingu oznacza wynik jako „Sliced with previous settings", przycisk zmienia się w „Re-slice" |
 | Zapamiętywanie ustawień | Drukarka, filament, preset jakości i nadpisania trzymane w `localStorage`, przywracane przy kolejnej wizycie |
@@ -45,6 +46,7 @@ Ostatnia aktualizacja: **2026-07-11** · wersja silnika: **OrcaSlicer v2.4.2** (
 | Własny build OrcaSlicer **v2.4.2** | Zbudowany przez `orca-wasm/` + Emscripten; artefakty w release `wasm-v2.4.2` |
 | `orc_obj_to_stl` | Nowy eksport WASM: konwersja OBJ → binary STL bez potrzeby `orc_init`; wynik zwracany jako `ArrayBuffer` do workera |
 | `orc_slice_multi` | Wiele STL → jeden G-code: auto-arrange przez `arrange_objects()` (libnest2d + NLopt); wynik identyczny jak `orc_slice` |
+| `orc_write_3mf` | Nowy eksport WASM: zapis siatki + wbudowanego configu jako `.3mf` przez `Slic3r::store_bbs_3mf()` — bez danych płyty/G-code/miniatur (brak `PartPlateList` w headless bridge); zweryfikowane przez smoke test (rozpakowanie ZIP, obecność `3D/3dmodel.model` + `Metadata/*.config`) |
 | Brak `slicer.data` | Headless flat-config slicer nie czyta `orca/resources` → plik danych zredukowany **200 MB → 0** |
 | Singleton Worker | Jeden Worker przez cały czas sesji |
 | Obsługa błędów | Kody błędów `-1`…`-9`, czytelne komunikaty |
@@ -130,6 +132,15 @@ Bridge udostępnia teraz `orc_slice_multi`'s `extruder_ids` — per-obiektowe pr
 | Variable layer height | 🟡 średni |
 | Support enforcement / blocking | 🟡 średni |
 
+### 3MF — zakres eksportu/importu silnikowego (issue #108)
+
+`orc_write_3mf` pokrywa tylko podstawowy przypadek: siatka + wbudowany config, bez danych płyty. Świadomie poza zakresem pierwszego cięcia:
+
+| Funkcja | Priorytet |
+|---------|-----------|
+| Silnikowy odczyt 3MF (`orc_read_3mf`) — natywny reader OrcaSlicera zamiast JS `parse3mf.ts` | 🟡 średni — obecny JS parser wystarcza na dziś; ma sens głównie dla rozszerzeń Orca (per-object config, malowanie support/seam), których `parse3mf.ts` nie rozumie |
+| Eksport pełnego "sliced project" 3MF (G-code per-płyta, miniatury płyt, `PlateDataPtrs`) | 🔴 niski — wymaga plumbingu `PartPlateList`, którego headless bridge nie buduje; desktop OrcaSlicer nie otworzy eksportu tej funkcji jako "project ze slice'em" |
+
 ---
 
 ## 🗺️ Roadmap
@@ -165,6 +176,8 @@ v0.4  ── ✅ Import OBJ (natywny parser OrcaSlicer w WASM, `orc_obj_to_stl`)
       ── ✅ Smoke test silnika w CI — realny orc_init/orc_slice(_multi) po każdym buildzie (ADR-009)
       ── ✅ Bridge: per-obiektowe przypisanie ekstrudera/filamentu (orc_slice_multi extruder_ids) — jedna dysza, wiele slotów filamentu
       ── Prawdziwe drukarki wielo-dyszowe — zablokowane do czasu root-cause session z debug buildem WASM
+      ── ✅ Bridge: eksport 3MF (orc_write_3mf) — siatka + wbudowany config, re-openable w desktop OrcaSlicer (issue #108)
+      ── Silnikowy odczyt 3MF (orc_read_3mf) — fast follow, patrz sekcja "Nie zaimplementowane"
 ```
 
 ---
@@ -182,15 +195,15 @@ src/
 │   └── SlicePanel.tsx     ✅ progress states, statystyki G-code, download
 ├── lib/
 │   ├── profiles.ts        ✅ presety z rozmiarami + kształtem stołu, 30+ pól + passthrough wszystkich pozostałych
-│   ├── parse3mf.ts        ✅ 3MF → binary STL + OrcaConfig
-│   ├── wasm-loader.ts     ✅ sesja (orc_session_create/destroy) + orc_init / orc_slice / orc_slice_multi (extruder_ids) / orc_obj_to_stl / orc_cad_to_stl (STEP) / error codes
+│   ├── parse3mf.ts        ✅ 3MF → binary STL + OrcaConfig (JS-side import; silnikowy odczyt to fast follow — patrz "Nie zaimplementowane")
+│   ├── wasm-loader.ts     ✅ sesja (orc_session_create/destroy) + orc_init / orc_slice / orc_slice_multi (extruder_ids) / orc_obj_to_stl / orc_cad_to_stl (STEP) / write3mf / error codes
 │   └── worker-singleton.ts ✅ singleton, preload WASM, drop+respawn workera po WASM_ERROR
 ├── workers/
-│   └── slicer.worker.ts   ✅ WASM load + tworzenie sesji + SLICE + SLICE_MULTI + OBJ_TO_STL
+│   └── slicer.worker.ts   ✅ WASM load + tworzenie sesji + SLICE + SLICE_MULTI + OBJ_TO_STL + WRITE_3MF
 └── types/index.ts         ✅ OrcaConfig, GcodeStats, WorkerMessages, SliceStatus
 
 orca-wasm/                 ✅ aktywny pipeline buildowy
-├── bridge/slicer.cpp      ✅ orc_session_create/destroy + orc_init / orc_slice / orc_slice_multi / orc_obj_to_stl bridge
+├── bridge/slicer.cpp      ✅ orc_session_create/destroy + orc_init / orc_slice / orc_slice_multi / orc_obj_to_stl / orc_write_3mf bridge
 ├── scripts/smoke-test.mjs ✅ post-build regression test (patrz ADR-009)
 ├── wasm/                  ✅ CMakeLists, link flags, shims
 ├── wasm/shims/tbb/        ✅ sekwencyjne stuby TBB

@@ -132,6 +132,9 @@ export type WorkerInMessage =
   // the queue item id).
   | { type: 'OBJ_TO_STL'; obj: ArrayBuffer; requestId: string }
   | { type: 'CAD_TO_STL'; cad: ArrayBuffer; requestId: string }
+  // Exports a single mesh + config as a .3mf (see orc_write_3mf in
+  // orca-wasm/bridge/slicer.cpp) — no plate/gcode/thumbnail data.
+  | { type: 'WRITE_3MF'; stl: ArrayBuffer; config: OrcaConfig; requestId: string }
 
 export type WorkerOutMessage =
   | { type: 'WASM_LOADED' }
@@ -144,6 +147,8 @@ export type WorkerOutMessage =
   | { type: 'OBJ_STL_ERROR'; message: string; requestId: string }
   | { type: 'CAD_STL_COMPLETE'; stl: ArrayBuffer; requestId: string }
   | { type: 'CAD_STL_ERROR'; message: string; requestId: string }
+  | { type: 'WRITE_3MF_COMPLETE'; data: ArrayBuffer; requestId: string }
+  | { type: 'WRITE_3MF_ERROR'; message: string; requestId: string }
 
 // --- G-code statistics ---
 
@@ -197,6 +202,13 @@ export interface OrcaModule {
   _orc_cad_to_stl(
     cadPtr: number,
     cadLen: number,
+    outputPtrPtr: number,
+    outputLenPtr: number,
+  ): number
+  _orc_write_3mf(
+    session: number,
+    stlPtr: number,
+    stlLen: number,
     outputPtrPtr: number,
     outputLenPtr: number,
   ): number

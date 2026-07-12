@@ -10,13 +10,14 @@
  *                   extruderIds, out, outLen)                     → 0 = ok
  *   orc_obj_to_stl(obj, objLen, outPtr, outLen)                   → 0 = ok
  *   orc_cad_to_stl(cad, cadLen, outPtr, outLen)                   → 0 = ok (STEP)
+ *   orc_write_3mf(session, stl, stlLen, outPtr, outLen)           → 0 = ok
  *   orc_free(ptr)
  *   orc_decode_exception(session)                                 → null-terminated UTF-8 string
  *
  * orc_obj_to_stl / orc_cad_to_stl are pure format conversions — they never
  * touch slicer config state, so they take no session handle.
  *
- * Error codes for orc_slice / orc_init / orc_slice_multi:
+ * Error codes for orc_slice / orc_init / orc_slice_multi / orc_write_3mf:
  *   -1  invalid / uninitialized state (includes a null/invalid session handle)
  *   -2  JSON parse failure
  *   -3  STL write to MEMFS failed
@@ -24,7 +25,7 @@
  *   -5  empty model
  *   -6  print validation failed
  *   -7  slicing error
- *   -8  gcode export failed
+ *   -8  gcode export failed (or, for orc_write_3mf, 3MF export failed)
  *   -9  unexpected C++ exception
  */
 
@@ -48,6 +49,7 @@
 #include "libslic3r/Format/STL.hpp"
 #include "libslic3r/Format/OBJ.hpp"
 #include "libslic3r/Format/STEP.hpp"
+#include "libslic3r/Format/bbs_3mf.hpp"
 #include "libslic3r/GCode.hpp"
 #include "libslic3r/Exception.hpp"
 
@@ -774,7 +776,122 @@ int orc_cad_to_stl(const char* cad_data, int cad_len,
     return status;
 }
 
-/** Free a buffer returned by orc_slice, orc_slice_multi, orc_obj_to_stl, or orc_cad_to_stl. */
+/**
+ * Export a single mesh + the session's current config as a .3mf file
+ * (geometry + embedded OrcaSlicer settings — no plate/G-code/thumbnail data;
+ * see orca-wasm bridge design notes for why that's out of scope here).
+ *
+ * On success *out_3mf points to a malloc'd buffer containing the .3mf (a ZIP
+ * archive — contains embedded NUL bytes, so callers must use the returned
+ * length, never a NUL-terminated string read). Caller must free with
+ * orc_free().
+ *
+ * Error codes: same convention as orc_slice, with -8 meaning the 3MF export
+ * itself (store_bbs_3mf) failed rather than gcode export.
+ */
+EMSCRIPTEN_KEEPALIVE
+int orc_write_3mf(void* session_ptr, const void* stl_data, int stl_len,
+                  char** out_3mf, int* out_len) {
+    OrcSession* session = as_session(session_ptr);
+    if (!session) return -1;
+    session->last_error.clear();
+    if (!session->initialized) { record_error(*session, "call orc_init first"); return -1; }
+    if (!stl_data || stl_len <= 0 || !out_3mf || !out_len)
+        return -1;
+
+    {
+        FILE* f = std::fopen("/tmp/ow_3mf_in.stl", "wb");
+        if (!f) { record_error(*session, "cannot open /tmp/ow_3mf_in.stl for writing"); return -3; }
+        std::fwrite(stl_data, 1, static_cast<std::size_t>(stl_len), f);
+        std::fclose(f);
+    }
+
+    try {
+        Slic3r::Model model;
+        const bool stl_ok = Slic3r::load_stl("/tmp/ow_3mf_in.stl", &model, "object");
+        std::remove("/tmp/ow_3mf_in.stl");
+        if (!stl_ok) {
+            record_error(*session, "STL load failed");
+            return -4;
+        }
+        if (model.objects.empty()) {
+            record_error(*session, "model contains no objects");
+            return -5;
+        }
+
+        // Same placement convention as orc_slice, so the mesh lands back in
+        // the same spot on re-import instead of at the model-space origin.
+        for (auto* obj : model.objects) {
+            center_object_xy_only(obj);
+            if (obj->instances.empty()) {
+                auto* inst = obj->add_instance();
+                inst->set_offset(Slic3r::Vec3d(session->bed_cx, session->bed_cy, 0.0));
+            }
+        }
+
+        TempFileGuard out_guard("/tmp/ow_out.3mf");
+        {
+            Slic3r::StoreParams store_params;
+            store_params.path = "/tmp/ow_out.3mf";
+            store_params.model = &model;
+            store_params.config = &session->config;
+            // plate_data_list / project_presets / thumbnail_* all stay at
+            // their StoreParams defaults (empty) — this headless bridge has
+            // no PartPlateList, so there's no plate/gcode/thumbnail data to
+            // attach. store_bbs_3mf treats all of that as optional and still
+            // writes a valid model+config 3mf (verified by reading its
+            // implementation: every plate/thumbnail loop is bounded by
+            // plate_data_list.size(), which is 0 here).
+            bool ok = Slic3r::store_bbs_3mf(store_params);
+            // get_backup_path() (used internally for the "Auxiliaries" dir)
+            // lazily creates a per-export MEMFS scratch directory the first
+            // time it's touched; nothing else in this bridge ever cleans it
+            // up, so without this call every export leaks one empty
+            // directory tree into MEMFS for the life of the WASM instance.
+            model.remove_backup_path_if_exist();
+            if (!ok) {
+                record_error(*session, "3MF export failed");
+                return -8;
+            }
+        }
+
+        FILE* zf = std::fopen("/tmp/ow_out.3mf", "rb");
+        if (!zf) { record_error(*session, "3mf export produced no output"); return -8; }
+
+        std::fseek(zf, 0, SEEK_END);
+        long sz = std::ftell(zf);
+        std::rewind(zf);
+        if (sz <= 0) {
+            std::fclose(zf);
+            record_error(*session, "3mf export produced empty output");
+            return -8;
+        }
+
+        char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz)));
+        if (!buf) {
+            std::fclose(zf);
+            record_error(*session, "out of memory");
+            return -9;
+        }
+        std::size_t nread = std::fread(buf, 1, static_cast<std::size_t>(sz), zf);
+        std::fclose(zf);
+        if (nread != static_cast<std::size_t>(sz)) {
+            std::free(buf);
+            record_error(*session, "3mf read incomplete");
+            return -8;
+        }
+
+        *out_3mf = buf;
+        *out_len = static_cast<int>(sz);
+        return 0;
+
+    } catch (const std::exception& e) {
+        record_error(*session, e.what());
+        return -9;
+    }
+}
+
+/** Free a buffer returned by orc_slice, orc_slice_multi, orc_obj_to_stl, orc_cad_to_stl, or orc_write_3mf. */
 EMSCRIPTEN_KEEPALIVE
 void orc_free(void* ptr) {
     std::free(ptr);

@@ -1,5 +1,5 @@
 import type { OrcaConfig, OrcaModuleFactory, OrcaModule, WorkerInMessage, WorkerOutMessage } from '../types'
-import { sliceStl, sliceMultiStl, objToStl, cadToStl, OrcaSliceError } from '../lib/wasm-loader'
+import { sliceStl, sliceMultiStl, objToStl, cadToStl, write3mf, OrcaSliceError } from '../lib/wasm-loader'
 import { toEngineConfig } from '../lib/profiles'
 import { logInfo, logWarn, logError } from '../lib/log'
 
@@ -24,6 +24,7 @@ let pendingSlice: { stl: ArrayBuffer; config: OrcaConfig } | null = null
 let pendingPlate: { stls: ArrayBuffer[]; config: OrcaConfig; extruderIds?: number[] } | null = null
 const pendingObjConvertQueue: { obj: ArrayBuffer; requestId: string }[] = []
 const pendingCadConvertQueue: { cad: ArrayBuffer; requestId: string }[] = []
+const pendingWrite3mfQueue: { stl: ArrayBuffer; config: OrcaConfig; requestId: string }[] = []
 
 function send(msg: WorkerOutMessage) {
   self.postMessage(msg)
@@ -43,6 +44,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       case 'SLICE_MULTI': send({ type: 'SLICE_MULTI_ERROR', code: -9, message: crashMsg }); break
       case 'OBJ_TO_STL': send({ type: 'OBJ_STL_ERROR', message: crashMsg, requestId: msg.requestId }); break
       case 'CAD_TO_STL': send({ type: 'CAD_STL_ERROR', message: crashMsg, requestId: msg.requestId }); break
+      case 'WRITE_3MF': send({ type: 'WRITE_3MF_ERROR', message: crashMsg, requestId: msg.requestId }); break
       case 'LOAD_WASM': send({ type: 'WASM_ERROR', message: crashMsg }); break
     }
     return
@@ -179,6 +181,10 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         doCadToStl(pending.cad, pending.requestId)
       }
       pendingCadConvertQueue.length = 0
+      for (const pending of pendingWrite3mfQueue) {
+        doWrite3mf(pending.stl, pending.config, pending.requestId)
+      }
+      pendingWrite3mfQueue.length = 0
       if (pendingSlice) {
         const { stl, config } = pendingSlice
         pendingSlice = null
@@ -231,6 +237,13 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         return
       }
       doCadToStl(msg.cad, msg.requestId)
+      return
+    case 'WRITE_3MF':
+      if (!orcaModule) {
+        pendingWrite3mfQueue.push({ stl: msg.stl, config: msg.config, requestId: msg.requestId })
+        return
+      }
+      doWrite3mf(msg.stl, msg.config, msg.requestId)
       return
     default:
       msg satisfies never
@@ -317,6 +330,34 @@ function doCadToStl(cad: ArrayBuffer, requestId: string) {
     self.postMessage({ type: 'CAD_STL_COMPLETE', stl: stlBuffer, requestId }, [stlBuffer])
   } catch (err) {
     send({ type: 'CAD_STL_ERROR', message: err instanceof Error ? err.message : String(err), requestId })
+  }
+}
+
+function doWrite3mf(stl: ArrayBuffer, config: OrcaConfig, requestId: string) {
+  if (!orcaModule) return
+  const startedAt = performance.now()
+  logInfo(`[OrcaWASM] 3mf export start — STL ${(stl.byteLength / 1e6).toFixed(2)} MB`)
+  try {
+    const { _passthrough, ...rest } = config
+    const engineRest = toEngineConfig(rest)
+    const flat = _passthrough ? { ...engineRest, ..._passthrough } : engineRest
+    const configJson = JSON.stringify(flat)
+    const data = write3mf(orcaModule, session, new Uint8Array(stl), configJson)
+    const dataBuffer = data.buffer as ArrayBuffer
+    logInfo(
+      `[OrcaWASM] 3mf export done in ${Math.round(performance.now() - startedAt)}ms `
+      + `— ${(data.byteLength / 1e6).toFixed(2)} MB`,
+    )
+    self.postMessage({ type: 'WRITE_3MF_COMPLETE', data: dataBuffer, requestId }, [dataBuffer])
+  } catch (err) {
+    const ms = Math.round(performance.now() - startedAt)
+    if (err instanceof OrcaSliceError) {
+      logError(`[OrcaWASM] 3mf export failed after ${ms}ms — code ${err.code}: ${err.message}`)
+      send({ type: 'WRITE_3MF_ERROR', message: err.message, requestId })
+    } else {
+      logError(`[OrcaWASM] 3mf export failed after ${ms}ms:`, err)
+      send({ type: 'WRITE_3MF_ERROR', message: String(err), requestId })
+    }
   }
 }
 

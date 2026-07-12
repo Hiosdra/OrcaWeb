@@ -316,7 +316,19 @@ File drop
           ▼                ▼
     ModelViewer       GcodeViewer
  (STL, white bg)  (toolpaths, dark bg)
+
+  └─ Export .3mf (per queue item, on a done card)
+     export3mf(item) → worker.postMessage(WRITE_3MF, stl, config, requestId)
+         │
+    [worker] _orc_write_3mf(session, stl) — reuses OrcSession::config
+    (the same flat DynamicPrintConfig ADR-005 describes) via
+    Slic3r::store_bbs_3mf(); no PartPlateList in this headless bridge, so
+    plate/gcode/thumbnail data is intentionally omitted (mesh + config only)
+         │
+    WRITE_3MF_COMPLETE { data } → downloadBlob(item.name + '.3mf')
 ```
+
+Engine-side 3MF write (`orc_write_3mf`, issue #108) is the first bridge export that touches `libslic3r/Format/bbs_3mf.hpp` — previously 3MF only flowed one way, parsed client-side by `parse3mf.ts`. It's a plain request/response through the worker (like `OBJ_TO_STL`/`CAD_TO_STL`), not part of the slice queue's state machine, since exporting doesn't change `item.status`.
 
 ## Build & deploy
 

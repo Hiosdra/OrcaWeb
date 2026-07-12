@@ -3,9 +3,9 @@
  * WASM engine smoke test.
  *
  * Loads the built slicer.js/slicer.wasm and runs several real orc_init +
- * orc_slice(_multi) calls end-to-end, so a broken engine build is caught
- * before it's ever published as a GitHub Release (build-wasm.yml) or
- * trusted by local `npm run dev` after `npm run setup`.
+ * orc_slice(_multi)/orc_write_3mf calls end-to-end, so a broken engine build
+ * is caught before it's ever published as a GitHub Release (build-wasm.yml)
+ * or trusted by local `npm run dev` after `npm run setup`.
  *
  * This formalizes the ad-hoc reproduction script referenced (but never
  * committed) in orca-wasm/wasm/CMakeLists.txt's --profiling-funcs comment,
@@ -36,6 +36,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createRequire } from 'node:module'
+import { unzipSync } from 'fflate'
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
@@ -260,6 +261,51 @@ function sliceMultiOnce(module, session, stlBytesArr, extruderIds) {
   return gcode
 }
 
+function write3mfOnce(module, session, stlBytes) {
+  const stlPtr = writeBytes(module, stlBytes)
+  const outPtrPtr = module._malloc(4)
+  const outLenPtr = module._malloc(4)
+  const rc = module._orc_write_3mf(session, stlPtr, stlBytes.length, outPtrPtr, outLenPtr)
+  module._free(stlPtr)
+  if (rc !== 0) {
+    const msg = decodeError(module, session)
+    module._free(outPtrPtr)
+    module._free(outLenPtr)
+    throw new Error(`orc_write_3mf failed (${rc}): ${msg}`)
+  }
+  const dataPtr = module.getValue(outPtrPtr, 'i32')
+  const dataLen = module.getValue(outLenPtr, 'i32')
+  const data = module.HEAPU8.slice(dataPtr, dataPtr + dataLen)
+  module._orc_free(dataPtr)
+  module._free(outPtrPtr)
+  module._free(outLenPtr)
+  return data
+}
+
+// A .3mf is a ZIP; verify it round-trips as one and carries the two pieces
+// orc_write_3mf's contract promises: the mesh (3D/3dmodel.model) and the
+// embedded OrcaSlicer settings (a Metadata/*.config file — see
+// EMBEDDED_PRINT_FILE_FORMAT et al. in bbs_3mf.hpp for why the filename
+// isn't a fixed constant).
+function assertValid3mf(bytes, label) {
+  if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) {
+    throw new Error(`${label}: output does not start with a ZIP (PK) signature`)
+  }
+  let entries
+  try {
+    entries = unzipSync(bytes)
+  } catch (err) {
+    throw new Error(`${label}: failed to unzip output: ${err.message}`)
+  }
+  const names = Object.keys(entries)
+  if (!names.includes('3D/3dmodel.model')) {
+    throw new Error(`${label}: missing 3D/3dmodel.model (entries: ${names.join(', ')})`)
+  }
+  if (!names.some((n) => /^Metadata\/.*\.config$/.test(n))) {
+    throw new Error(`${label}: missing a Metadata/*.config file (entries: ${names.join(', ')})`)
+  }
+}
+
 // ── sanity assertions on the resulting G-code ─────────────────────────────────
 
 function assertSaneGcode(gcode, label) {
@@ -394,6 +440,21 @@ async function main() {
       assertSaneGcode(gcode, plateLabel)
       assertRestsOnBed(gcode, plateLabel, BASE_CONFIG.initial_layer_height)
       console.log(`PASS (${gcode.length} bytes)`)
+    } catch (err) {
+      failures++
+      console.log('FAIL')
+      console.error(`  ${err.message}`)
+    }
+
+    // orc_write_3mf: mesh + embedded config, no plate/gcode data (see
+    // orca-wasm/bridge/slicer.cpp doc comment and issue #108's scope notes).
+    const write3mfLabel = `[${mesh.label}] write .3mf (mesh + embedded config)`
+    process.stdout.write(`[smoke-test] ${write3mfLabel} ... `)
+    try {
+      initSession(module, session, JSON.stringify(BASE_CONFIG))
+      const data = write3mfOnce(module, session, mesh.bytes)
+      assertValid3mf(data, write3mfLabel)
+      console.log(`PASS (${data.length} bytes)`)
     } catch (err) {
       failures++
       console.log('FAIL')
