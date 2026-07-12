@@ -7,8 +7,20 @@ public/wasm/slicer.wasm
 public/wasm/slicer.data
 public/wasm/slicer.cjs
 public/wasm/.wasm-release-tag
-public/wasm/engine-version.json
 wasm-artifacts/
+# orca-wasm/orca is a shallow clone of the OrcaSlicer submodule fetched by CI
+# (build-wasm.yml) or manually per MT-PLAN.md Phase 0 — .gitmodules already
+# declares `ignore = all` for it, but that only applies when it's checked out
+# via `git submodule update`; a plain `git clone` into the same path (as
+# MT-PLAN.md's inventory step does) isn't covered by that, hence this entry.
+orca-wasm/orca/
+# orca-wasm/deps-install(-st|-mt) and build-wasm(-st|-mt) are build-wasm.yml's
+# (and its local reproduction's — see MT-PLAN.md Phase 4) own dep-install and
+# CMake build output dirs. CI never needed this entry (its runners are
+# ephemeral, so the directory never outlives a single job), but a local build
+# inside a real checkout leaves it sitting in the working tree.
+orca-wasm/deps-install*/
+orca-wasm/build-wasm*/
 corpus/
 scripts/repro-oom.mjs
 scripts/simple_cube_30mm.stl
@@ -22,6 +34,3 @@ scripts/rocket_engine_mk4s.stl
 playwright-report/
 test-results/
 blob-report/
-
-# wrangler (Cloudflare) local state
-.wrangler

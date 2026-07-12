@@ -1,10 +1,19 @@
 # Final Emscripten WASM module target.
-# Links libslic3r + our bridge and emits slicer.js / slicer.wasm / slicer.data.
+# Links libslic3r + our bridge and emits <output name>.js / .wasm / .data.
 
 # Emscripten requires an "executable" target even though the output is a .js module.
 add_executable(slicer "${CMAKE_CURRENT_SOURCE_DIR}/empty_main.cpp")
 
 target_link_libraries(slicer PRIVATE orca_web_bridge)
+
+# Output filename stem — "slicer" for the default sequential build,
+# "slicer-mt" for the multithreaded variant (see orca-wasm/MT-PLAN.md
+# Phase 2), so both can be published/deployed side by side and
+# src/lib/wasm-loader.ts can pick one at runtime without either
+# overwriting the other in public/wasm/.
+if(NOT DEFINED ORCA_WEB_WASM_OUTPUT_NAME)
+  set(ORCA_WEB_WASM_OUTPUT_NAME "slicer")
+endif()
 
 # ── Emscripten link flags ────────────────────────────────────────────────────
 target_link_options(slicer PRIVATE
@@ -25,6 +34,16 @@ target_link_options(slicer PRIVATE
   -sMODULARIZE=1
   -sEXPORT_NAME=OrcaModule
   -sDISABLE_EXCEPTION_CATCHING=0
+  $<$<BOOL:${SLIC3R_WASM_MT}>:-pthread>
+  $<$<BOOL:${SLIC3R_WASM_MT}>:-sUSE_PTHREADS=1>
+  # Pre-spawns the pthread worker pool at module load instead of creating
+  # Web Workers lazily on first pthread_create() — required because the
+  # slicer's calling thread never yields to the JS event loop while blocked
+  # inside print.process() (see poc/wasm-threads/'s own README/
+  # INTEGRATION-NOTES.md and orca-wasm/MT-PLAN.md Phase 1a: without this, a
+  # lazily-created pthread worker never actually materializes and any
+  # blocking join/condvar wait on it hangs forever).
+  $<$<BOOL:${SLIC3R_WASM_MT}>:-sPTHREAD_POOL_SIZE=8>
   # EMULATE_FUNCTION_POINTER_CASTS + a raised max-func-params was tried here
   # to fix a real crash (slicing the official Voron Design Cube v7 STL traps
   # with "memory access out of bounds"), on the initial hypothesis that it
@@ -75,9 +94,9 @@ target_link_options(slicer PRIVATE
 ]"
 )
 
-# Rename Emscripten output to slicer.js/.wasm/.data
+# Rename Emscripten output to <ORCA_WEB_WASM_OUTPUT_NAME>.js/.wasm/.data
 set_target_properties(slicer PROPERTIES
-  OUTPUT_NAME slicer
+  OUTPUT_NAME "${ORCA_WEB_WASM_OUTPUT_NAME}"
   SUFFIX ".js"
 )
 
@@ -86,11 +105,11 @@ add_custom_command(TARGET slicer POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory
     "${CMAKE_CURRENT_SOURCE_DIR}/../../public/wasm"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    "${CMAKE_CURRENT_BINARY_DIR}/slicer.js"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../public/wasm/slicer.js"
+    "${CMAKE_CURRENT_BINARY_DIR}/${ORCA_WEB_WASM_OUTPUT_NAME}.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../public/wasm/${ORCA_WEB_WASM_OUTPUT_NAME}.js"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    "${CMAKE_CURRENT_BINARY_DIR}/slicer.wasm"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../public/wasm/slicer.wasm"
-  # No slicer.data: the engine is built without --preload-file.
+    "${CMAKE_CURRENT_BINARY_DIR}/${ORCA_WEB_WASM_OUTPUT_NAME}.wasm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../public/wasm/${ORCA_WEB_WASM_OUTPUT_NAME}.wasm"
+  # No .data output: the engine is built without --preload-file.
   COMMENT "Copying WASM artifacts to public/wasm/"
 )
