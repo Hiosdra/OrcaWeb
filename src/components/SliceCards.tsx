@@ -381,10 +381,18 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
 // ── Config summary ────────────────────────────────────────────────────────────
 
 export function ConfigSummary({ config, fileCount }: { config: OrcaConfig; fileCount: number }) {
+  const filamentEntries = String(config.filament_type ?? DISPLAY_DEFAULTS.filament_type)
+    .split(/[;,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+  const filamentTypes = [...new Set(filamentEntries)]
+  const material = filamentEntries.length > 1
+    ? `${filamentTypes.join(' / ')} (${filamentEntries.length} slots)`
+    : (filamentTypes[0] ?? DISPLAY_DEFAULTS.filament_type)
   const rows: [string, string][] = [
     ['Files', `${fileCount} file${fileCount !== 1 ? 's' : ''}`],
     ['Printer', config.printer_model ?? DISPLAY_DEFAULTS.printer_model],
-    ['Material', config.filament_type ?? DISPLAY_DEFAULTS.filament_type],
+    ['Material', material],
     ['Layer height', `${config.layer_height ?? DISPLAY_DEFAULTS.layer_height} mm`],
     ['Infill', `${config.sparse_infill_density ?? DISPLAY_DEFAULTS.sparse_infill_density}% ${config.sparse_infill_pattern ?? DISPLAY_DEFAULTS.sparse_infill_pattern}`],
     ['Walls', String(config.wall_loops ?? DISPLAY_DEFAULTS.wall_loops)],

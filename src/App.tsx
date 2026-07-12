@@ -99,9 +99,7 @@ export default function App() {
         ? { _passthrough: { ...prev._passthrough, ...patch._passthrough } }
         : {}),
     }))
-    const { _passthrough, ...known } = patch
-    const count = Object.keys(known).length + (_passthrough ? Object.keys(_passthrough).length : 0)
-    setImportNotice(`Applied ${count} print setting${count !== 1 ? 's' : ''} embedded in ${filename}`)
+    setImportNotice(`Imported print settings from ${filename}`)
   }, [])
 
   useEffect(() => {
