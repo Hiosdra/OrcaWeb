@@ -135,6 +135,25 @@ struct TempFileGuard {
     TempFileGuard& operator=(const TempFileGuard&) = delete;
 };
 
+// Same rationale as TempFileGuard, for Model::remove_backup_path_if_exist()
+// (the lazily-created MEMFS "Auxiliaries"/backup scratch dir that
+// store_bbs_3mf/load_bbs_3mf both touch internally via get_backup_path()).
+// Traced the two most likely internal throw sites in bbs_3mf.cpp — a
+// painting-feature version mismatch during model XML parsing, and a
+// malformed Metadata/*.config JSON — and both are caught internally and
+// converted to false/-1 returns rather than propagating, so the risk this
+// guards against is low in practice. bbs_3mf.cpp is ~9000 lines and wasn't
+// exhaustively audited past those two paths, though, and this costs
+// nothing, so guard it the same way as everything else here rather than
+// rely on that audit staying true across future engine version bumps.
+struct ModelBackupPathGuard {
+    Slic3r::Model& model;
+    explicit ModelBackupPathGuard(Slic3r::Model& m) : model(m) {}
+    ~ModelBackupPathGuard() { model.remove_backup_path_if_exist(); }
+    ModelBackupPathGuard(const ModelBackupPathGuard&) = delete;
+    ModelBackupPathGuard& operator=(const ModelBackupPathGuard&) = delete;
+};
+
 // Reads an entire file into a malloc'd buffer. Returns nullptr on any
 // failure (missing file, empty/negative size, OOM, or a short read); sets
 // *out_err to a short reason and *out_oom to distinguish the OOM case
@@ -885,6 +904,12 @@ int orc_write_3mf(void* session_ptr, const void* stl_data, int stl_len,
 
         TempFileGuard out_guard("/tmp/ow_out.3mf");
         {
+            // Constructed before store_bbs_3mf() runs, so its destructor
+            // (which does the get_backup_path()/"Auxiliaries" dir cleanup
+            // that call lazily triggers) still fires even if store_bbs_3mf
+            // throws instead of returning false.
+            ModelBackupPathGuard backup_guard(model);
+
             Slic3r::StoreParams store_params;
             store_params.path = "/tmp/ow_out.3mf";
             store_params.model = &model;
@@ -897,12 +922,6 @@ int orc_write_3mf(void* session_ptr, const void* stl_data, int stl_len,
             // implementation: every plate/thumbnail loop is bounded by
             // plate_data_list.size(), which is 0 here).
             bool ok = Slic3r::store_bbs_3mf(store_params);
-            // get_backup_path() (used internally for the "Auxiliaries" dir)
-            // lazily creates a per-export MEMFS scratch directory the first
-            // time it's touched; nothing else in this bridge ever cleans it
-            // up, so without this call every export leaks one empty
-            // directory tree into MEMFS for the life of the WASM instance.
-            model.remove_backup_path_if_exist();
             if (!ok) {
                 record_error(*session, "3MF export failed");
                 return -8;
@@ -983,6 +1002,11 @@ int orc_read_3mf(const void* mf_data, int mf_len,
         TempFileGuard in_guard(tmp_in);
 
         Slic3r::Model model;
+        // Constructed before load_bbs_3mf() runs, so its destructor (the
+        // get_backup_path()/"Auxiliaries" dir cleanup that call lazily
+        // triggers) still fires even if load_bbs_3mf throws instead of
+        // returning false — same rationale as orc_write_3mf's backup_guard.
+        ModelBackupPathGuard backup_guard(model);
         Slic3r::DynamicPrintConfig config;
         // EnableSilent: substitute unknown/incompatible option values with
         // defaults instead of throwing — mirrors orc_init's own "silently
@@ -1001,7 +1025,6 @@ int orc_read_3mf(const void* mf_data, int mf_len,
             Slic3r::LoadStrategy::AddDefaultInstances | Slic3r::LoadStrategy::LoadModel | Slic3r::LoadStrategy::LoadConfig);
 
         Slic3r::release_PlateData_list(plate_data_list);
-        model.remove_backup_path_if_exist(); // same lazy-dir cleanup as orc_write_3mf
 
         if (!ok) {
             record_error("3MF load failed");

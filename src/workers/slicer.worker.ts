@@ -3,6 +3,23 @@ import { sliceStl, sliceMultiStl, objToStl, cadToStl, write3mf, read3mf, OrcaSli
 import { toEngineConfig } from '../lib/profiles'
 import { logInfo, logWarn, logError } from '../lib/log'
 
+// A genuinely stalled connection (TCP connected but the server/proxy never
+// answers — as opposed to a slow-but-progressing download) previously left
+// the LOAD_WASM fetch()es pending forever, since neither ever resolves or
+// rejects: no WASM_LOADED/WASM_ERROR is ever sent, so anything awaiting the
+// engine (e.g. a 3MF import) hangs indefinitely with no fallback. The
+// timeout here only bounds *time to first response* — fetch()'s promise
+// settles as soon as headers arrive, well before the body (tens of MB for
+// slicer.wasm) finishes streaming, so a legitimately slow-but-working
+// download is never aborted once it starts.
+const FETCH_RESPONSE_TIMEOUT_MS = 30_000
+
+function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer))
+}
+
 let orcaModule: OrcaModule | null = null
 // Created once, right after the module loads, and reused for the worker's
 // entire lifetime — behaviour-equivalent to the old global-state bridge, but
@@ -91,7 +108,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       // `application/wasm` Content-Type, so fall back to buffered
       // WebAssembly.compile when a server (or a proxy) mislabels the file.
       const wasmModulePromise = (async () => {
-        const res = await fetch(`${wasmBase}/slicer.wasm${v}`)
+        const res = await fetchWithTimeout(`${wasmBase}/slicer.wasm${v}`, FETCH_RESPONSE_TIMEOUT_MS)
         if (!res.ok) throw new Error(`HTTP ${res.status} fetching slicer.wasm`)
         if (
           typeof WebAssembly.compileStreaming === 'function'
@@ -102,7 +119,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         return WebAssembly.compile(await res.arrayBuffer())
       })()
 
-      const jsText = await fetch(`${wasmBase}/slicer.js${v}`).then((r) => {
+      const jsText = await fetchWithTimeout(`${wasmBase}/slicer.js${v}`, FETCH_RESPONSE_TIMEOUT_MS).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status} fetching slicer.js`)
         return r.text()
       })

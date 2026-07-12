@@ -439,6 +439,48 @@ export function useSliceQueue(
     [],
   )
 
+  // Reads a .3mf via the engine, falling back to the JS walker on any
+  // failure. Deliberately NOT awaited by addFiles's batch loop (see there)
+  // — it handles its own success/fallback/error dispatch end-to-end, the
+  // same shape as postConversion(), just for 3MF instead of OBJ/STEP.
+  const importMf3 = useCallback(async (item: QueueItem) => {
+    const f = item.sourceFile
+    try {
+      const buf = await f.arrayBuffer()
+      const { stl, configJson } = await readMf3ViaEngine(buf, item.id)
+      const profileConfig = parseOrcaProfileJson(configJson)
+      if (Object.keys(profileConfig).length > 0) {
+        onSettingsImportedRef.current(profileConfig, f.name)
+      }
+      dispatch({ type: 'CONVERSION_DONE', id: item.id, stl })
+    } catch {
+      // Engine reader unavailable (WASM crashed/still loading and got
+      // cancelled) or rejected this archive — fall back to the JS
+      // walker rather than lose 3MF import entirely. `buf` above may
+      // already be detached (transferred to the worker), so re-read.
+      try {
+        const buf = await f.arrayBuffer()
+        const { stlBytes, config: profileConfig } = parse3mf(buf)
+        if (Object.keys(profileConfig).length > 0) {
+          onSettingsImportedRef.current(profileConfig, f.name)
+        }
+        const stlName = f.name.replace(/\.3mf$/i, '.stl')
+        const stlFile = new File(
+          [stlBytes.buffer.slice(stlBytes.byteOffset, stlBytes.byteOffset + stlBytes.byteLength) as ArrayBuffer],
+          stlName,
+          { type: 'model/stl' },
+        )
+        dispatch({ type: 'PATCH_ITEM', id: item.id, patch: { stlFile, name: stlName, status: 'ready' } })
+      } catch (err) {
+        dispatch({
+          type: 'PATCH_ITEM',
+          id: item.id,
+          patch: { status: 'error', error: err instanceof Error ? err.message : String(err) },
+        })
+      }
+    }
+  }, [readMf3ViaEngine])
+
   const addFiles = useCallback((files: File[]) => {
     const newItems: QueueItem[] = files.map((f) => ({
       id: crypto.randomUUID(),
@@ -455,32 +497,11 @@ export function useSliceQueue(
         const f = item.sourceFile
         try {
           if (/\.3mf$/i.test(f.name)) {
-            try {
-              const buf = await f.arrayBuffer()
-              const { stl, configJson } = await readMf3ViaEngine(buf, item.id)
-              const profileConfig = parseOrcaProfileJson(configJson)
-              if (Object.keys(profileConfig).length > 0) {
-                onSettingsImportedRef.current(profileConfig, f.name)
-              }
-              dispatch({ type: 'CONVERSION_DONE', id: item.id, stl })
-            } catch {
-              // Engine reader unavailable (WASM crashed/still loading and got
-              // cancelled) or rejected this archive — fall back to the JS
-              // walker rather than lose 3MF import entirely. `buf` above may
-              // already be detached (transferred to the worker), so re-read.
-              const buf = await f.arrayBuffer()
-              const { stlBytes, config: profileConfig } = parse3mf(buf)
-              if (Object.keys(profileConfig).length > 0) {
-                onSettingsImportedRef.current(profileConfig, f.name)
-              }
-              const stlName = f.name.replace(/\.3mf$/i, '.stl')
-              const stlFile = new File(
-                [stlBytes.buffer.slice(stlBytes.byteOffset, stlBytes.byteOffset + stlBytes.byteLength) as ArrayBuffer],
-                stlName,
-                { type: 'model/stl' },
-              )
-              dispatch({ type: 'PATCH_ITEM', id: item.id, patch: { stlFile, name: stlName, status: 'ready' } })
-            }
+            // Fire-and-forget, like the OBJ/STEP branch below — importMf3
+            // resolves its own success/fallback/error internally, so one
+            // slow (or WASM-load-blocked) .3mf doesn't hold up every other
+            // file dropped in the same batch behind it in this loop.
+            void importMf3(item)
           } else if (/\.(step|stp|obj)$/i.test(f.name)) {
             await postConversion(item)
           } else {
@@ -495,7 +516,7 @@ export function useSliceQueue(
         }
       }
     })()
-  }, [postConversion])
+  }, [postConversion, importMf3])
 
   // Terminating the worker also kills any conversions queued inside it —
   // re-post them (from the retained source files) to the fresh worker.
