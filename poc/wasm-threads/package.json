@@ -1,0 +1,9 @@
+{
+  "name": "orcaweb-wasm-threads-poc",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "build": "./build.sh",
+    "start": "node server.js"
+  }
+}

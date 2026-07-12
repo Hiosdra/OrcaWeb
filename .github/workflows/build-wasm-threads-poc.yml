@@ -1,0 +1,116 @@
+name: Build WASM Threads PoC
+
+# Reference implementation of the dual-artifact release pattern described in
+# poc/wasm-threads/INTEGRATION-NOTES.md §3: build the SAME source twice (once
+# without -pthread, once with) and publish both as separately-named release
+# assets, so a loader can feature-detect COOP/COEP at runtime and pick the
+# right one.
+#
+# This targets poc/wasm-threads/ only — a standalone demo, NOT the real
+# OrcaSlicer engine (orca-wasm/). It is deliberately tag-namespaced as
+# "wasm-poc-*" rather than "wasm-*" so it can never collide with the real
+# engine's releases published by build-wasm.yml (which already owns the
+# "wasm-vX.Y.Z[-patchN]" tag family for actual OrcaSlicer builds). If/when
+# real pthread-based TBB shims exist for libslic3r (see ADR-007 "Future"),
+# this same two-tag, shared-patch-number pattern is what would move onto
+# build-wasm.yml, at which point it would use the bare "wasm-vX.Y.Z-patchN"
+# / "wasm-vX.Y.Z-patchN-multithreaded" names as originally requested.
+on:
+  workflow_dispatch:
+    inputs:
+      poc_version:
+        description: 'Version label for this PoC release (e.g. v0.1.0)'
+        default: 'v0.1.0'
+        required: true
+  push:
+    tags: ['wasm-threads-poc-v*']
+  pull_request:
+    paths:
+      - 'poc/wasm-threads/**'
+      - '.github/workflows/build-wasm-threads-poc.yml'
+
+permissions:
+  contents: write # needed to create/update releases
+
+concurrency:
+  group: build-wasm-threads-poc-${{ github.event.inputs.poc_version || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v0.1.0' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      POC_VERSION: ${{ github.event.inputs.poc_version || (startsWith(github.ref, 'refs/tags/wasm-threads-poc-') && github.ref_name) || 'v0.1.0' }}
+      EMSDK_VERSION: "3.1.74" # matches build-wasm.yml, the real engine's pin
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache Emscripten
+        id: cache-emsdk
+        uses: actions/cache@v5
+        with:
+          path: /opt/emsdk
+          key: emsdk-${{ runner.os }}-${{ env.EMSDK_VERSION }}-v1
+
+      - name: Install Emscripten
+        if: steps.cache-emsdk.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git /opt/emsdk
+          /opt/emsdk/emsdk install "$EMSDK_VERSION"
+          /opt/emsdk/emsdk activate "$EMSDK_VERSION"
+
+      - name: Build both variants
+        run: |
+          source /opt/emsdk/emsdk_env.sh
+          cd poc/wasm-threads
+          ./build.sh
+
+      - name: Package release bundles
+        run: |
+          cd poc/wasm-threads
+          ./package.sh "$POC_VERSION"
+
+      - name: Upload build artifacts (CI, all events)
+        uses: actions/upload-artifact@v7
+        with:
+          name: wasm-threads-poc-${{ env.POC_VERSION }}
+          path: poc/wasm-threads/release-artifacts/
+          retention-days: 30
+
+      # Skip on PRs — those runs only validate the build, not publish.
+      - name: Publish GitHub Releases (single-threaded + multithreaded)
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd poc/wasm-threads
+          BASE_TAG="wasm-poc-$POC_VERSION"
+
+          if gh release view "$BASE_TAG" --repo "$GITHUB_REPOSITORY" &>/dev/null; then
+            LATEST_PATCH=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq "
+              [.[] | .tagName
+                | select(startswith(\"${BASE_TAG}-patch\") and (endswith(\"-multithreaded\") | not))
+                | split(\"-patch\")[1] | tonumber]
+              | max // 0
+            ")
+            TAG_ST="${BASE_TAG}-patch$((LATEST_PATCH + 1))"
+          else
+            TAG_ST="$BASE_TAG"
+          fi
+          TAG_MT="${TAG_ST}-multithreaded"
+
+          echo "Publishing: $TAG_ST (single-threaded) and $TAG_MT (multithreaded)"
+
+          gh release create "$TAG_ST" \
+            --title "WASM threads PoC $POC_VERSION ($TAG_ST) — single-threaded" \
+            --notes "Single-threaded build (no -pthread). Loads on any HTTP server, no COOP/COEP required. Companion release: $TAG_MT." \
+            --repo "$GITHUB_REPOSITORY" \
+            release-artifacts/single-threaded/*
+
+          gh release create "$TAG_MT" \
+            --title "WASM threads PoC $POC_VERSION ($TAG_MT) — multithreaded" \
+            --notes "Multithreaded build (-pthread/-sUSE_PTHREADS=1). Requires COOP/COEP headers (crossOriginIsolated) to instantiate. Companion release: $TAG_ST." \
+            --repo "$GITHUB_REPOSITORY" \
+            release-artifacts/multithreaded/*
