@@ -47,16 +47,23 @@ public:
     using const_iterator = stable_iterator<true>;
 
     concurrent_unordered_map() { m_map.reserve(k_initial_buckets); }
-    concurrent_unordered_map(const concurrent_unordered_map& other) : m_map(other.m_map) {}
-    concurrent_unordered_map(concurrent_unordered_map&& other) noexcept
-        : m_map(std::move(other.m_map)) {}
+    concurrent_unordered_map(const concurrent_unordered_map& other) {
+        std::lock_guard<std::mutex> lk(other.m_mutex);
+        m_map = other.m_map;
+    }
+    concurrent_unordered_map(concurrent_unordered_map&& other) {
+        std::lock_guard<std::mutex> lk(other.m_mutex);
+        m_map = std::move(other.m_map);
+    }
     concurrent_unordered_map& operator=(const concurrent_unordered_map& other) {
-        std::lock_guard<std::mutex> lk(m_mutex);
+        if (this == &other) return *this;
+        std::scoped_lock lk(m_mutex, other.m_mutex);
         m_map = other.m_map;
         return *this;
     }
-    concurrent_unordered_map& operator=(concurrent_unordered_map&& other) noexcept {
-        std::lock_guard<std::mutex> lk(m_mutex);
+    concurrent_unordered_map& operator=(concurrent_unordered_map&& other) {
+        if (this == &other) return *this;
+        std::scoped_lock lk(m_mutex, other.m_mutex);
         m_map = std::move(other.m_map);
         return *this;
     }

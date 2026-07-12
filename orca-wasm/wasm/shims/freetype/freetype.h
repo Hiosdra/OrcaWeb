@@ -15,6 +15,10 @@ typedef void*          FT_Pointer;
 typedef size_t         FT_Offset;
 typedef signed long    FT_Pos;
 typedef char           FT_String;
+typedef int            FT_Int32;
+typedef signed long    FT_F26Dot6;
+typedef signed long    FT_F16Dot6;
+typedef signed long    FT_26Dot6;
 
 struct FT_LibraryRec_;
 struct FT_FaceRec_;
@@ -117,7 +121,3 @@ inline FT_Error FT_Render_Glyph(FT_GlyphSlot,int)       { return 1; }
 inline void     FT_Set_Transform(FT_Face,void*,FT_Vector*) {}
 inline FT_Error FT_Get_Glyph(FT_GlyphSlot,void**)       { return 1; }
 inline void     FT_Done_Glyph(void*)                     {}
-
-typedef signed long FT_F26Dot6;
-typedef signed long FT_F16Dot6;
-typedef signed long FT_26Dot6;

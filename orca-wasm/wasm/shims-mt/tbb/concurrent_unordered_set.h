@@ -20,16 +20,23 @@ public:
     using size_type      = typename Base::size_type;
 
     concurrent_unordered_set() = default;
-    concurrent_unordered_set(const concurrent_unordered_set& other) : m_set(other.m_set) {}
-    concurrent_unordered_set(concurrent_unordered_set&& other) noexcept
-        : m_set(std::move(other.m_set)) {}
+    concurrent_unordered_set(const concurrent_unordered_set& other) {
+        std::lock_guard<std::mutex> lk(other.m_mutex);
+        m_set = other.m_set;
+    }
+    concurrent_unordered_set(concurrent_unordered_set&& other) {
+        std::lock_guard<std::mutex> lk(other.m_mutex);
+        m_set = std::move(other.m_set);
+    }
     concurrent_unordered_set& operator=(const concurrent_unordered_set& other) {
-        std::lock_guard<std::mutex> lk(m_mutex);
+        if (this == &other) return *this;
+        std::scoped_lock lk(m_mutex, other.m_mutex);
         m_set = other.m_set;
         return *this;
     }
-    concurrent_unordered_set& operator=(concurrent_unordered_set&& other) noexcept {
-        std::lock_guard<std::mutex> lk(m_mutex);
+    concurrent_unordered_set& operator=(concurrent_unordered_set&& other) {
+        if (this == &other) return *this;
+        std::scoped_lock lk(m_mutex, other.m_mutex);
         m_set = std::move(other.m_set);
         return *this;
     }

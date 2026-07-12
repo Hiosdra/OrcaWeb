@@ -28,14 +28,24 @@ public:
     // members would otherwise be deleted — each instance gets its own fresh
     // mutex; the vector *contents* still copy/move normally via Base.
     concurrent_vector() = default;
-    concurrent_vector(const concurrent_vector& other) : Base(other) {}
-    concurrent_vector(concurrent_vector&& other) noexcept : Base(std::move(other)) {}
+    concurrent_vector(const concurrent_vector& other) {
+        std::lock_guard<std::mutex> lk(other.m_mutex);
+        Base::operator=(static_cast<const Base&>(other));
+    }
+    concurrent_vector(concurrent_vector&& other) {
+        std::lock_guard<std::mutex> lk(other.m_mutex);
+        Base::operator=(std::move(static_cast<Base&>(other)));
+    }
     concurrent_vector& operator=(const concurrent_vector& other) {
-        Base::operator=(other);
+        if (this == &other) return *this;
+        std::scoped_lock lk(m_mutex, other.m_mutex);
+        Base::operator=(static_cast<const Base&>(other));
         return *this;
     }
-    concurrent_vector& operator=(concurrent_vector&& other) noexcept {
-        Base::operator=(std::move(other));
+    concurrent_vector& operator=(concurrent_vector&& other) {
+        if (this == &other) return *this;
+        std::scoped_lock lk(m_mutex, other.m_mutex);
+        Base::operator=(std::move(static_cast<Base&>(other)));
         return *this;
     }
 

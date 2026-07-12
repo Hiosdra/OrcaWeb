@@ -41,10 +41,12 @@ public:
         scoped_lock& operator=(const scoped_lock&) = delete;
 
         void acquire(spin_mutex& m) {
+            release();
             m_mutex = &m;
             m_mutex->lock();
         }
         bool try_acquire(spin_mutex& m) {
+            release();
             if (m.try_lock()) {
                 m_mutex = &m;
                 return true;
@@ -89,10 +91,12 @@ public:
         scoped_lock& operator=(const scoped_lock&) = delete;
 
         void acquire(basic_mutex& m) {
+            release();
             m_mutex = &m;
             m_mutex->lock();
         }
         bool try_acquire(basic_mutex& m) {
+            release();
             if (m.try_lock()) {
                 m_mutex = &m;
                 return true;
