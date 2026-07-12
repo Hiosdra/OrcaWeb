@@ -250,11 +250,13 @@ export function useSliceQueue(
   // WRITE_3MF / READ_3MF are one-off request/response round trips, not part
   // of the queue state machine — resolved directly against the promise the
   // caller is awaiting, keyed by the same requestId the worker echoes back.
+  // itemId is carried alongside so a removed item's own pending requests can
+  // be found and rejected without disturbing other items' in-flight ones.
   const export3mfResolvers = useRef(
-    new Map<string, { resolve: (data: ArrayBuffer) => void; reject: (err: Error) => void }>(),
+    new Map<string, { itemId: string; resolve: (data: ArrayBuffer) => void; reject: (err: Error) => void }>(),
   )
   const read3mfResolvers = useRef(
-    new Map<string, { resolve: (data: { stl: ArrayBuffer; configJson: string }) => void; reject: (err: Error) => void }>(),
+    new Map<string, { itemId: string; resolve: (data: { stl: ArrayBuffer; configJson: string }) => void; reject: (err: Error) => void }>(),
   )
 
   // Terminating the worker (cancel/removeItem) or a WASM_ERROR both orphan
@@ -268,6 +270,19 @@ export function useSliceQueue(
       const pending = [...resolvers.values()]
       resolvers.clear()
       for (const { reject } of pending) reject(new Error(message))
+    }
+  }, [])
+
+  // Removing an item should orphan only THAT item's pending export/read
+  // requests, not every in-flight request — unlike rejectAllPendingMf, which
+  // is for "the whole engine died" (cancel / WASM_ERROR).
+  const rejectPendingForItem = useCallback((itemId: string, message: string) => {
+    for (const resolvers of [export3mfResolvers.current, read3mfResolvers.current]) {
+      for (const [requestId, entry] of resolvers) {
+        if (entry.itemId !== itemId) continue
+        resolvers.delete(requestId)
+        entry.reject(new Error(message))
+      }
     }
   }, [])
 
@@ -406,13 +421,19 @@ export function useSliceQueue(
   // the JS-side parse3mf.ts walker — see that bridge function's doc comment
   // for why (Orca-specific transform/assembly handling). `mf` is transferred
   // to the worker (detached here), so callers must not reuse it afterwards.
+  // `itemId` lets removeItem() find and cancel this specific request later.
   const readMf3ViaEngine = useCallback(
-    (mf: ArrayBuffer): Promise<{ stl: ArrayBuffer; configJson: string }> => {
+    (mf: ArrayBuffer, itemId: string): Promise<{ stl: ArrayBuffer; configJson: string }> => {
       return new Promise((resolve, reject) => {
         const requestId = crypto.randomUUID()
-        read3mfResolvers.current.set(requestId, { resolve, reject })
-        if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
-        getWorker().postMessage({ type: 'READ_3MF', mf, requestId }, [mf])
+        read3mfResolvers.current.set(requestId, { itemId, resolve, reject })
+        try {
+          if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
+          getWorker().postMessage({ type: 'READ_3MF', mf, requestId }, [mf])
+        } catch (err) {
+          read3mfResolvers.current.delete(requestId)
+          reject(err instanceof Error ? err : new Error(String(err)))
+        }
       })
     },
     [],
@@ -436,7 +457,7 @@ export function useSliceQueue(
           if (/\.3mf$/i.test(f.name)) {
             try {
               const buf = await f.arrayBuffer()
-              const { stl, configJson } = await readMf3ViaEngine(buf)
+              const { stl, configJson } = await readMf3ViaEngine(buf, item.id)
               const profileConfig = parseOrcaProfileJson(configJson)
               if (Object.keys(profileConfig).length > 0) {
                 onSettingsImportedRef.current(profileConfig, f.name)
@@ -505,8 +526,13 @@ export function useSliceQueue(
       repostConversions()
       rejectAllPendingMf('Engine restarted — export cancelled')
     }
+    // Independent of the above: this item may have its own in-flight
+    // export3mf()/engine 3MF-read request (keyed by a UUID unrelated to
+    // currentId) that would otherwise still resolve after removal — e.g.
+    // silently downloading a .3mf for an item the user just deleted.
+    rejectPendingForItem(id, 'Item removed from queue')
     dispatch({ type: 'REMOVE_ITEM', id })
-  }, [state.currentId, repostConversions, rejectAllPendingMf])
+  }, [state.currentId, repostConversions, rejectAllPendingMf, rejectPendingForItem])
 
   const sliceAll = useCallback(() => {
     dispatch({ type: 'RUN_QUEUE' })
@@ -518,7 +544,7 @@ export function useSliceQueue(
     if (!item.stlFile) return Promise.reject(new Error('No model data for this item'))
     return new Promise<ArrayBuffer>((resolve, reject) => {
       const requestId = crypto.randomUUID()
-      export3mfResolvers.current.set(requestId, { resolve, reject })
+      export3mfResolvers.current.set(requestId, { itemId: item.id, resolve, reject })
       void (async () => {
         try {
           const stl = await item.stlFile!.arrayBuffer()

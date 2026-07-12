@@ -135,6 +135,45 @@ struct TempFileGuard {
     TempFileGuard& operator=(const TempFileGuard&) = delete;
 };
 
+// Reads an entire file into a malloc'd buffer. Returns nullptr on any
+// failure (missing file, empty/negative size, OOM, or a short read); sets
+// *out_err to a short reason and *out_oom to distinguish the OOM case
+// (callers map that to a different error code than the others). Callers
+// still pick their own record_error() overload (session-aware vs. the
+// conversion-functions' shared slot) and error code, since those differ
+// per call site — this only owns the mechanical fopen/fseek/malloc/fread
+// sequence that orc_write_3mf and orc_read_3mf both need to read back the
+// file they just asked OrcaSlicer to produce.
+static char* read_file_to_buffer(const char* path, long* out_len, const char** out_err, bool* out_oom) {
+    *out_oom = false;
+    FILE* f = std::fopen(path, "rb");
+    if (!f) { *out_err = "produced no output"; return nullptr; }
+    std::fseek(f, 0, SEEK_END);
+    long sz = std::ftell(f);
+    std::rewind(f);
+    if (sz <= 0) {
+        std::fclose(f);
+        *out_err = "produced empty output";
+        return nullptr;
+    }
+    char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz)));
+    if (!buf) {
+        std::fclose(f);
+        *out_err = "out of memory";
+        *out_oom = true;
+        return nullptr;
+    }
+    std::size_t nread = std::fread(buf, 1, static_cast<std::size_t>(sz), f);
+    std::fclose(f);
+    if (nread != static_cast<std::size_t>(sz)) {
+        std::free(buf);
+        *out_err = "read incomplete";
+        return nullptr;
+    }
+    *out_len = sz;
+    return buf;
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 static std::string json_val_to_string(const nlohmann::json& v) {
     if (v.is_string())  return v.get<std::string>();
@@ -870,30 +909,13 @@ int orc_write_3mf(void* session_ptr, const void* stl_data, int stl_len,
             }
         }
 
-        FILE* zf = std::fopen("/tmp/ow_out.3mf", "rb");
-        if (!zf) { record_error(*session, "3mf export produced no output"); return -8; }
-
-        std::fseek(zf, 0, SEEK_END);
-        long sz = std::ftell(zf);
-        std::rewind(zf);
-        if (sz <= 0) {
-            std::fclose(zf);
-            record_error(*session, "3mf export produced empty output");
-            return -8;
-        }
-
-        char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz)));
+        long sz = 0;
+        const char* err = nullptr;
+        bool oom = false;
+        char* buf = read_file_to_buffer("/tmp/ow_out.3mf", &sz, &err, &oom);
         if (!buf) {
-            std::fclose(zf);
-            record_error(*session, "out of memory");
-            return -9;
-        }
-        std::size_t nread = std::fread(buf, 1, static_cast<std::size_t>(sz), zf);
-        std::fclose(zf);
-        if (nread != static_cast<std::size_t>(sz)) {
-            std::free(buf);
-            record_error(*session, "3mf read incomplete");
-            return -8;
+            record_error(*session, std::string("3mf export ") + err);
+            return oom ? -9 : -8;
         }
 
         *out_3mf = buf;
@@ -957,7 +979,6 @@ int orc_read_3mf(const void* mf_data, int mf_len,
         }
     }
 
-    int status = -9;
     try {
         TempFileGuard in_guard(tmp_in);
 
@@ -1013,34 +1034,15 @@ int orc_read_3mf(const void* mf_data, int mf_len,
             return -8;
         }
 
-        char* stl_buf = nullptr;
-        int stl_len = 0;
-        {
-            FILE* sf = std::fopen(tmp_out, "rb");
-            if (!sf) { record_error("STL export produced no output"); return -8; }
-            std::fseek(sf, 0, SEEK_END);
-            long sz = std::ftell(sf);
-            std::rewind(sf);
-            if (sz <= 0) {
-                std::fclose(sf);
-                record_error("STL export produced empty output");
-                return -8;
-            }
-            stl_buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz)));
-            if (!stl_buf) {
-                std::fclose(sf);
-                record_error("out of memory");
-                return -9;
-            }
-            std::size_t nread = std::fread(stl_buf, 1, static_cast<std::size_t>(sz), sf);
-            std::fclose(sf);
-            if (nread != static_cast<std::size_t>(sz)) {
-                std::free(stl_buf);
-                record_error("STL read incomplete");
-                return -8;
-            }
-            stl_len = static_cast<int>(sz);
+        long stl_sz = 0;
+        const char* stl_err = nullptr;
+        bool stl_oom = false;
+        char* stl_buf = read_file_to_buffer(tmp_out, &stl_sz, &stl_err, &stl_oom);
+        if (!stl_buf) {
+            record_error(std::string("STL export ") + stl_err);
+            return stl_oom ? -9 : -8;
         }
+        int stl_len = static_cast<int>(stl_sz);
 
         // Serialize every config key the file actually had set — matches
         // OrcaSlicer's own flat .config shape (string values), which
