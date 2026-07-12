@@ -36,7 +36,6 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createRequire } from 'node:module'
-import { unzipSync } from 'fflate'
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
@@ -282,6 +281,48 @@ function write3mfOnce(module, session, stlBytes) {
   return data
 }
 
+// Minimal ZIP central-directory reader — deliberately hand-rolled rather than
+// pulling in a zip library (e.g. fflate, used for this in src/lib/*.ts): this
+// script also runs inside build-wasm.yml's "Smoke test WASM module" step,
+// which only sets up Node (actions/setup-node) and never runs `npm install`
+// — so no package outside Node's stdlib is resolvable there. Only reads
+// filenames from the central directory (no decompression needed for this
+// check), and assumes the classic (non-Zip64) EOCD/CD record layout, which is
+// what miniz (OrcaSlicer's zip writer) emits for archives this small — Zip64
+// records only get written once entry count or size actually exceeds the
+// 32-bit fields' range.
+function findEndOfCentralDirectory(bytes) {
+  const minPos = Math.max(0, bytes.length - 22 - 65535) // EOCD (22B) + max comment (64KB)
+  for (let i = bytes.length - 22; i >= minPos; i--) {
+    if (bytes[i] === 0x50 && bytes[i + 1] === 0x4b && bytes[i + 2] === 0x05 && bytes[i + 3] === 0x06) {
+      return i
+    }
+  }
+  return -1
+}
+
+function listZipEntryNames(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const eocd = findEndOfCentralDirectory(bytes)
+  if (eocd < 0) throw new Error('no End Of Central Directory record found')
+  const totalEntries = dv.getUint16(eocd + 10, true)
+  const cdOffset = dv.getUint32(eocd + 16, true)
+
+  const names = []
+  let pos = cdOffset
+  for (let i = 0; i < totalEntries; i++) {
+    const sig = dv.getUint32(pos, true)
+    if (sig !== 0x02014b50) throw new Error(`bad central directory entry signature at offset ${pos}`)
+    const nameLen = dv.getUint16(pos + 28, true)
+    const extraLen = dv.getUint16(pos + 30, true)
+    const commentLen = dv.getUint16(pos + 32, true)
+    const nameStart = pos + 46
+    names.push(new TextDecoder('utf-8').decode(bytes.subarray(nameStart, nameStart + nameLen)))
+    pos = nameStart + nameLen + extraLen + commentLen
+  }
+  return names
+}
+
 // A .3mf is a ZIP; verify it round-trips as one and carries the two pieces
 // orc_write_3mf's contract promises: the mesh (3D/3dmodel.model) and the
 // embedded OrcaSlicer settings (a Metadata/*.config file — see
@@ -291,13 +332,12 @@ function assertValid3mf(bytes, label) {
   if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) {
     throw new Error(`${label}: output does not start with a ZIP (PK) signature`)
   }
-  let entries
+  let names
   try {
-    entries = unzipSync(bytes)
+    names = listZipEntryNames(bytes)
   } catch (err) {
-    throw new Error(`${label}: failed to unzip output: ${err.message}`)
+    throw new Error(`${label}: failed to read ZIP central directory: ${err.message}`)
   }
-  const names = Object.keys(entries)
   if (!names.includes('3D/3dmodel.model')) {
     throw new Error(`${label}: missing 3D/3dmodel.model (entries: ${names.join(', ')})`)
   }
