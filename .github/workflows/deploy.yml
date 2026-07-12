@@ -224,8 +224,14 @@ jobs:
           # contains "." which is a regex metacharacter; matching it literally
           # this way sidesteps needing to escape it correctly in a jq/bash
           # string that's already been through one layer of interpolation.
+          # Excludes "-multithreaded" siblings (build-wasm.yml's mt matrix leg
+          # publishes wasm-$ORCA_VERSION[-patchN]-multithreaded alongside the
+          # plain st tag) — without this, `tonumber` below chokes on a patch
+          # number like "1-multithreaded" the instant an mt release exists.
+          # GitHub Pages can never send the COOP/COEP headers slicer-mt.*
+          # needs anyway, so this deploy target only ever wants the st build.
           WASM_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq "
-            [.[] | .tagName | select(. == \"${BASE_TAG}\" or startswith(\"${BASE_TAG}-patch\"))]
+            [.[] | .tagName | select(. == \"${BASE_TAG}\" or startswith(\"${BASE_TAG}-patch\")) | select(endswith(\"-multithreaded\") | not)]
             | sort_by(if . == \"${BASE_TAG}\" then 0 else (ltrimstr(\"${BASE_TAG}-patch\") | tonumber) end)
             | last // empty
           ")
@@ -272,19 +278,6 @@ jobs:
           WASM_VERSION=$(sha256sum public/wasm/slicer.wasm | cut -c1-16)
           echo "WASM_VERSION=$WASM_VERSION" >> "$GITHUB_ENV"
           echo "Using WASM cache key: $WASM_VERSION"
-          # Engine manifest, deployed next to the wasm files (public/ flows
-          # into dist/ and then gh-pages under app/wasm/). Consumed by
-          # scripts/cf-build.mjs: the Cloudflare mirror build reads it to get
-          # the same cache-busting key and header label as this deploy —
-          # crucially describing the exact bytes gh-pages is serving (works
-          # in the restore-fallback path above too). cf-build used to resolve
-          # this via the GitHub Releases API instead, but Cloudflare's shared
-          # build egress IPs hit the unauthenticated rate limit (observed
-          # live: the first CF build shipped an "unresolved" label and fell
-          # back to the app version as the cache key); a static file on
-          # GitHub Pages has no such limit.
-          jq -n --arg label "$ENGINE_LABEL" --arg version "$WASM_VERSION" \
-            '{label: $label, version: $version}' > public/wasm/engine-version.json
 
       # ── Build Vite app ───────────────────────────────────────────────
       - name: Build Vite app

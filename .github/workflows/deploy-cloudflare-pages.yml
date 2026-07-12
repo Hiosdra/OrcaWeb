@@ -1,0 +1,174 @@
+name: Deploy (Cloudflare Pages)
+
+# Real, automated deploy target for the multithreaded engine — GitHub Pages
+# (deploy.yml) cannot send custom response headers, so crossOriginIsolated/
+# SharedArrayBuffer is unavailable there and it only ever ships the
+# single-threaded slicer.*. Cloudflare Pages honors a root-level `_headers`
+# file (written by the "Assemble output" step below) to set COOP/COEP per
+# path — no server code needed — so it's the one deploy target that can
+# actually load slicer-mt.* (see mkdocs-docs/adr/adr-007-tbb-stubs.md and
+# orca-wasm/MT-PLAN.md Phase 3).
+#
+# Triggers mirror deploy.yml exactly (push for non-engine changes,
+# workflow_run chained off "Build WASM" for engine changes — see that
+# file's own comments for why both are needed together) so st always lands
+# on GitHub Pages and mt always lands here in the same automated pipeline,
+# without anyone needing to remember a manual dispatch. workflow_dispatch
+# stays available too, for a manual redeploy or to target a different
+# Cloudflare Pages project ad hoc.
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - 'orca-wasm/**'
+  workflow_run:
+    workflows: ["Build WASM"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      cloudflare_project_name:
+        description: 'Cloudflare Pages project name (defaults to the live orcaweb-cf-pages project)'
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloudflare-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    # Same gate as deploy.yml: workflow_run fires for every Build WASM run,
+    # including PR-validation builds and failed builds — only actually
+    # deploy for a successful master build; push/workflow_dispatch proceed
+    # unconditionally.
+    if: >
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master')
+    runs-on: ubuntu-latest
+
+    env:
+      # Must match deploy.yml's ORCA_VERSION — bump both together.
+      ORCA_VERSION: v2.4.2
+      # The live project name, used whenever this fires automatically
+      # (push/workflow_run supply no inputs). A manual workflow_dispatch can
+      # still override it to target a different project.
+      CF_PROJECT_NAME: ${{ github.event.inputs.cloudflare_project_name || 'orcaweb-cf-pages' }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # ── Node / Vite app ──────────────────────────────────────────────
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # ── Download WASM artifacts ──────────────────────────────────────
+      # Same resolution logic as deploy.yml for the st tag, plus an mt
+      # download unique to this workflow: Cloudflare Pages is the only
+      # deploy target that can actually send the COOP/COEP headers
+      # slicer-mt.* needs (see the file header comment), so it's the only
+      # one worth shipping it to — GitHub Pages can never use it.
+      - name: Download WASM artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p public/wasm
+          BASE_TAG="wasm-$ORCA_VERSION"
+          # Excludes "-multithreaded" siblings — without this, `tonumber`
+          # below chokes on a patch number like "1-multithreaded" the instant
+          # an mt release exists (build-wasm.yml publishes both st and mt
+          # tags off the same shared patch counter — see its comments).
+          WASM_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq "
+            [.[] | .tagName | select(. == \"${BASE_TAG}\" or startswith(\"${BASE_TAG}-patch\")) | select(endswith(\"-multithreaded\") | not)]
+            | sort_by(if . == \"${BASE_TAG}\" then 0 else (ltrimstr(\"${BASE_TAG}-patch\") | tonumber) end)
+            | last // empty
+          ")
+          if [ -n "$WASM_TAG" ]; then
+            gh release download "$WASM_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern "slicer.*" \
+              --dir public/wasm
+            echo "Downloaded WASM from release $WASM_TAG"
+          else
+            echo "::warning::No release found for $ORCA_VERSION — restoring WASM from previous gh-pages deploy"
+            git fetch origin gh-pages 2>/dev/null || true
+            for f in slicer.js slicer.wasm; do
+              git show "origin/gh-pages:app/wasm/$f" > "public/wasm/$f" 2>/dev/null \
+                && echo "  restored $f from gh-pages" \
+                || echo "::warning::  $f not found in gh-pages either"
+            done
+          fi
+
+          # mt sibling of whichever st tag was just resolved (same base/patch
+          # number, "-multithreaded" suffix — see build-wasm.yml's shared
+          # patch counter). Best-effort: slicer.worker.ts's dual-mode loader
+          # probes for slicer-mt.js at runtime and falls back to the st
+          # engine if it's missing, so an absent mt release here degrades
+          # gracefully to a single-threaded deploy rather than failing it.
+          MT_TAG=""
+          if [ -n "$WASM_TAG" ]; then
+            MT_TAG="${WASM_TAG}-multithreaded"
+            if ! gh release view "$MT_TAG" --repo "$GITHUB_REPOSITORY" &>/dev/null; then
+              MT_TAG=""
+            fi
+          fi
+          if [ -n "$MT_TAG" ]; then
+            gh release download "$MT_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern "slicer-mt.*" \
+              --dir public/wasm
+            echo "Downloaded MT WASM from release $MT_TAG"
+          else
+            echo "::notice::No multithreaded WASM release found for $ORCA_VERSION yet — deploying st-only (dual-mode loader falls back automatically)"
+          fi
+          ls -lh public/wasm/ || true
+
+      # ── Build Vite app ───────────────────────────────────────────────
+      - name: Build Vite app
+        run: npm run build
+        env:
+          # Cloudflare Pages serves from the domain root — no repo-name
+          # prefix needed here, unlike GitHub Pages' /OrcaWeb/app/.
+          VITE_BASE: /app/
+
+      # ── Python / MkDocs ─────────────────────────────────────────────
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - run: pip install mkdocs-material
+
+      - name: Build MkDocs
+        run: mkdocs build --config-file mkdocs.yml --site-dir dist-docs --strict
+
+      # ── Assemble output tree ──────────────────────────────────────────
+      - name: Assemble output
+        run: |
+          mkdir -p cf-pages/app cf-pages/docs
+          cp landing/index.html cf-pages/index.html
+          cp -r dist/. cf-pages/app/
+          cp -r dist-docs/. cf-pages/docs/
+          touch cf-pages/.nojekyll
+
+          # COOP/COEP for the slicer app only — narrowly scoped so COEP's
+          # require-corp doesn't also apply to the landing page or docs,
+          # where any cross-origin embed without a CORP header would break.
+          cat > cf-pages/_headers <<'EOF'
+          /app/*
+            Cross-Origin-Opener-Policy: same-origin
+            Cross-Origin-Embedder-Policy: require-corp
+          EOF
+
+      # ── Deploy ───────────────────────────────────────────────────────
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: ${{ env.CF_PROJECT_NAME }}
+          directory: cf-pages
