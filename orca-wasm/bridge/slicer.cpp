@@ -589,7 +589,16 @@ int orc_slice_multi(
 
         Slic3r::ArrangeParams params;
         params.min_obj_distance = static_cast<coord_t>(2.0 * 1e6); // 2 mm gap
+        // See orca-wasm/MT-PLAN.md Phase 2 / bridge/CMakeLists.txt's
+        // SLIC3R_WASM_MT option — the only threading-aware line in the
+        // entire bridge. Everything else runs in parallel automatically via
+        // the shims-mt/ TBB shims once that option is set; the sequential
+        // build (default) is unaffected.
+#ifdef SLIC3R_WASM_MT
+        params.parallel         = true;
+#else
         params.parallel         = false; // WASM is single-threaded
+#endif
 
         // Objects that don't fit land at bed centre instead of throwing
         Slic3r::arrange_objects(model, bed, params,

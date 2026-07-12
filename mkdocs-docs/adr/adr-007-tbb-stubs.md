@@ -73,6 +73,13 @@ a typical model in 50–500 ms, which is acceptable.
   slower than on a native multi-threaded desktop build. This is an inherent
   constraint of single-threaded WASM.
 - **Future:** If `SharedArrayBuffer` + Atomics become reliably available (requires
-  COOP/COEP headers, already served by the app), real TBB or a
-  threading-capable Emscripten build could be explored. The stub headers could
-  then be replaced with a real TBB port without touching `libslic3r` callsites.
+  COOP/COEP headers), real TBB or a threading-capable Emscripten build could be
+  explored. The stub headers could then be replaced with a real TBB port
+  without touching `libslic3r` callsites. Note: COOP/COEP is currently only
+  served by the Vite **dev** server (`vite.config.ts`); the production
+  deployment on GitHub Pages cannot send custom response headers, so
+  `crossOriginIsolated` is `false` in production today. See
+  `poc/wasm-threads/` for a working, standalone proof-of-concept (pthreads +
+  SharedArrayBuffer, served with COOP/COEP from a plain Node server) showing
+  near-linear multi-core speedup once headers are available, as a first step
+  toward evaluating this path.

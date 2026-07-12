@@ -35,6 +35,16 @@ target_compile_definitions(orca_web_bridge PUBLIC
   __EMSCRIPTEN__
 )
 
+# Set (via -DSLIC3R_WASM_MT=ON on the cmake command line) for the
+# multithreaded build variant . Flips the
+# one threading-aware line in slicer.cpp's orc_slice_multi (auto-arrange);
+# everything else is unaffected — real parallelism lives entirely inside
+# libslic3r via the shims-mt/ TBB shims selected through _SHIM_DIR above.
+option(SLIC3R_WASM_MT "Build against shims-mt/ with real pthread threading" OFF)
+if(SLIC3R_WASM_MT)
+  target_compile_definitions(orca_web_bridge PUBLIC SLIC3R_WASM_MT)
+endif()
+
 # OCCT headers needed because slicer.cpp includes Format/STEP.hpp directly.
 # The toolkits themselves are linked transitively via libslic3r.
 if(DEFINED OpenCASCADE_INCLUDE_DIR)
