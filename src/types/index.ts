@@ -135,6 +135,10 @@ export type WorkerInMessage =
   // Exports a single mesh + config as a .3mf (see orc_write_3mf in
   // orca-wasm/bridge/slicer.cpp) — no plate/gcode/thumbnail data.
   | { type: 'WRITE_3MF'; stl: ArrayBuffer; config: OrcaConfig; requestId: string }
+  // Reads a .3mf's mesh + embedded config using OrcaSlicer's own reader (see
+  // orc_read_3mf in orca-wasm/bridge/slicer.cpp) instead of the JS-side
+  // parse3mf.ts walker.
+  | { type: 'READ_3MF'; mf: ArrayBuffer; requestId: string }
 
 export type WorkerOutMessage =
   | { type: 'WASM_LOADED' }
@@ -149,6 +153,8 @@ export type WorkerOutMessage =
   | { type: 'CAD_STL_ERROR'; message: string; requestId: string }
   | { type: 'WRITE_3MF_COMPLETE'; data: ArrayBuffer; requestId: string }
   | { type: 'WRITE_3MF_ERROR'; message: string; requestId: string }
+  | { type: 'READ_3MF_COMPLETE'; stl: ArrayBuffer; configJson: string; requestId: string }
+  | { type: 'READ_3MF_ERROR'; message: string; requestId: string }
 
 // --- G-code statistics ---
 
@@ -212,10 +218,18 @@ export interface OrcaModule {
     outputPtrPtr: number,
     outputLenPtr: number,
   ): number
+  _orc_read_3mf(
+    mfPtr: number,
+    mfLen: number,
+    outStlPtrPtr: number,
+    outStlLenPtr: number,
+    outConfigPtrPtr: number,
+    outConfigLenPtr: number,
+  ): number
   _orc_free(ptr: number): void
   // Pass the session used for a failing _orc_init/_orc_slice/_orc_slice_multi
-  // call; pass 0 after a failing _orc_obj_to_stl/_orc_cad_to_stl call (those
-  // take no session).
+  // call; pass 0 after a failing _orc_obj_to_stl/_orc_cad_to_stl/_orc_read_3mf
+  // call (those take no session).
   _orc_decode_exception(session: number): number
   setValue(ptr: number, value: number, type: string): void
   getValue(ptr: number, type: string): number

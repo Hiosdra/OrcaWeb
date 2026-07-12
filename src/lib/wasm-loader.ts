@@ -186,6 +186,51 @@ export function write3mf(
   }
 }
 
+export interface Read3mfResult {
+  stl: Uint8Array
+  configJson: string
+}
+
+// No session — orc_read_3mf is a pure format conversion, like objToStl/cadToStl.
+export function read3mf(module: OrcaModule, mfData: Uint8Array): Read3mfResult {
+  const mfPtr = module._malloc(mfData.length)
+  module.HEAPU8.set(mfData, mfPtr)
+
+  const outStlPtrPtr = module._malloc(4)
+  const outStlLenPtr = module._malloc(4)
+  const outConfigPtrPtr = module._malloc(4)
+  const outConfigLenPtr = module._malloc(4)
+
+  try {
+    const result = module._orc_read_3mf(
+      mfPtr, mfData.length, outStlPtrPtr, outStlLenPtr, outConfigPtrPtr, outConfigLenPtr,
+    )
+    if (result !== 0) {
+      throw new OrcaSliceError(result, wasmError(module, 0, result))
+    }
+
+    const stlPtr = module.getValue(outStlPtrPtr, 'i32')
+    const stlLen = module.getValue(outStlLenPtr, 'i32')
+    const configPtr = module.getValue(outConfigPtrPtr, 'i32')
+    const configLen = module.getValue(outConfigLenPtr, 'i32')
+    try {
+      return {
+        stl: module.HEAPU8.slice(stlPtr, stlPtr + stlLen),
+        configJson: module.UTF8ToString(configPtr, configLen),
+      }
+    } finally {
+      module._orc_free(stlPtr)
+      module._orc_free(configPtr)
+    }
+  } finally {
+    module._free(mfPtr)
+    module._free(outStlPtrPtr)
+    module._free(outStlLenPtr)
+    module._free(outConfigPtrPtr)
+    module._free(outConfigLenPtr)
+  }
+}
+
 export function cadToStl(module: OrcaModule, cadData: Uint8Array): Uint8Array {
   if (cadData.length === 0) {
     throw new Error('CAD data is empty')

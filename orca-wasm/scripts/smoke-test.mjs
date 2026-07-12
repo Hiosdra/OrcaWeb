@@ -3,9 +3,9 @@
  * WASM engine smoke test.
  *
  * Loads the built slicer.js/slicer.wasm and runs several real orc_init +
- * orc_slice(_multi)/orc_write_3mf calls end-to-end, so a broken engine build
- * is caught before it's ever published as a GitHub Release (build-wasm.yml)
- * or trusted by local `npm run dev` after `npm run setup`.
+ * orc_slice(_multi)/orc_write_3mf/orc_read_3mf calls end-to-end, so a broken
+ * engine build is caught before it's ever published as a GitHub Release
+ * (build-wasm.yml) or trusted by local `npm run dev` after `npm run setup`.
  *
  * This formalizes the ad-hoc reproduction script referenced (but never
  * committed) in orca-wasm/wasm/CMakeLists.txt's --profiling-funcs comment,
@@ -281,6 +281,42 @@ function write3mfOnce(module, session, stlBytes) {
   return data
 }
 
+function read3mfOnce(module, mfBytes) {
+  const mfPtr = writeBytes(module, mfBytes)
+  const outStlPtrPtr = module._malloc(4)
+  const outStlLenPtr = module._malloc(4)
+  const outConfigPtrPtr = module._malloc(4)
+  const outConfigLenPtr = module._malloc(4)
+  const rc = module._orc_read_3mf(mfPtr, mfBytes.length, outStlPtrPtr, outStlLenPtr, outConfigPtrPtr, outConfigLenPtr)
+  module._free(mfPtr)
+  if (rc !== 0) {
+    const msg = decodeError(module, 0)
+    module._free(outStlPtrPtr)
+    module._free(outStlLenPtr)
+    module._free(outConfigPtrPtr)
+    module._free(outConfigLenPtr)
+    throw new Error(`orc_read_3mf failed (${rc}): ${msg}`)
+  }
+  const stlPtr = module.getValue(outStlPtrPtr, 'i32')
+  const stlLen = module.getValue(outStlLenPtr, 'i32')
+  const configPtr = module.getValue(outConfigPtrPtr, 'i32')
+  const configLen = module.getValue(outConfigLenPtr, 'i32')
+  const stl = module.HEAPU8.slice(stlPtr, stlPtr + stlLen)
+  const configJson = module.UTF8ToString(configPtr, configLen)
+  module._orc_free(stlPtr)
+  module._orc_free(configPtr)
+  module._free(outStlPtrPtr)
+  module._free(outStlLenPtr)
+  module._free(outConfigPtrPtr)
+  module._free(outConfigLenPtr)
+  return { stl, configJson }
+}
+
+// Binary STL: 80-byte header + uint32 triangle count + N * 50 bytes.
+function stlTriangleCount(bytes) {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(80, true)
+}
+
 // Minimal ZIP central-directory reader — deliberately hand-rolled rather than
 // pulling in a zip library (e.g. fflate, used for this in src/lib/*.ts): this
 // script also runs inside build-wasm.yml's "Smoke test WASM module" step,
@@ -490,11 +526,42 @@ async function main() {
     // orca-wasm/bridge/slicer.cpp doc comment and issue #108's scope notes).
     const write3mfLabel = `[${mesh.label}] write .3mf (mesh + embedded config)`
     process.stdout.write(`[smoke-test] ${write3mfLabel} ... `)
+    let written3mf = null
     try {
       initSession(module, session, JSON.stringify(BASE_CONFIG))
-      const data = write3mfOnce(module, session, mesh.bytes)
-      assertValid3mf(data, write3mfLabel)
-      console.log(`PASS (${data.length} bytes)`)
+      written3mf = write3mfOnce(module, session, mesh.bytes)
+      assertValid3mf(written3mf, write3mfLabel)
+      console.log(`PASS (${written3mf.length} bytes)`)
+    } catch (err) {
+      failures++
+      console.log('FAIL')
+      console.error(`  ${err.message}`)
+    }
+
+    // orc_read_3mf: round-trip the .3mf just written back through the
+    // engine's own reader — mesh triangle count and a few config keys must
+    // survive (per issue #108's read-path test plan).
+    const read3mfLabel = `[${mesh.label}] read .3mf (round-trip mesh + config)`
+    process.stdout.write(`[smoke-test] ${read3mfLabel} ... `)
+    try {
+      if (!written3mf) throw new Error('no .3mf available (write step failed above)')
+      const { stl, configJson } = read3mfOnce(module, written3mf)
+
+      const expectedTris = stlTriangleCount(mesh.bytes)
+      const actualTris = stlTriangleCount(stl)
+      if (actualTris !== expectedTris) {
+        throw new Error(`triangle count mismatch: expected ${expectedTris}, got ${actualTris}`)
+      }
+
+      const config = JSON.parse(configJson)
+      for (const key of ['layer_height', 'nozzle_temperature', 'filament_type', 'sparse_infill_density']) {
+        if (!(key in config)) throw new Error(`config key "${key}" missing from round-tripped .3mf (keys: ${Object.keys(config).join(', ')})`)
+      }
+      if (parseFloat(config.layer_height) !== BASE_CONFIG.layer_height) {
+        throw new Error(`layer_height mismatch: expected ${BASE_CONFIG.layer_height}, got ${config.layer_height}`)
+      }
+
+      console.log(`PASS (${actualTris} tris, ${Object.keys(config).length} config keys)`)
     } catch (err) {
       failures++
       console.log('FAIL')

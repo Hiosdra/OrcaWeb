@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import type { OrcaConfig, QueueItem, WorkerOutMessage } from '../types'
 import { parse3mf } from '../lib/parse3mf'
+import { parseOrcaProfileJson } from '../lib/profiles'
 import {
   getWorker,
   addWorkerListener,
@@ -88,7 +89,7 @@ function reducer(state: QueueState, action: QueueAction): QueueState {
     case 'CONVERSION_DONE': {
       const item = state.items.find((i) => i.id === action.id)
       if (!item) return state // removed while converting — drop the result
-      const name = item.name.replace(/\.(obj|step|stp)$/i, '.stl')
+      const name = item.name.replace(/\.(obj|step|stp|3mf)$/i, '.stl')
       const stlFile = new File([action.stl], name, { type: 'model/stl' })
       return { ...state, items: patchItem(state.items, action.id, { stlFile, name, status: 'ready' }) }
     }
@@ -246,23 +247,28 @@ export function useSliceQueue(
   const onSettingsImportedRef = useRef(onSettingsImported)
   useEffect(() => { onSettingsImportedRef.current = onSettingsImported }, [onSettingsImported])
 
-  // WRITE_3MF is a one-off request/response, not part of the queue state
-  // machine (it doesn't change item.status) — resolved directly against the
-  // promise the caller is awaiting, keyed by the same requestId the worker
-  // echoes back.
+  // WRITE_3MF / READ_3MF are one-off request/response round trips, not part
+  // of the queue state machine — resolved directly against the promise the
+  // caller is awaiting, keyed by the same requestId the worker echoes back.
   const export3mfResolvers = useRef(
     new Map<string, { resolve: (data: ArrayBuffer) => void; reject: (err: Error) => void }>(),
   )
+  const read3mfResolvers = useRef(
+    new Map<string, { resolve: (data: { stl: ArrayBuffer; configJson: string }) => void; reject: (err: Error) => void }>(),
+  )
 
   // Terminating the worker (cancel/removeItem) or a WASM_ERROR both orphan
-  // any in-flight WRITE_3MF requests — nothing will ever answer them, so
-  // without this every pending export3mf() promise would hang forever and
-  // leave its "Exporting…" button stuck.
-  const rejectAllExports = useCallback((message: string) => {
-    if (export3mfResolvers.current.size === 0) return
-    const resolvers = [...export3mfResolvers.current.values()]
-    export3mfResolvers.current.clear()
-    for (const { reject } of resolvers) reject(new Error(message))
+  // any in-flight WRITE_3MF/READ_3MF requests — nothing will ever answer
+  // them, so without this every pending export3mf()/engine 3MF-read promise
+  // would hang forever (export3mf: the "Exporting…" button stuck; read: the
+  // queue item stuck on "Converting…" instead of falling back to the JS parser).
+  const rejectAllPendingMf = useCallback((message: string) => {
+    for (const resolvers of [export3mfResolvers.current, read3mfResolvers.current]) {
+      if (resolvers.size === 0) continue
+      const pending = [...resolvers.values()]
+      resolvers.clear()
+      for (const { reject } of pending) reject(new Error(message))
+    }
   }, [])
 
   // Mark results stale whenever the effective config changes after they were
@@ -287,7 +293,7 @@ export function useSliceQueue(
         case 'WASM_ERROR':
           setWasmStatus('error')
           dispatch({ type: 'ENGINE_FAILED', message: `Slicer engine failed: ${msg.message}` })
-          rejectAllExports(`Slicer engine failed: ${msg.message}`)
+          rejectAllPendingMf(`Slicer engine failed: ${msg.message}`)
           return
         case 'SLICE_COMPLETE':
           dispatch({ type: 'SLICE_DONE', gcode: msg.gcode })
@@ -323,6 +329,22 @@ export function useSliceQueue(
           const resolver = export3mfResolvers.current.get(msg.requestId)
           if (resolver) {
             export3mfResolvers.current.delete(msg.requestId)
+            resolver.reject(new Error(msg.message))
+          }
+          return
+        }
+        case 'READ_3MF_COMPLETE': {
+          const resolver = read3mfResolvers.current.get(msg.requestId)
+          if (resolver) {
+            read3mfResolvers.current.delete(msg.requestId)
+            resolver.resolve({ stl: msg.stl, configJson: msg.configJson })
+          }
+          return
+        }
+        case 'READ_3MF_ERROR': {
+          const resolver = read3mfResolvers.current.get(msg.requestId)
+          if (resolver) {
+            read3mfResolvers.current.delete(msg.requestId)
             resolver.reject(new Error(msg.message))
           }
           return
@@ -380,6 +402,22 @@ export function useSliceQueue(
     }
   }, [])
 
+  // Reads a .3mf via the WASM engine's own reader (orc_read_3mf) instead of
+  // the JS-side parse3mf.ts walker — see that bridge function's doc comment
+  // for why (Orca-specific transform/assembly handling). `mf` is transferred
+  // to the worker (detached here), so callers must not reuse it afterwards.
+  const readMf3ViaEngine = useCallback(
+    (mf: ArrayBuffer): Promise<{ stl: ArrayBuffer; configJson: string }> => {
+      return new Promise((resolve, reject) => {
+        const requestId = crypto.randomUUID()
+        read3mfResolvers.current.set(requestId, { resolve, reject })
+        if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
+        getWorker().postMessage({ type: 'READ_3MF', mf, requestId }, [mf])
+      })
+    },
+    [],
+  )
+
   const addFiles = useCallback((files: File[]) => {
     const newItems: QueueItem[] = files.map((f) => ({
       id: crypto.randomUUID(),
@@ -396,18 +434,32 @@ export function useSliceQueue(
         const f = item.sourceFile
         try {
           if (/\.3mf$/i.test(f.name)) {
-            const buf = await f.arrayBuffer()
-            const { stlBytes, config: profileConfig } = parse3mf(buf)
-            if (Object.keys(profileConfig).length > 0) {
-              onSettingsImportedRef.current(profileConfig, f.name)
+            try {
+              const buf = await f.arrayBuffer()
+              const { stl, configJson } = await readMf3ViaEngine(buf)
+              const profileConfig = parseOrcaProfileJson(configJson)
+              if (Object.keys(profileConfig).length > 0) {
+                onSettingsImportedRef.current(profileConfig, f.name)
+              }
+              dispatch({ type: 'CONVERSION_DONE', id: item.id, stl })
+            } catch {
+              // Engine reader unavailable (WASM crashed/still loading and got
+              // cancelled) or rejected this archive — fall back to the JS
+              // walker rather than lose 3MF import entirely. `buf` above may
+              // already be detached (transferred to the worker), so re-read.
+              const buf = await f.arrayBuffer()
+              const { stlBytes, config: profileConfig } = parse3mf(buf)
+              if (Object.keys(profileConfig).length > 0) {
+                onSettingsImportedRef.current(profileConfig, f.name)
+              }
+              const stlName = f.name.replace(/\.3mf$/i, '.stl')
+              const stlFile = new File(
+                [stlBytes.buffer.slice(stlBytes.byteOffset, stlBytes.byteOffset + stlBytes.byteLength) as ArrayBuffer],
+                stlName,
+                { type: 'model/stl' },
+              )
+              dispatch({ type: 'PATCH_ITEM', id: item.id, patch: { stlFile, name: stlName, status: 'ready' } })
             }
-            const stlName = f.name.replace(/\.3mf$/i, '.stl')
-            const stlFile = new File(
-              [stlBytes.buffer.slice(stlBytes.byteOffset, stlBytes.byteOffset + stlBytes.byteLength) as ArrayBuffer],
-              stlName,
-              { type: 'model/stl' },
-            )
-            dispatch({ type: 'PATCH_ITEM', id: item.id, patch: { stlFile, name: stlName, status: 'ready' } })
           } else if (/\.(step|stp|obj)$/i.test(f.name)) {
             await postConversion(item)
           } else {
@@ -440,8 +492,8 @@ export function useSliceQueue(
     setWasmStatus('idle')
     dispatch({ type: 'CANCELLED' })
     repostConversions()
-    rejectAllExports('Slice cancelled — engine restarted')
-  }, [state.currentId, state.plate.slicing, repostConversions, rejectAllExports])
+    rejectAllPendingMf('Slice cancelled — engine restarted')
+  }, [state.currentId, state.plate.slicing, repostConversions, rejectAllPendingMf])
 
   const removeItem = useCallback((id: string) => {
     if (state.currentId === id) {
@@ -451,10 +503,10 @@ export function useSliceQueue(
       terminateWorker()
       setWasmStatus('idle')
       repostConversions()
-      rejectAllExports('Engine restarted — export cancelled')
+      rejectAllPendingMf('Engine restarted — export cancelled')
     }
     dispatch({ type: 'REMOVE_ITEM', id })
-  }, [state.currentId, repostConversions, rejectAllExports])
+  }, [state.currentId, repostConversions, rejectAllPendingMf])
 
   const sliceAll = useCallback(() => {
     dispatch({ type: 'RUN_QUEUE' })
