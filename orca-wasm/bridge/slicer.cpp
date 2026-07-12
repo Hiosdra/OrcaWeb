@@ -799,17 +799,25 @@ int orc_write_3mf(void* session_ptr, const void* stl_data, int stl_len,
     if (!stl_data || stl_len <= 0 || !out_3mf || !out_len)
         return -1;
 
-    {
-        FILE* f = std::fopen("/tmp/ow_3mf_in.stl", "wb");
-        if (!f) { record_error(*session, "cannot open /tmp/ow_3mf_in.stl for writing"); return -3; }
-        std::fwrite(stl_data, 1, static_cast<std::size_t>(stl_len), f);
-        std::fclose(f);
-    }
-
     try {
+        // Guard covers the fwrite below too: if load_stl throws (rather than
+        // just returning false), the temp file would otherwise never be
+        // removed — a real per-failed-export MEMFS leak since MEMFS is
+        // RAM-backed (same rationale as TempFileGuard's other use below).
+        TempFileGuard in_guard("/tmp/ow_3mf_in.stl");
+        {
+            FILE* f = std::fopen("/tmp/ow_3mf_in.stl", "wb");
+            if (!f) { record_error(*session, "cannot open /tmp/ow_3mf_in.stl for writing"); return -3; }
+            std::size_t written = std::fwrite(stl_data, 1, static_cast<std::size_t>(stl_len), f);
+            std::fclose(f);
+            if (written != static_cast<std::size_t>(stl_len)) {
+                record_error(*session, "failed to write complete STL data to MEMFS");
+                return -3;
+            }
+        }
+
         Slic3r::Model model;
         const bool stl_ok = Slic3r::load_stl("/tmp/ow_3mf_in.stl", &model, "object");
-        std::remove("/tmp/ow_3mf_in.stl");
         if (!stl_ok) {
             record_error(*session, "STL load failed");
             return -4;

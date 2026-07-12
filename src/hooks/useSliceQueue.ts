@@ -254,6 +254,17 @@ export function useSliceQueue(
     new Map<string, { resolve: (data: ArrayBuffer) => void; reject: (err: Error) => void }>(),
   )
 
+  // Terminating the worker (cancel/removeItem) or a WASM_ERROR both orphan
+  // any in-flight WRITE_3MF requests — nothing will ever answer them, so
+  // without this every pending export3mf() promise would hang forever and
+  // leave its "Exporting…" button stuck.
+  const rejectAllExports = useCallback((message: string) => {
+    if (export3mfResolvers.current.size === 0) return
+    const resolvers = [...export3mfResolvers.current.values()]
+    export3mfResolvers.current.clear()
+    for (const { reject } of resolvers) reject(new Error(message))
+  }, [])
+
   // Mark results stale whenever the effective config changes after they were
   // produced (skip the mount run — nothing has been sliced yet).
   const configSeenRef = useRef<OrcaConfig | null>(null)
@@ -276,6 +287,7 @@ export function useSliceQueue(
         case 'WASM_ERROR':
           setWasmStatus('error')
           dispatch({ type: 'ENGINE_FAILED', message: `Slicer engine failed: ${msg.message}` })
+          rejectAllExports(`Slicer engine failed: ${msg.message}`)
           return
         case 'SLICE_COMPLETE':
           dispatch({ type: 'SLICE_DONE', gcode: msg.gcode })
@@ -428,7 +440,8 @@ export function useSliceQueue(
     setWasmStatus('idle')
     dispatch({ type: 'CANCELLED' })
     repostConversions()
-  }, [state.currentId, state.plate.slicing, repostConversions])
+    rejectAllExports('Slice cancelled — engine restarted')
+  }, [state.currentId, state.plate.slicing, repostConversions, rejectAllExports])
 
   const removeItem = useCallback((id: string) => {
     if (state.currentId === id) {
@@ -438,9 +451,10 @@ export function useSliceQueue(
       terminateWorker()
       setWasmStatus('idle')
       repostConversions()
+      rejectAllExports('Engine restarted — export cancelled')
     }
     dispatch({ type: 'REMOVE_ITEM', id })
-  }, [state.currentId, repostConversions])
+  }, [state.currentId, repostConversions, rejectAllExports])
 
   const sliceAll = useCallback(() => {
     dispatch({ type: 'RUN_QUEUE' })
