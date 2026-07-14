@@ -3,9 +3,9 @@
  * WASM engine smoke test.
  *
  * Loads the built slicer.js/slicer.wasm and runs several real orc_init +
- * orc_slice(_multi) calls end-to-end, so a broken engine build is caught
- * before it's ever published as a GitHub Release (build-wasm.yml) or
- * trusted by local `npm run dev` after `npm run setup`.
+ * orc_slice(_multi)/orc_write_3mf/orc_read_3mf calls end-to-end, so a broken
+ * engine build is caught before it's ever published as a GitHub Release
+ * (build-wasm.yml) or trusted by local `npm run dev` after `npm run setup`.
  *
  * This formalizes the ad-hoc reproduction script referenced (but never
  * committed) in orca-wasm/wasm/CMakeLists.txt's --profiling-funcs comment,
@@ -260,6 +260,128 @@ function sliceMultiOnce(module, session, stlBytesArr, extruderIds) {
   return gcode
 }
 
+function write3mfOnce(module, session, stlBytes) {
+  const stlPtr = writeBytes(module, stlBytes)
+  const outPtrPtr = module._malloc(4)
+  const outLenPtr = module._malloc(4)
+  const rc = module._orc_write_3mf(session, stlPtr, stlBytes.length, outPtrPtr, outLenPtr)
+  module._free(stlPtr)
+  if (rc !== 0) {
+    const msg = decodeError(module, session)
+    module._free(outPtrPtr)
+    module._free(outLenPtr)
+    throw new Error(`orc_write_3mf failed (${rc}): ${msg}`)
+  }
+  const dataPtr = module.getValue(outPtrPtr, 'i32')
+  const dataLen = module.getValue(outLenPtr, 'i32')
+  const data = module.HEAPU8.slice(dataPtr, dataPtr + dataLen)
+  module._orc_free(dataPtr)
+  module._free(outPtrPtr)
+  module._free(outLenPtr)
+  return data
+}
+
+function read3mfOnce(module, mfBytes) {
+  const mfPtr = writeBytes(module, mfBytes)
+  const outStlPtrPtr = module._malloc(4)
+  const outStlLenPtr = module._malloc(4)
+  const outConfigPtrPtr = module._malloc(4)
+  const outConfigLenPtr = module._malloc(4)
+  const rc = module._orc_read_3mf(mfPtr, mfBytes.length, outStlPtrPtr, outStlLenPtr, outConfigPtrPtr, outConfigLenPtr)
+  module._free(mfPtr)
+  if (rc !== 0) {
+    const msg = decodeError(module, 0)
+    module._free(outStlPtrPtr)
+    module._free(outStlLenPtr)
+    module._free(outConfigPtrPtr)
+    module._free(outConfigLenPtr)
+    throw new Error(`orc_read_3mf failed (${rc}): ${msg}`)
+  }
+  const stlPtr = module.getValue(outStlPtrPtr, 'i32')
+  const stlLen = module.getValue(outStlLenPtr, 'i32')
+  const configPtr = module.getValue(outConfigPtrPtr, 'i32')
+  const configLen = module.getValue(outConfigLenPtr, 'i32')
+  const stl = module.HEAPU8.slice(stlPtr, stlPtr + stlLen)
+  const configJson = module.UTF8ToString(configPtr, configLen)
+  module._orc_free(stlPtr)
+  module._orc_free(configPtr)
+  module._free(outStlPtrPtr)
+  module._free(outStlLenPtr)
+  module._free(outConfigPtrPtr)
+  module._free(outConfigLenPtr)
+  return { stl, configJson }
+}
+
+// Binary STL: 80-byte header + uint32 triangle count + N * 50 bytes.
+function stlTriangleCount(bytes) {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(80, true)
+}
+
+// Minimal ZIP central-directory reader — deliberately hand-rolled rather than
+// pulling in a zip library (e.g. fflate, used for this in src/lib/*.ts): this
+// script also runs inside build-wasm.yml's "Smoke test WASM module" step,
+// which only sets up Node (actions/setup-node) and never runs `npm install`
+// — so no package outside Node's stdlib is resolvable there. Only reads
+// filenames from the central directory (no decompression needed for this
+// check), and assumes the classic (non-Zip64) EOCD/CD record layout, which is
+// what miniz (OrcaSlicer's zip writer) emits for archives this small — Zip64
+// records only get written once entry count or size actually exceeds the
+// 32-bit fields' range.
+function findEndOfCentralDirectory(bytes) {
+  const minPos = Math.max(0, bytes.length - 22 - 65535) // EOCD (22B) + max comment (64KB)
+  for (let i = bytes.length - 22; i >= minPos; i--) {
+    if (bytes[i] === 0x50 && bytes[i + 1] === 0x4b && bytes[i + 2] === 0x05 && bytes[i + 3] === 0x06) {
+      return i
+    }
+  }
+  return -1
+}
+
+function listZipEntryNames(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const eocd = findEndOfCentralDirectory(bytes)
+  if (eocd < 0) throw new Error('no End Of Central Directory record found')
+  const totalEntries = dv.getUint16(eocd + 10, true)
+  const cdOffset = dv.getUint32(eocd + 16, true)
+
+  const names = []
+  let pos = cdOffset
+  for (let i = 0; i < totalEntries; i++) {
+    const sig = dv.getUint32(pos, true)
+    if (sig !== 0x02014b50) throw new Error(`bad central directory entry signature at offset ${pos}`)
+    const nameLen = dv.getUint16(pos + 28, true)
+    const extraLen = dv.getUint16(pos + 30, true)
+    const commentLen = dv.getUint16(pos + 32, true)
+    const nameStart = pos + 46
+    names.push(new TextDecoder('utf-8').decode(bytes.subarray(nameStart, nameStart + nameLen)))
+    pos = nameStart + nameLen + extraLen + commentLen
+  }
+  return names
+}
+
+// A .3mf is a ZIP; verify it round-trips as one and carries the two pieces
+// orc_write_3mf's contract promises: the mesh (3D/3dmodel.model) and the
+// embedded OrcaSlicer settings (a Metadata/*.config file — see
+// EMBEDDED_PRINT_FILE_FORMAT et al. in bbs_3mf.hpp for why the filename
+// isn't a fixed constant).
+function assertValid3mf(bytes, label) {
+  if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) {
+    throw new Error(`${label}: output does not start with a ZIP (PK) signature`)
+  }
+  let names
+  try {
+    names = listZipEntryNames(bytes)
+  } catch (err) {
+    throw new Error(`${label}: failed to read ZIP central directory: ${err.message}`)
+  }
+  if (!names.includes('3D/3dmodel.model')) {
+    throw new Error(`${label}: missing 3D/3dmodel.model (entries: ${names.join(', ')})`)
+  }
+  if (!names.some((n) => /^Metadata\/.*\.config$/.test(n))) {
+    throw new Error(`${label}: missing a Metadata/*.config file (entries: ${names.join(', ')})`)
+  }
+}
+
 // ── sanity assertions on the resulting G-code ─────────────────────────────────
 
 function assertSaneGcode(gcode, label) {
@@ -394,6 +516,52 @@ async function main() {
       assertSaneGcode(gcode, plateLabel)
       assertRestsOnBed(gcode, plateLabel, BASE_CONFIG.initial_layer_height)
       console.log(`PASS (${gcode.length} bytes)`)
+    } catch (err) {
+      failures++
+      console.log('FAIL')
+      console.error(`  ${err.message}`)
+    }
+
+    // orc_write_3mf: mesh + embedded config, no plate/gcode data (see
+    // orca-wasm/bridge/slicer.cpp doc comment and issue #108's scope notes).
+    const write3mfLabel = `[${mesh.label}] write .3mf (mesh + embedded config)`
+    process.stdout.write(`[smoke-test] ${write3mfLabel} ... `)
+    let written3mf = null
+    try {
+      initSession(module, session, JSON.stringify(BASE_CONFIG))
+      written3mf = write3mfOnce(module, session, mesh.bytes)
+      assertValid3mf(written3mf, write3mfLabel)
+      console.log(`PASS (${written3mf.length} bytes)`)
+    } catch (err) {
+      failures++
+      console.log('FAIL')
+      console.error(`  ${err.message}`)
+    }
+
+    // orc_read_3mf: round-trip the .3mf just written back through the
+    // engine's own reader — mesh triangle count and a few config keys must
+    // survive (per issue #108's read-path test plan).
+    const read3mfLabel = `[${mesh.label}] read .3mf (round-trip mesh + config)`
+    process.stdout.write(`[smoke-test] ${read3mfLabel} ... `)
+    try {
+      if (!written3mf) throw new Error('no .3mf available (write step failed above)')
+      const { stl, configJson } = read3mfOnce(module, written3mf)
+
+      const expectedTris = stlTriangleCount(mesh.bytes)
+      const actualTris = stlTriangleCount(stl)
+      if (actualTris !== expectedTris) {
+        throw new Error(`triangle count mismatch: expected ${expectedTris}, got ${actualTris}`)
+      }
+
+      const config = JSON.parse(configJson)
+      for (const key of ['layer_height', 'nozzle_temperature', 'filament_type', 'sparse_infill_density']) {
+        if (!(key in config)) throw new Error(`config key "${key}" missing from round-tripped .3mf (keys: ${Object.keys(config).join(', ')})`)
+      }
+      if (parseFloat(config.layer_height) !== BASE_CONFIG.layer_height) {
+        throw new Error(`layer_height mismatch: expected ${BASE_CONFIG.layer_height}, got ${config.layer_height}`)
+      }
+
+      console.log(`PASS (${actualTris} tris, ${Object.keys(config).length} config keys)`)
     } catch (err) {
       failures++
       console.log('FAIL')

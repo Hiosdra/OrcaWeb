@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Node.js 18+** — [nodejs.org](https://nodejs.org)
+- **Node.js 22 LTS** — [nodejs.org](https://nodejs.org) (the version used by CI; Node 24 currently leaves Playwright's local Vite server running after E2E tests on Windows)
 - ~**30 MB** free disk space for WASM artifacts
 
 ## Installation

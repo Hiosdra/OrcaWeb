@@ -145,6 +145,92 @@ export function sliceMultiStl(
   return gcode
 }
 
+export function write3mf(
+  module: OrcaModule,
+  session: number,
+  stlData: Uint8Array,
+  configJson: string,
+): Uint8Array {
+  const encoder = new TextEncoder()
+  const configBytes = encoder.encode(configJson)
+
+  const configPtr = module._malloc(configBytes.length)
+  module.HEAPU8.set(configBytes, configPtr)
+  const initResult = module._orc_init(session, configPtr, configBytes.length)
+  module._free(configPtr)
+  if (initResult !== 0) throw new OrcaSliceError(initResult, wasmError(module, session, initResult))
+
+  const stlPtr = module._malloc(stlData.length)
+  module.HEAPU8.set(stlData, stlPtr)
+
+  const outPtrPtr = module._malloc(4)
+  const outLenPtr = module._malloc(4)
+
+  try {
+    const result = module._orc_write_3mf(session, stlPtr, stlData.length, outPtrPtr, outLenPtr)
+    if (result !== 0) {
+      throw new OrcaSliceError(result, wasmError(module, session, result))
+    }
+
+    const dataPtr = module.getValue(outPtrPtr, 'i32')
+    const dataLen = module.getValue(outLenPtr, 'i32')
+    try {
+      return module.HEAPU8.slice(dataPtr, dataPtr + dataLen)
+    } finally {
+      module._orc_free(dataPtr)
+    }
+  } finally {
+    module._free(stlPtr)
+    module._free(outPtrPtr)
+    module._free(outLenPtr)
+  }
+}
+
+export interface Read3mfResult {
+  stl: Uint8Array
+  configJson: string
+}
+
+// No session — orc_read_3mf is a pure format conversion, like objToStl/cadToStl.
+export function read3mf(module: OrcaModule, mfData: Uint8Array): Read3mfResult {
+  const mfPtr = module._malloc(mfData.length)
+  module.HEAPU8.set(mfData, mfPtr)
+
+  const outStlPtrPtr = module._malloc(4)
+  const outStlLenPtr = module._malloc(4)
+  const outConfigPtrPtr = module._malloc(4)
+  const outConfigLenPtr = module._malloc(4)
+
+  try {
+    const result = module._orc_read_3mf(
+      mfPtr, mfData.length, outStlPtrPtr, outStlLenPtr, outConfigPtrPtr, outConfigLenPtr,
+    )
+    if (result !== 0) {
+      throw new OrcaSliceError(result, wasmError(module, 0, result))
+    }
+
+    const stlPtr = module.getValue(outStlPtrPtr, 'i32')
+    const stlLen = module.getValue(outStlLenPtr, 'i32')
+    const configPtr = module.getValue(outConfigPtrPtr, 'i32')
+    const configLen = module.getValue(outConfigLenPtr, 'i32')
+    try {
+      return {
+        stl: module.HEAPU8.slice(stlPtr, stlPtr + stlLen),
+        configJson: module.UTF8ToString(configPtr, configLen),
+      }
+    } finally {
+      module._orc_free(stlPtr)
+      module._orc_free(configPtr)
+    }
+  } finally {
+    module._free(mfPtr)
+    module._free(outStlPtrPtr)
+    module._free(outStlLenPtr)
+    module._free(outConfigPtrPtr)
+    module._free(outConfigLenPtr)
+  }
+}
+
 export function cadToStl(module: OrcaModule, cadData: Uint8Array): Uint8Array {
   if (cadData.length === 0) {
     throw new Error('CAD data is empty')

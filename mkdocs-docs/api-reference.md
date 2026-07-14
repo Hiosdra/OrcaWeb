@@ -217,13 +217,84 @@ Convert a STEP file to binary STL using the OCCT 7.8.1 reader compiled into `sli
 
 ---
 
+### `orc_write_3mf`
+
+```c
+int orc_write_3mf(
+    void*       session,
+    const void* stl_data, int stl_len,
+    char**      out_3mf,  int* out_len
+);
+```
+
+Export a single mesh plus the session's current config as a `.3mf` archive (geometry + embedded process/filament/printer settings — no plate/G-code/thumbnail data). Requires a prior `orc_init` on the same session; the exported settings are whatever that call last applied.
+
+**Parameters**
+
+- `session` — handle from `orc_session_create`, already `orc_init`'d
+- `stl_data` / `stl_len` — pointer/length of the mesh to embed, as binary STL
+- `out_3mf` — on success, written with the address of the output `.3mf` buffer
+- `out_len` — on success, written with the byte length of the output
+
+**Returns**
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `-1` | Invalid/uninitialized session, or invalid arguments |
+| `-3` | Could not write STL to MEMFS |
+| `-4` | STL load failed |
+| `-5` | Empty model |
+| `-8` | 3MF export failed |
+| `-9` | Unexpected C++ exception |
+
+**Memory:** caller must free `*out_3mf` with `orc_free()` after reading it.
+
+---
+
+### `orc_read_3mf`
+
+```c
+int orc_read_3mf(
+    const void* mf_data,        int mf_len,
+    char**      out_stl,        int* out_stl_len,
+    char**      out_config_json, int* out_config_len
+);
+```
+
+Read a `.3mf` file's mesh and embedded OrcaSlicer config using OrcaSlicer's own reader (`load_bbs_3mf`), so multi-object assemblies and per-object/instance transforms are resolved exactly the way OrcaSlicer itself resolves them. A pure format conversion like `orc_obj_to_stl`/`orc_cad_to_stl` — no session/config state involved, so it takes none.
+
+**Parameters**
+
+- `mf_data` / `mf_len` — pointer/length of the raw `.3mf` archive bytes
+- `out_stl` — on success, written with the address of a binary STL buffer (all objects merged into one mesh, with each object's transform already applied)
+- `out_stl_len` — byte length of `*out_stl`
+- `out_config_json` — on success, written with the address of a null-terminated JSON string of every config key the file's `Metadata/*.config` had set (same shape `parseOrcaProfileJson()` already parses for imported profile JSON)
+- `out_config_len` — byte length of `*out_config_json`, excluding the trailing NUL
+
+**Returns**
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `-1` | Invalid arguments (null pointer or zero length) |
+| `-3` | Could not write `.3mf` bytes to MEMFS |
+| `-4` | 3MF load failed (bad archive / no recognizable model) |
+| `-5` | 3MF contains no printable geometry |
+| `-8` | STL export of the merged mesh failed |
+| `-9` | Unexpected C++ exception |
+
+**Memory:** caller must free both `*out_stl` and `*out_config_json` with `orc_free()`.
+
+---
+
 ### `orc_free`
 
 ```c
 void orc_free(void* ptr);
 ```
 
-Free a buffer allocated by `orc_slice`, `orc_slice_multi`, `orc_obj_to_stl`, or `orc_cad_to_stl`. Do **not** use `_free` for these buffers — they are `malloc`'d by the C++ bridge.
+Free a buffer allocated by `orc_slice`, `orc_slice_multi`, `orc_obj_to_stl`, `orc_cad_to_stl`, `orc_write_3mf`, or `orc_read_3mf`. Do **not** use `_free` for these buffers — they are `malloc`'d by the C++ bridge.
 
 ---
 
@@ -367,6 +438,21 @@ Communication between the main thread and `slicer.worker.ts`.
   cad: ArrayBuffer      // transferred (zero-copy)
   filename: string      // echoed back in the response for tracking
 }
+
+// Export a mesh + config as a .3mf (see orc_write_3mf)
+{
+  type: 'WRITE_3MF'
+  stl: ArrayBuffer      // transferred (zero-copy)
+  config: OrcaConfig
+  requestId: string     // echoed back in the response for tracking
+}
+
+// Read a .3mf's mesh + embedded config (see orc_read_3mf)
+{
+  type: 'READ_3MF'
+  mf: ArrayBuffer        // transferred (zero-copy)
+  requestId: string      // echoed back in the response for tracking
+}
 ```
 
 ### Worker → Main
@@ -404,13 +490,25 @@ Communication between the main thread and `slicer.worker.ts`.
 
 // STEP → STL conversion failed
 { type: 'CAD_STL_ERROR'; message: string; filename: string }
+
+// .3mf export finished
+{ type: 'WRITE_3MF_COMPLETE'; data: ArrayBuffer; requestId: string }
+
+// .3mf export failed
+{ type: 'WRITE_3MF_ERROR'; message: string; requestId: string }
+
+// .3mf read finished
+{ type: 'READ_3MF_COMPLETE'; stl: ArrayBuffer; configJson: string; requestId: string }
+
+// .3mf read failed
+{ type: 'READ_3MF_ERROR'; message: string; requestId: string }
 ```
 
 **Ordering notes:**
 
 - `LOAD_WASM` must be sent before any other message type.
 - Slice and conversion requests sent before `WASM_LOADED` are queued inside the worker and dispatched automatically once the engine is ready.
-- `SLICE` requests are last-wins when queued (only one can be pending). `OBJ_TO_STL` and `CAD_TO_STL` requests are queued independently (FIFO).
+- `SLICE` requests are last-wins when queued (only one can be pending). `OBJ_TO_STL`, `CAD_TO_STL`, `WRITE_3MF`, and `READ_3MF` requests are queued independently (FIFO).
 
 ---
 
@@ -522,22 +620,3 @@ interface GcodeStats {
 ```
 
 Both the first 100 kB (up to 300 lines) and the last 30 kB (up to 200 lines) of the G-code string are scanned — OrcaSlicer may write summary comments at either the beginning or the end depending on the post-processing path. `layers` falls back to counting `;LAYER_CHANGE` markers in the full file when the `; total layers count` comment is absent.
-
----
-
-## 3MF parser
-
-```typescript
-import { parse3mf } from './lib/parse3mf'
-
-interface Parse3mfResult {
-  stlBytes: Uint8Array        // binary STL converted from the 3MF mesh XML
-  config: Partial<OrcaConfig> // merged settings from Metadata/ profiles
-}
-
-function parse3mf(data: ArrayBuffer): Parse3mfResult
-```
-
-Throws if the archive has no `3D/3dmodel.model` entry or contains no geometry.
-
-The returned `stlBytes` can be passed directly to `orc_slice` (or posted to the worker as a `SLICE` message). The returned `config` contains any printer/filament/process settings extracted from the 3MF's embedded profiles and can be merged with your base config before calling `orc_init`.

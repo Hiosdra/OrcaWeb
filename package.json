@@ -4,6 +4,9 @@
   "version": "0.7.35",
   "license": "AGPL-3.0-or-later",
   "type": "module",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

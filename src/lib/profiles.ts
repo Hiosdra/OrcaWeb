@@ -95,8 +95,22 @@ export function buildConfig(
  * Call this once, right before JSON.stringify'ing the config for orc_init.
  */
 export function toEngineConfig(config: OrcaConfig): Record<string, unknown> {
-  const { default_speed, enable_ironing, ...rest } = config as OrcaConfig & Record<string, unknown>
+  const { default_speed, enable_ironing, bed_temperature, ...rest } = config as OrcaConfig & Record<string, unknown>
   const out: Record<string, unknown> = { ...rest }
+  if (config.bed_size_x !== undefined && config.bed_size_y !== undefined) {
+    const x = config.bed_size_x
+    const y = config.bed_size_y
+    out.printable_area = `0x0,${x}x0,${x}x${y},0x${y}`
+  }
+  if (bed_temperature !== undefined) {
+    // OrcaSlicer/BambuStudio's real option names — "bed_temperature" isn't
+    // in its PrintConfig schema, so set_deserialize_strict silently dropped
+    // it and every slice used the engine's own baked-in default instead of
+    // the UI value (confirmed: exported .3mf always had hot_plate_temp=45
+    // regardless of this field, for every printer preset).
+    out.hot_plate_temp = bed_temperature
+    out.hot_plate_temp_initial_layer = bed_temperature
+  }
   if (default_speed !== undefined) {
     // "Speed of inner wall" (PrintConfig.cpp) — the closest real equivalent
     // to a general/default print speed; OrcaSlicer has no single knob that
@@ -304,7 +318,10 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
     // crashes our single-extruder WASM build (see isMultiExtruderProfile).
     if (!isMultiExtruderProfile(raw)) {
       const SKIP_META = new Set(['type', 'name', 'inherits', 'from', 'version', 'description', '__proto__', 'constructor', 'prototype'])
-      const SKIP_BED  = new Set(['printable_area', 'bed_size'])
+      // Keep printable_area verbatim so non-rectangular and offset beds survive
+      // import -> export. toEngineConfig supplies a rectangular fallback for
+      // built-in presets, while this passthrough value takes precedence later.
+      const SKIP_BED  = new Set(['bed_size'])
       const alreadyMapped = new Set(Object.keys(ORCA_FIELD_MAP))
       const passthrough: Record<string, string> = Object.create(null) as Record<string, string>
       for (const [field, val] of Object.entries(raw)) {

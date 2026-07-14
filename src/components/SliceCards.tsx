@@ -168,12 +168,30 @@ export function SliceHeader({
 
 // ── Queue item card ───────────────────────────────────────────────────────────
 
-export function QueueItemCard({ item, bedX, bedY, bedShape }: { item: QueueItem } & BedProps) {
+export function QueueItemCard({
+  item, bedX, bedY, bedShape, onExport3mf,
+}: { item: QueueItem; onExport3mf: (item: QueueItem) => Promise<ArrayBuffer> } & BedProps) {
   const [expanded, setExpanded] = useState(false)
+  const [exporting3mf, setExporting3mf] = useState(false)
+  const [export3mfError, setExport3mfError] = useState<string | null>(null)
   const statsLabel = useMemo(
     () => (item.gcode ? gcodeStatsLabel(extractGcodeStats(item.gcode)) : ''),
     [item.gcode],
   )
+
+  const handleExport3mf = async () => {
+    setExporting3mf(true)
+    setExport3mfError(null)
+    try {
+      const data = await onExport3mf(item)
+      const name = item.name.replace(/\.\w+$/, '') + '.3mf'
+      downloadBlob(new Blob([data], { type: 'model/3mf' }), name)
+    } catch (err) {
+      setExport3mfError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setExporting3mf(false)
+    }
+  }
 
   return (
     <div
@@ -234,9 +252,36 @@ export function QueueItemCard({ item, bedX, bedY, bedShape }: { item: QueueItem 
               <DownloadIcon className="w-3.5 h-3.5" />
               Download
             </button>
+            <button
+              onClick={handleExport3mf}
+              disabled={exporting3mf}
+              title={
+                item.stale
+                  ? 'Exports current settings, which differ from the ones used for the G-code above — re-slice first to keep both in sync'
+                  : 'Export mesh + settings as a .3mf, re-openable in desktop OrcaSlicer'
+              }
+              data-testid="export-3mf-button"
+              className={clsx(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
+                exporting3mf
+                  ? 'border-slate-200 text-slate-400 cursor-wait'
+                  : item.stale
+                  ? 'border-amber-300 text-amber-600 hover:border-amber-400'
+                  : 'border-slate-300 text-slate-600 hover:border-orca-300 hover:text-orca-600',
+              )}
+            >
+              {exporting3mf ? <SpinnerIcon className="w-3.5 h-3.5 animate-spin" /> : <DownloadIcon className="w-3.5 h-3.5" />}
+              {exporting3mf ? 'Exporting…' : item.stale ? '.3mf*' : '.3mf'}
+            </button>
           </div>
         )}
       </div>
+
+      {export3mfError && (
+        <div className="px-4 pb-3 -mt-1 text-xs text-red-500">
+          3MF export failed: {export3mfError}
+        </div>
+      )}
 
       {expanded && item.stlFile && item.gcode && (
         <div className="border-t border-slate-100">
@@ -336,10 +381,18 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
 // ── Config summary ────────────────────────────────────────────────────────────
 
 export function ConfigSummary({ config, fileCount }: { config: OrcaConfig; fileCount: number }) {
+  const filamentEntries = String(config.filament_type ?? DISPLAY_DEFAULTS.filament_type)
+    .split(/[;,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+  const filamentTypes = [...new Set(filamentEntries)]
+  const material = filamentEntries.length > 1
+    ? `${filamentTypes.join(' / ')} (${filamentEntries.length} slots)`
+    : (filamentTypes[0] ?? DISPLAY_DEFAULTS.filament_type)
   const rows: [string, string][] = [
     ['Files', `${fileCount} file${fileCount !== 1 ? 's' : ''}`],
     ['Printer', config.printer_model ?? DISPLAY_DEFAULTS.printer_model],
-    ['Material', config.filament_type ?? DISPLAY_DEFAULTS.filament_type],
+    ['Material', material],
     ['Layer height', `${config.layer_height ?? DISPLAY_DEFAULTS.layer_height} mm`],
     ['Infill', `${config.sparse_infill_density ?? DISPLAY_DEFAULTS.sparse_infill_density}% ${config.sparse_infill_pattern ?? DISPLAY_DEFAULTS.sparse_infill_pattern}`],
     ['Walls', String(config.wall_loops ?? DISPLAY_DEFAULTS.wall_loops)],

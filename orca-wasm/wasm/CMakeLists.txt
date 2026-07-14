@@ -55,6 +55,8 @@ target_link_options(slicer PRIVATE
 '_orc_slice_multi',\
 '_orc_obj_to_stl',\
 '_orc_cad_to_stl',\
+'_orc_write_3mf',\
+'_orc_read_3mf',\
 '_orc_free',\
 '_orc_decode_exception',\
 '_malloc',\

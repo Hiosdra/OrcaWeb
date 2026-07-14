@@ -1,7 +1,24 @@
 import type { OrcaConfig, OrcaModuleFactory, OrcaModule, WorkerInMessage, WorkerOutMessage } from '../types'
-import { sliceStl, sliceMultiStl, objToStl, cadToStl, OrcaSliceError } from '../lib/wasm-loader'
+import { sliceStl, sliceMultiStl, objToStl, cadToStl, write3mf, read3mf, OrcaSliceError } from '../lib/wasm-loader'
 import { toEngineConfig } from '../lib/profiles'
 import { logInfo, logWarn, logError } from '../lib/log'
+
+// A genuinely stalled connection (TCP connected but the server/proxy never
+// answers — as opposed to a slow-but-progressing download) previously left
+// the LOAD_WASM fetch()es pending forever, since neither ever resolves or
+// rejects: no WASM_LOADED/WASM_ERROR is ever sent, so anything awaiting the
+// engine (e.g. a 3MF import) hangs indefinitely with no fallback. The
+// timeout here only bounds *time to first response* — fetch()'s promise
+// settles as soon as headers arrive, well before the body (tens of MB for
+// slicer.wasm) finishes streaming, so a legitimately slow-but-working
+// download is never aborted once it starts.
+const FETCH_RESPONSE_TIMEOUT_MS = 30_000
+
+function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer))
+}
 
 let orcaModule: OrcaModule | null = null
 // Created once, right after the module loads, and reused for the worker's
@@ -24,6 +41,8 @@ let pendingSlice: { stl: ArrayBuffer; config: OrcaConfig } | null = null
 let pendingPlate: { stls: ArrayBuffer[]; config: OrcaConfig; extruderIds?: number[] } | null = null
 const pendingObjConvertQueue: { obj: ArrayBuffer; requestId: string }[] = []
 const pendingCadConvertQueue: { cad: ArrayBuffer; requestId: string }[] = []
+const pendingWrite3mfQueue: { stl: ArrayBuffer; config: OrcaConfig; requestId: string }[] = []
+const pendingRead3mfQueue: { mf: ArrayBuffer; requestId: string }[] = []
 
 function send(msg: WorkerOutMessage) {
   self.postMessage(msg)
@@ -43,6 +62,8 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       case 'SLICE_MULTI': send({ type: 'SLICE_MULTI_ERROR', code: -9, message: crashMsg }); break
       case 'OBJ_TO_STL': send({ type: 'OBJ_STL_ERROR', message: crashMsg, requestId: msg.requestId }); break
       case 'CAD_TO_STL': send({ type: 'CAD_STL_ERROR', message: crashMsg, requestId: msg.requestId }); break
+      case 'WRITE_3MF': send({ type: 'WRITE_3MF_ERROR', message: crashMsg, requestId: msg.requestId }); break
+      case 'READ_3MF': send({ type: 'READ_3MF_ERROR', message: crashMsg, requestId: msg.requestId }); break
       case 'LOAD_WASM': send({ type: 'WASM_ERROR', message: crashMsg }); break
     }
     return
@@ -87,7 +108,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       // `application/wasm` Content-Type, so fall back to buffered
       // WebAssembly.compile when a server (or a proxy) mislabels the file.
       const wasmModulePromise = (async () => {
-        const res = await fetch(`${wasmBase}/slicer.wasm${v}`)
+        const res = await fetchWithTimeout(`${wasmBase}/slicer.wasm${v}`, FETCH_RESPONSE_TIMEOUT_MS)
         if (!res.ok) throw new Error(`HTTP ${res.status} fetching slicer.wasm`)
         if (
           typeof WebAssembly.compileStreaming === 'function'
@@ -98,7 +119,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         return WebAssembly.compile(await res.arrayBuffer())
       })()
 
-      const jsText = await fetch(`${wasmBase}/slicer.js${v}`).then((r) => {
+      const jsText = await fetchWithTimeout(`${wasmBase}/slicer.js${v}`, FETCH_RESPONSE_TIMEOUT_MS).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status} fetching slicer.js`)
         return r.text()
       })
@@ -179,6 +200,14 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         doCadToStl(pending.cad, pending.requestId)
       }
       pendingCadConvertQueue.length = 0
+      for (const pending of pendingWrite3mfQueue) {
+        doWrite3mf(pending.stl, pending.config, pending.requestId)
+      }
+      pendingWrite3mfQueue.length = 0
+      for (const pending of pendingRead3mfQueue) {
+        doRead3mf(pending.mf, pending.requestId)
+      }
+      pendingRead3mfQueue.length = 0
       if (pendingSlice) {
         const { stl, config } = pendingSlice
         pendingSlice = null
@@ -231,6 +260,20 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         return
       }
       doCadToStl(msg.cad, msg.requestId)
+      return
+    case 'WRITE_3MF':
+      if (!orcaModule) {
+        pendingWrite3mfQueue.push({ stl: msg.stl, config: msg.config, requestId: msg.requestId })
+        return
+      }
+      doWrite3mf(msg.stl, msg.config, msg.requestId)
+      return
+    case 'READ_3MF':
+      if (!orcaModule) {
+        pendingRead3mfQueue.push({ mf: msg.mf, requestId: msg.requestId })
+        return
+      }
+      doRead3mf(msg.mf, msg.requestId)
       return
     default:
       msg satisfies never
@@ -317,6 +360,58 @@ function doCadToStl(cad: ArrayBuffer, requestId: string) {
     self.postMessage({ type: 'CAD_STL_COMPLETE', stl: stlBuffer, requestId }, [stlBuffer])
   } catch (err) {
     send({ type: 'CAD_STL_ERROR', message: err instanceof Error ? err.message : String(err), requestId })
+  }
+}
+
+function doWrite3mf(stl: ArrayBuffer, config: OrcaConfig, requestId: string) {
+  if (!orcaModule) return
+  const startedAt = performance.now()
+  logInfo(`[OrcaWASM] 3mf export start — STL ${(stl.byteLength / 1e6).toFixed(2)} MB`)
+  try {
+    const { _passthrough, ...rest } = config
+    const engineRest = toEngineConfig(rest)
+    const flat = _passthrough ? { ...engineRest, ..._passthrough } : engineRest
+    const configJson = JSON.stringify(flat)
+    const data = write3mf(orcaModule, session, new Uint8Array(stl), configJson)
+    const dataBuffer = data.buffer as ArrayBuffer
+    logInfo(
+      `[OrcaWASM] 3mf export done in ${Math.round(performance.now() - startedAt)}ms `
+      + `— ${(data.byteLength / 1e6).toFixed(2)} MB`,
+    )
+    self.postMessage({ type: 'WRITE_3MF_COMPLETE', data: dataBuffer, requestId }, [dataBuffer])
+  } catch (err) {
+    const ms = Math.round(performance.now() - startedAt)
+    if (err instanceof OrcaSliceError) {
+      logError(`[OrcaWASM] 3mf export failed after ${ms}ms — code ${err.code}: ${err.message}`)
+      send({ type: 'WRITE_3MF_ERROR', message: err.message, requestId })
+    } else {
+      logError(`[OrcaWASM] 3mf export failed after ${ms}ms:`, err)
+      send({ type: 'WRITE_3MF_ERROR', message: String(err), requestId })
+    }
+  }
+}
+
+function doRead3mf(mf: ArrayBuffer, requestId: string) {
+  if (!orcaModule) return
+  const startedAt = performance.now()
+  logInfo(`[OrcaWASM] 3mf read start — ${(mf.byteLength / 1e6).toFixed(2)} MB`)
+  try {
+    const { stl, configJson } = read3mf(orcaModule, new Uint8Array(mf))
+    const stlBuffer = stl.buffer as ArrayBuffer
+    logInfo(
+      `[OrcaWASM] 3mf read done in ${Math.round(performance.now() - startedAt)}ms `
+      + `— STL ${(stl.byteLength / 1e6).toFixed(2)} MB`,
+    )
+    self.postMessage({ type: 'READ_3MF_COMPLETE', stl: stlBuffer, configJson, requestId }, [stlBuffer])
+  } catch (err) {
+    const ms = Math.round(performance.now() - startedAt)
+    if (err instanceof OrcaSliceError) {
+      logError(`[OrcaWASM] 3mf read failed after ${ms}ms — code ${err.code}: ${err.message}`)
+      send({ type: 'READ_3MF_ERROR', message: err.message, requestId })
+    } else {
+      logError(`[OrcaWASM] 3mf read failed after ${ms}ms:`, err)
+      send({ type: 'READ_3MF_ERROR', message: String(err), requestId })
+    }
   }
 }
 

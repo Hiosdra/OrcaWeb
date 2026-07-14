@@ -10,13 +10,16 @@
  *                   extruderIds, out, outLen)                     → 0 = ok
  *   orc_obj_to_stl(obj, objLen, outPtr, outLen)                   → 0 = ok
  *   orc_cad_to_stl(cad, cadLen, outPtr, outLen)                   → 0 = ok (STEP)
+ *   orc_write_3mf(session, stl, stlLen, outPtr, outLen)           → 0 = ok
+ *   orc_read_3mf(mf, mfLen, outStl, outStlLen,
+ *                outConfigJson, outConfigLen)                     → 0 = ok
  *   orc_free(ptr)
  *   orc_decode_exception(session)                                 → null-terminated UTF-8 string
  *
- * orc_obj_to_stl / orc_cad_to_stl are pure format conversions — they never
- * touch slicer config state, so they take no session handle.
+ * orc_obj_to_stl / orc_cad_to_stl / orc_read_3mf are pure format conversions
+ * — they never touch slicer config state, so they take no session handle.
  *
- * Error codes for orc_slice / orc_init / orc_slice_multi:
+ * Error codes for orc_slice / orc_init / orc_slice_multi / orc_write_3mf:
  *   -1  invalid / uninitialized state (includes a null/invalid session handle)
  *   -2  JSON parse failure
  *   -3  STL write to MEMFS failed
@@ -24,8 +27,12 @@
  *   -5  empty model
  *   -6  print validation failed
  *   -7  slicing error
- *   -8  gcode export failed
+ *   -8  gcode export failed (or, for orc_write_3mf, 3MF export failed)
  *   -9  unexpected C++ exception
+ *
+ * orc_read_3mf reuses the same -1/-3/-4/-5/-8/-9 meanings (input write /
+ * 3MF load / no geometry / STL export / exception), decoded via
+ * orc_decode_exception(0) like orc_obj_to_stl / orc_cad_to_stl.
  */
 
 #include <cstdio>
@@ -45,11 +52,14 @@
 #include "libslic3r/ModelArrange.hpp"
 #include "libslic3r/Print.hpp"
 #include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/Preset.hpp"
 #include "libslic3r/Format/STL.hpp"
 #include "libslic3r/Format/OBJ.hpp"
 #include "libslic3r/Format/STEP.hpp"
+#include "libslic3r/Format/bbs_3mf.hpp"
 #include "libslic3r/GCode.hpp"
 #include "libslic3r/Exception.hpp"
+#include "libslic3r/Semver.hpp"
 
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/log/core.hpp>
@@ -125,6 +135,83 @@ struct TempFileGuard {
     TempFileGuard(const TempFileGuard&) = delete;
     TempFileGuard& operator=(const TempFileGuard&) = delete;
 };
+
+// Same rationale as TempFileGuard, for Model::remove_backup_path_if_exist()
+// (the lazily-created MEMFS "Auxiliaries"/backup scratch dir that
+// store_bbs_3mf/load_bbs_3mf both touch internally via get_backup_path()).
+// Traced the two most likely internal throw sites in bbs_3mf.cpp — a
+// painting-feature version mismatch during model XML parsing, and a
+// malformed Metadata/*.config JSON — and both are caught internally and
+// converted to false/-1 returns rather than propagating, so the risk this
+// guards against is low in practice. bbs_3mf.cpp is ~9000 lines and wasn't
+// exhaustively audited past those two paths, though, and this costs
+// nothing, so guard it the same way as everything else here rather than
+// rely on that audit staying true across future engine version bumps.
+struct ModelBackupPathGuard {
+    Slic3r::Model& model;
+    explicit ModelBackupPathGuard(Slic3r::Model& m) : model(m) {}
+    ~ModelBackupPathGuard() { model.remove_backup_path_if_exist(); }
+    ModelBackupPathGuard(const ModelBackupPathGuard&) = delete;
+    ModelBackupPathGuard& operator=(const ModelBackupPathGuard&) = delete;
+};
+
+// load_bbs_3mf() transfers ownership of imported plate data and embedded
+// presets to its output vectors. Keep both behind one guard so partial loads
+// and exceptions release the same allocations as OrcaSlicer's GUI callers.
+struct Loaded3mfResourcesGuard {
+    Slic3r::PlateDataPtrs& plate_data;
+    std::vector<Slic3r::Preset*>& project_presets;
+
+    Loaded3mfResourcesGuard(Slic3r::PlateDataPtrs& plates, std::vector<Slic3r::Preset*>& presets)
+        : plate_data(plates), project_presets(presets) {}
+    ~Loaded3mfResourcesGuard() {
+        Slic3r::release_PlateData_list(plate_data);
+        for (Slic3r::Preset* preset : project_presets)
+            delete preset;
+        project_presets.clear();
+    }
+    Loaded3mfResourcesGuard(const Loaded3mfResourcesGuard&) = delete;
+    Loaded3mfResourcesGuard& operator=(const Loaded3mfResourcesGuard&) = delete;
+};
+
+// Reads an entire file into a malloc'd buffer. Returns nullptr on any
+// failure (missing file, empty/negative size, OOM, or a short read); sets
+// *out_err to a short reason and *out_oom to distinguish the OOM case
+// (callers map that to a different error code than the others). Callers
+// still pick their own record_error() overload (session-aware vs. the
+// conversion-functions' shared slot) and error code, since those differ
+// per call site — this only owns the mechanical fopen/fseek/malloc/fread
+// sequence that orc_write_3mf and orc_read_3mf both need to read back the
+// file they just asked OrcaSlicer to produce.
+static char* read_file_to_buffer(const char* path, long* out_len, const char** out_err, bool* out_oom) {
+    *out_oom = false;
+    FILE* f = std::fopen(path, "rb");
+    if (!f) { *out_err = "produced no output"; return nullptr; }
+    std::fseek(f, 0, SEEK_END);
+    long sz = std::ftell(f);
+    std::rewind(f);
+    if (sz <= 0) {
+        std::fclose(f);
+        *out_err = "produced empty output";
+        return nullptr;
+    }
+    char* buf = static_cast<char*>(std::malloc(static_cast<std::size_t>(sz)));
+    if (!buf) {
+        std::fclose(f);
+        *out_err = "out of memory";
+        *out_oom = true;
+        return nullptr;
+    }
+    std::size_t nread = std::fread(buf, 1, static_cast<std::size_t>(sz), f);
+    std::fclose(f);
+    if (nread != static_cast<std::size_t>(sz)) {
+        std::free(buf);
+        *out_err = "read incomplete";
+        return nullptr;
+    }
+    *out_len = sz;
+    return buf;
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 static std::string json_val_to_string(const nlohmann::json& v) {
@@ -774,7 +861,263 @@ int orc_cad_to_stl(const char* cad_data, int cad_len,
     return status;
 }
 
-/** Free a buffer returned by orc_slice, orc_slice_multi, orc_obj_to_stl, or orc_cad_to_stl. */
+/**
+ * Export a single mesh + the session's current config as a .3mf file
+ * (geometry + embedded OrcaSlicer settings — no plate/G-code/thumbnail data;
+ * see orca-wasm bridge design notes for why that's out of scope here).
+ *
+ * On success *out_3mf points to a malloc'd buffer containing the .3mf (a ZIP
+ * archive — contains embedded NUL bytes, so callers must use the returned
+ * length, never a NUL-terminated string read). Caller must free with
+ * orc_free().
+ *
+ * Error codes: same convention as orc_slice, with -8 meaning the 3MF export
+ * itself (store_bbs_3mf) failed rather than gcode export.
+ */
+EMSCRIPTEN_KEEPALIVE
+int orc_write_3mf(void* session_ptr, const void* stl_data, int stl_len,
+                  char** out_3mf, int* out_len) {
+    OrcSession* session = as_session(session_ptr);
+    if (!session) return -1;
+    session->last_error.clear();
+    if (!session->initialized) { record_error(*session, "call orc_init first"); return -1; }
+    if (!stl_data || stl_len <= 0 || !out_3mf || !out_len)
+        return -1;
+
+    try {
+        // Guard covers the fwrite below too: if load_stl throws (rather than
+        // just returning false), the temp file would otherwise never be
+        // removed — a real per-failed-export MEMFS leak since MEMFS is
+        // RAM-backed (same rationale as TempFileGuard's other use below).
+        TempFileGuard in_guard("/tmp/ow_3mf_in.stl");
+        {
+            FILE* f = std::fopen("/tmp/ow_3mf_in.stl", "wb");
+            if (!f) { record_error(*session, "cannot open /tmp/ow_3mf_in.stl for writing"); return -3; }
+            std::size_t written = std::fwrite(stl_data, 1, static_cast<std::size_t>(stl_len), f);
+            std::fclose(f);
+            if (written != static_cast<std::size_t>(stl_len)) {
+                record_error(*session, "failed to write complete STL data to MEMFS");
+                return -3;
+            }
+        }
+
+        Slic3r::Model model;
+        const bool stl_ok = Slic3r::load_stl("/tmp/ow_3mf_in.stl", &model, "object");
+        if (!stl_ok) {
+            record_error(*session, "STL load failed");
+            return -4;
+        }
+        if (model.objects.empty()) {
+            record_error(*session, "model contains no objects");
+            return -5;
+        }
+
+        // Same placement convention as orc_slice, so the mesh lands back in
+        // the same spot on re-import instead of at the model-space origin.
+        for (auto* obj : model.objects) {
+            center_object_xy_only(obj);
+            if (obj->instances.empty()) {
+                auto* inst = obj->add_instance();
+                inst->set_offset(Slic3r::Vec3d(session->bed_cx, session->bed_cy, 0.0));
+            }
+        }
+
+        TempFileGuard out_guard("/tmp/ow_out.3mf");
+        {
+            // Constructed before store_bbs_3mf() runs, so its destructor
+            // (which does the get_backup_path()/"Auxiliaries" dir cleanup
+            // that call lazily triggers) still fires even if store_bbs_3mf
+            // throws instead of returning false.
+            ModelBackupPathGuard backup_guard(model);
+
+            Slic3r::StoreParams store_params;
+            store_params.path = "/tmp/ow_out.3mf";
+            store_params.model = &model;
+            store_params.config = &session->config;
+            // plate_data_list / project_presets / thumbnail_* all stay at
+            // their StoreParams defaults (empty) — this headless bridge has
+            // no PartPlateList, so there's no plate/gcode/thumbnail data to
+            // attach. store_bbs_3mf treats all of that as optional and still
+            // writes a valid model+config 3mf (verified by reading its
+            // implementation: every plate/thumbnail loop is bounded by
+            // plate_data_list.size(), which is 0 here).
+            bool ok = Slic3r::store_bbs_3mf(store_params);
+            if (!ok) {
+                record_error(*session, "3MF export failed");
+                return -8;
+            }
+        }
+
+        long sz = 0;
+        const char* err = nullptr;
+        bool oom = false;
+        char* buf = read_file_to_buffer("/tmp/ow_out.3mf", &sz, &err, &oom);
+        if (!buf) {
+            record_error(*session, std::string("3mf export ") + err);
+            return oom ? -9 : -8;
+        }
+
+        *out_3mf = buf;
+        *out_len = static_cast<int>(sz);
+        return 0;
+
+    } catch (const std::exception& e) {
+        record_error(*session, e.what());
+        return -9;
+    }
+}
+
+/**
+ * Read a .3mf file's mesh + embedded OrcaSlicer config, using OrcaSlicer's
+ * own reader (load_bbs_3mf) rather than the JS-side XML walker
+ * (src/lib/parse3mf.ts) — so this understands whatever OrcaSlicer itself
+ * wrote (multi-object assemblies, per-object transforms) exactly the way
+ * OrcaSlicer does, instead of re-deriving the 3MF core spec's transform math
+ * in JS. A pure format conversion like orc_obj_to_stl / orc_cad_to_stl — no
+ * session/config state involved, so it takes none.
+ *
+ * On success:
+ *   *out_stl points to a malloc'd binary STL buffer — all objects' meshes,
+ *     each with its own instance/volume transforms already applied via
+ *     ModelObject::mesh() (so position/rotation/scale in the file survive),
+ *     merged into one. Byte length in *out_stl_len.
+ *   *out_config_json points to a malloc'd, null-terminated JSON object
+ *     string of every config key the file's Metadata/*.config had *set*
+ *     (same string-valued shape OrcaSlicer's own .config files use — the JS
+ *     side re-parses it with the existing parseOrcaProfileJson(), the same
+ *     parser already used for imported profile JSON). Byte length in
+ *     *out_config_len (excludes the trailing NUL, matching orc_slice's
+ *     gcode convention; JSON text itself never contains an embedded NUL).
+ * Caller must free both buffers with orc_free().
+ *
+ * Error codes: same convention as orc_obj_to_stl.
+ *   -3  could not write 3MF bytes to MEMFS
+ *   -4  3MF load failed (bad archive / no recognizable model)
+ *   -5  3MF contains no printable geometry
+ *   -8  STL export of the merged mesh failed
+ *   -9  unexpected C++ exception
+ */
+EMSCRIPTEN_KEEPALIVE
+int orc_read_3mf(const void* mf_data, int mf_len,
+                 char** out_stl, int* out_stl_len,
+                 char** out_config_json, int* out_config_len) {
+    g_conversion_last_error.clear();
+    if (!mf_data || mf_len <= 0 || !out_stl || !out_stl_len || !out_config_json || !out_config_len)
+        return -1;
+
+    const char* tmp_in = "/tmp/ow_3mf_read_in.3mf";
+    {
+        FILE* f = std::fopen(tmp_in, "wb");
+        if (!f) { record_error("cannot open temp file for writing"); return -3; }
+        std::size_t written = std::fwrite(mf_data, 1, static_cast<std::size_t>(mf_len), f);
+        std::fclose(f);
+        if (written != static_cast<std::size_t>(mf_len)) {
+            std::remove(tmp_in);
+            record_error("failed to write complete 3MF data to MEMFS");
+            return -3;
+        }
+    }
+
+    try {
+        TempFileGuard in_guard(tmp_in);
+
+        Slic3r::Model model;
+        // Constructed before load_bbs_3mf() runs, so its destructor (the
+        // get_backup_path()/"Auxiliaries" dir cleanup that call lazily
+        // triggers) still fires even if load_bbs_3mf throws instead of
+        // returning false — same rationale as orc_write_3mf's backup_guard.
+        ModelBackupPathGuard backup_guard(model);
+        Slic3r::DynamicPrintConfig config;
+        // EnableSilent: substitute unknown/incompatible option values with
+        // defaults instead of throwing — mirrors orc_init's own "silently
+        // skip unknown / incompatible keys" policy for the same reason (a
+        // 3MF authored by a different OrcaSlicer/Bambu Studio version may
+        // carry option values this pinned engine version doesn't recognize).
+        Slic3r::ConfigSubstitutionContext substitutions(Slic3r::ForwardCompatibilitySubstitutionRule::EnableSilent);
+        Slic3r::PlateDataPtrs plate_data_list;
+        std::vector<Slic3r::Preset*> project_presets;
+        Loaded3mfResourcesGuard loaded_resources(plate_data_list, project_presets);
+        Slic3r::Semver file_version;
+
+        bool ok = Slic3r::load_bbs_3mf(
+            tmp_in, &config, &substitutions, &model,
+            &plate_data_list, &project_presets,
+            nullptr, nullptr, &file_version, nullptr,
+            Slic3r::LoadStrategy::AddDefaultInstances | Slic3r::LoadStrategy::LoadModel | Slic3r::LoadStrategy::LoadConfig);
+
+        if (!ok) {
+            record_error("3MF load failed");
+            return -4;
+        }
+        if (model.objects.empty()) {
+            record_error("3MF contains no geometry");
+            return -5;
+        }
+
+        // ModelObject::mesh() bakes in every instance's + volume's transform
+        // (position/rotation/scale) — unlike orc_obj_to_stl/orc_cad_to_stl's
+        // raw vol->mesh() merge, which is fine for OBJ/STEP (no separate
+        // instance concept there) but would silently drop a 3MF's actual
+        // placement if used here.
+        Slic3r::TriangleMesh combined;
+        for (auto* obj : model.objects) {
+            if (!obj) continue;
+            combined.merge(obj->mesh());
+        }
+        if (combined.facets_count() == 0) {
+            record_error("3MF contains no printable geometry");
+            return -5;
+        }
+
+        const char* tmp_out = "/tmp/ow_3mf_read_out.stl";
+        TempFileGuard out_guard(tmp_out);
+        if (!Slic3r::store_stl(tmp_out, &combined, true)) {
+            record_error("STL export of 3MF geometry failed");
+            return -8;
+        }
+
+        long stl_sz = 0;
+        const char* stl_err = nullptr;
+        bool stl_oom = false;
+        char* stl_buf = read_file_to_buffer(tmp_out, &stl_sz, &stl_err, &stl_oom);
+        if (!stl_buf) {
+            record_error(std::string("STL export ") + stl_err);
+            return stl_oom ? -9 : -8;
+        }
+        std::unique_ptr<char, decltype(&std::free)> stl_owner(stl_buf, &std::free);
+        int stl_len = static_cast<int>(stl_sz);
+
+        // Serialize every config key the file actually had set — matches
+        // OrcaSlicer's own flat .config shape (string values), which
+        // parseOrcaProfileJson() on the JS side already knows how to read.
+        nlohmann::json j = nlohmann::json::object();
+        for (const auto& key : config.keys()) {
+            const Slic3r::ConfigOption* opt = config.option(key);
+            if (opt) j[key] = opt->serialize();
+        }
+        std::string json_str = j.dump();
+
+        char* json_buf = static_cast<char*>(std::malloc(json_str.size() + 1));
+        if (!json_buf) {
+            record_error("out of memory");
+            return -9;
+        }
+        std::memcpy(json_buf, json_str.data(), json_str.size());
+        json_buf[json_str.size()] = '\0';
+
+        *out_stl = stl_owner.release();
+        *out_stl_len = stl_len;
+        *out_config_json = json_buf;
+        *out_config_len = static_cast<int>(json_str.size());
+        return 0;
+
+    } catch (const std::exception& e) {
+        record_error(e.what());
+        return -9;
+    }
+}
+
+/** Free a buffer returned by orc_slice, orc_slice_multi, orc_obj_to_stl, orc_cad_to_stl, orc_write_3mf, or orc_read_3mf. */
 EMSCRIPTEN_KEEPALIVE
 void orc_free(void* ptr) {
     std::free(ptr);

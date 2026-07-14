@@ -35,7 +35,9 @@ the slice. Output was **byte-for-byte identical** (174,799 bytes).
 **Why:** OrcaWeb's bridge (`slicer.cpp`) never calls `set_resources_dir()` or
 instantiates `PresetBundle`. Configuration is built entirely in JavaScript
 (`src/lib/profiles.ts`) and passed as a flat JSON string to `_orc_init`. 3MF
-parsing is also done in JavaScript (`src/lib/parse3mf.ts`).
+reading/writing (`orc_read_3mf`/`orc_write_3mf`, issue #108) go through
+`libslic3r/Format/bbs_3mf.hpp` directly and likewise never touch
+`/resources`.
 
 ## Decision
 
