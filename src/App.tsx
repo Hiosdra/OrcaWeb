@@ -47,6 +47,19 @@ function loadSavedSettings(): SavedSettings | null {
   }
 }
 
+// Reverse-lookup a preset key (e.g. "Bambu Lab X1C") from a raw engine field
+// value (e.g. printer_model: "Bambu Lab X1 Carbon") — the two differ because
+// preset keys are UI labels while the field values are the literal OrcaSlicer
+// option strings. Used to keep the Printer/Material dropdowns in sync with a
+// value that arrived via 3MF import rather than the dropdown itself.
+function findPresetKeyByField(
+  presets: Record<string, Partial<OrcaConfig>>,
+  field: keyof OrcaConfig,
+  value: unknown,
+): string | undefined {
+  return Object.keys(presets).find((key) => presets[key][field] === value)
+}
+
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
 type Tab = 'upload' | 'settings' | 'slice'
@@ -99,6 +112,19 @@ export default function App() {
         ? { _passthrough: { ...prev._passthrough, ...patch._passthrough } }
         : {}),
     }))
+    // Sync the dropdowns too — without this, config.printer_model/filament_type
+    // get overridden correctly (visible on the Slice tab) but the Settings tab
+    // dropdowns keep showing whatever was selected before import, and touching
+    // either one afterwards wipes every imported override via
+    // onPrinterChange/onFilamentChange's setConfigOverrides({}) reset.
+    if (patch.printer_model !== undefined) {
+      const matched = findPresetKeyByField(PRINTER_PRESETS, 'printer_model', patch.printer_model)
+      if (matched) setSelectedPrinter(matched)
+    }
+    if (patch.filament_type !== undefined) {
+      const matched = findPresetKeyByField(FILAMENT_PRESETS, 'filament_type', patch.filament_type)
+      if (matched) setSelectedFilament(matched)
+    }
     setImportNotice(`Imported print settings from ${filename}`)
   }, [])
 
