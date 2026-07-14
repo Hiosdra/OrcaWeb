@@ -285,8 +285,8 @@ File drop
   │               READ_3MF_COMPLETE { stl, configJson }
   │                       ├─► onSettingsImported(patch, filename)
   │                       └─► synthetic .stl File → File state
-  │                  (on engine failure: falls back to parse3mf.ts,
-  │                   the JS-side XML walker — same File-state result)
+  │                  (on engine failure: item marked 'error' — no JS-side
+  │                   fallback parser)
   │
   ├─ .step / .stp ──► worker.postMessage(CAD_TO_STL, cad bytes)
   │                       │
@@ -341,7 +341,7 @@ File drop
     WRITE_3MF_COMPLETE { data } → downloadBlob(item.name + '.3mf')
 ```
 
-Engine-side 3MF write + read (`orc_write_3mf` / `orc_read_3mf`, issue #108) are the first bridge functions to touch `libslic3r/Format/bbs_3mf.hpp` — previously 3MF only flowed one way, parsed client-side by `parse3mf.ts`. `orc_write_3mf` is a plain request/response through the worker (like `OBJ_TO_STL`/`CAD_TO_STL`), not part of the slice queue's state machine, since exporting doesn't change `item.status`. `orc_read_3mf` *is* part of the file-drop pipeline (same shape as `OBJ_TO_STL`/`CAD_TO_STL`'s conversion step) — `parse3mf.ts` stays in the tree as its fallback rather than being deleted, so 3MF import survives a dead/crashed WASM engine instead of failing outright. Not scoped: a full "sliced project" 3MF (per-plate G-code, thumbnails) — this headless bridge has no `PartPlateList` to source that from; see `status.md`'s "Nie zaimplementowane" section.
+Engine-side 3MF write + read (`orc_write_3mf` / `orc_read_3mf`, issue #108) are the first bridge functions to touch `libslic3r/Format/bbs_3mf.hpp` — previously 3MF only flowed one way, parsed client-side by the now-removed `parse3mf.ts`. `orc_write_3mf` is a plain request/response through the worker (like `OBJ_TO_STL`/`CAD_TO_STL`), not part of the slice queue's state machine, since exporting doesn't change `item.status`. `orc_read_3mf` *is* part of the file-drop pipeline (same shape as `OBJ_TO_STL`/`CAD_TO_STL`'s conversion step); a failed engine read now marks the queue item `'error'` rather than falling back to a JS parser — `orc_read_3mf` resolves multi-object transforms the way OrcaSlicer itself does, which the JS walker couldn't, so a fallback would have silently produced worse geometry rather than a clear failure. Not scoped: a full "sliced project" 3MF (per-plate G-code, thumbnails) — this headless bridge has no `PartPlateList` to source that from; see `status.md`'s "Nie zaimplementowane" section.
 
 ## Build & deploy
 

@@ -135,9 +135,8 @@ export type WorkerInMessage =
   // Exports a single mesh + config as a .3mf (see orc_write_3mf in
   // orca-wasm/bridge/slicer.cpp) — no plate/gcode/thumbnail data.
   | { type: 'WRITE_3MF'; stl: ArrayBuffer; config: OrcaConfig; requestId: string }
-  // Reads a .3mf's mesh + embedded config using OrcaSlicer's own reader (see
-  // orc_read_3mf in orca-wasm/bridge/slicer.cpp) instead of the JS-side
-  // parse3mf.ts walker.
+  // Reads a .3mf's mesh + embedded config using OrcaSlicer's own reader
+  // (see orc_read_3mf in orca-wasm/bridge/slicer.cpp).
   | { type: 'READ_3MF'; mf: ArrayBuffer; requestId: string }
 
 export type WorkerOutMessage =

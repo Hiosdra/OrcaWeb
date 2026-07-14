@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import type { OrcaConfig, QueueItem, WorkerOutMessage } from '../types'
-import { parse3mf } from '../lib/parse3mf'
 import { parseOrcaProfileJson } from '../lib/profiles'
 import {
   getWorker,
@@ -419,11 +418,12 @@ export function useSliceQueue(
     }
   }, [])
 
-  // Reads a .3mf via the WASM engine's own reader (orc_read_3mf) instead of
-  // the JS-side parse3mf.ts walker — see that bridge function's doc comment
-  // for why (Orca-specific transform/assembly handling). `mf` is transferred
-  // to the worker (detached here), so callers must not reuse it afterwards.
-  // `itemId` lets removeItem() find and cancel this specific request later.
+  // Reads a .3mf via the WASM engine's own reader (orc_read_3mf) — see that
+  // bridge function's doc comment for why a real OrcaSlicer reader is used
+  // instead of re-deriving the 3MF spec's transform math in JS (Orca-specific
+  // transform/assembly handling). `mf` is transferred to the worker
+  // (detached here), so callers must not reuse it afterwards. `itemId` lets
+  // removeItem() find and cancel this specific request later.
   const readMf3ViaEngine = useCallback(
     (mf: ArrayBuffer, itemId: string): Promise<{ stl: ArrayBuffer; configJson: string }> => {
       return new Promise((resolve, reject) => {
@@ -441,10 +441,10 @@ export function useSliceQueue(
     [],
   )
 
-  // Reads a .3mf via the engine, falling back to the JS walker on any
-  // failure. Deliberately NOT awaited by addFiles's batch loop (see there)
-  // — it handles its own success/fallback/error dispatch end-to-end, the
-  // same shape as postConversion(), just for 3MF instead of OBJ/STEP.
+  // Reads a .3mf via the engine. Deliberately NOT awaited by addFiles's
+  // batch loop (see there) — it handles its own success/error dispatch
+  // end-to-end, the same shape as postConversion(), just for 3MF instead
+  // of OBJ/STEP.
   const importMf3 = useCallback(async (item: QueueItem) => {
     const f = item.sourceFile
     try {
@@ -456,34 +456,13 @@ export function useSliceQueue(
       }
       dispatch({ type: 'CONVERSION_DONE', id: item.id, stl })
     } catch (err) {
-      // Removal is cancellation, not an engine-read failure. Falling back
-      // here would parse the deleted file and still apply its embedded
-      // settings globally after the queue item disappeared.
+      // Removal is cancellation, not an engine-read failure.
       if (err instanceof ItemRemovedError) return
-      // Engine reader unavailable (WASM crashed/still loading and got
-      // cancelled) or rejected this archive — fall back to the JS
-      // walker rather than lose 3MF import entirely. `buf` above may
-      // already be detached (transferred to the worker), so re-read.
-      try {
-        const buf = await f.arrayBuffer()
-        const { stlBytes, config: profileConfig } = parse3mf(buf)
-        if (Object.keys(profileConfig).length > 0) {
-          onSettingsImportedRef.current(profileConfig, f.name)
-        }
-        const stlName = f.name.replace(/\.3mf$/i, '.stl')
-        const stlFile = new File(
-          [stlBytes.buffer.slice(stlBytes.byteOffset, stlBytes.byteOffset + stlBytes.byteLength) as ArrayBuffer],
-          stlName,
-          { type: 'model/stl' },
-        )
-        dispatch({ type: 'PATCH_ITEM', id: item.id, patch: { stlFile, name: stlName, status: 'ready' } })
-      } catch (err) {
-        dispatch({
-          type: 'PATCH_ITEM',
-          id: item.id,
-          patch: { status: 'error', error: err instanceof Error ? err.message : String(err) },
-        })
-      }
+      dispatch({
+        type: 'PATCH_ITEM',
+        id: item.id,
+        patch: { status: 'error', error: err instanceof Error ? err.message : String(err) },
+      })
     }
   }, [readMf3ViaEngine])
 

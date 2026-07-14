@@ -13,7 +13,7 @@ Ostatnia aktualizacja: **2026-07-11** · wersja silnika: **OrcaSlicer v2.4.2** (
 | Funkcja | Uwagi |
 |---------|-------|
 | Drag & drop pliku STL | ASCII i binary STL; wiele plików naraz — kolejka sekwencyjna, każdy G-code do pobrania osobno |
-| Import pliku 3MF | Silnikowy odczyt (`orc_read_3mf`, natywny reader OrcaSlicera — poprawnie stosuje transformy per-obiekt/instancję) z automatycznym fallbackiem na JS-owy `parse3mf.ts`, gdy silnik zawiedzie (np. WASM padnie w trakcie) |
+| Import pliku 3MF | Silnikowy odczyt (`orc_read_3mf`, natywny reader OrcaSlicera — poprawnie stosuje transformy per-obiekt/instancję); brak fallbacku JS — awaria silnika kończy się błędem importu |
 | Import OBJ | Konwersja OBJ → STL przez natywny parser OrcaSlicer (`objparser.cpp` + `OBJ.cpp`) skompilowany w WASM — bez dodatkowych zależności; obsługuje trójkąty, quady, multi-obiekt |
 | Import STEP | Konwersja STEP → STL przez OCCT 7.8.1 wkompilowane bezpośrednio w `slicer.wasm` (`Model::read_from_step`); bez osobnego pobierania. IGES nieobsługiwane (czytnik STEP OrcaSlicera nie obsługuje IGES) |
 | Podgląd 3D modelu (Three.js) | Model na wirtualnym stole drukarskim w skali mm, OrbitControls |
@@ -195,7 +195,6 @@ src/
 │   └── SlicePanel.tsx     ✅ progress states, statystyki G-code, download
 ├── lib/
 │   ├── profiles.ts        ✅ presety z rozmiarami + kształtem stołu, 30+ pól + passthrough wszystkich pozostałych
-│   ├── parse3mf.ts        ✅ 3MF → binary STL + OrcaConfig — JS-side fallback, używany tylko gdy silnikowy odczyt (orc_read_3mf) zawiedzie
 │   ├── wasm-loader.ts     ✅ sesja (orc_session_create/destroy) + orc_init / orc_slice / orc_slice_multi (extruder_ids) / orc_obj_to_stl / orc_cad_to_stl (STEP) / write3mf / read3mf / error codes
 │   └── worker-singleton.ts ✅ singleton, preload WASM, drop+respawn workera po WASM_ERROR
 ├── workers/
