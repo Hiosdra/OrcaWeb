@@ -81,8 +81,8 @@ export function SliceHeader({
 
   const readyForPlate = queue.filter(i => i.status === 'ready' && i.stlFile != null).length
   const allDone = totalCount > 0 && doneCount + errorCount === totalCount && staleCount === 0
-  const canSlice = sliceableCount > 0 && !isSlicing
-  const canPlate = readyForPlate >= 2 && !plate.slicing && wasmStatus === 'ready'
+  const canSlice = sliceableCount > 0 && !isSlicing && !plate.slicing
+  const canPlate = readyForPlate >= 2 && !isSlicing && !plate.slicing && wasmStatus === 'ready'
 
   const sliceLabel = isSlicing
     ? `Slicing… (${doneCount + busyCount}/${totalCount})`
