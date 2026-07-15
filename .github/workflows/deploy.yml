@@ -274,8 +274,12 @@ jobs:
           # Same resolution against the "-multithreaded" release family.
           # Independent from the ST lookup above — a missing/failed MT
           # release never blocks or falls back onto the ST download.
+          # Same numeric-suffix guard as the ST WASM_TAG select above: only
+          # accept a purely numeric patch number before "-multithreaded", so a
+          # malformed tag (e.g. "-patchX-multithreaded") is skipped instead of
+          # crashing tonumber and, under set -e, killing this step.
           MT_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq "
-            [.[] | .tagName | select(. == \"${BASE_TAG}-multithreaded\" or (startswith(\"${BASE_TAG}-patch\") and endswith(\"-multithreaded\")))]
+            [.[] | .tagName | select(. == \"${BASE_TAG}-multithreaded\" or (startswith(\"${BASE_TAG}-patch\") and endswith(\"-multithreaded\") and (ltrimstr(\"${BASE_TAG}-patch\") | rtrimstr(\"-multithreaded\") | test(\"^[0-9]+\$\"))))]
             | sort_by(
                 if . == \"${BASE_TAG}-multithreaded\" then 0
                 else (ltrimstr(\"${BASE_TAG}-patch\") | rtrimstr(\"-multithreaded\") | tonumber)
@@ -284,12 +288,23 @@ jobs:
             | last // empty
           ")
           if [ -n "$MT_TAG" ]; then
-            gh release download "$MT_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --pattern "slicer-mt.*" \
-              --dir public/wasm
-            echo "Downloaded MT WASM from release $MT_TAG"
-          else
+            # Best-effort: a transient/partial MT download must NOT fail the
+            # deploy (ST-only is a valid state), so swallow a non-zero exit and
+            # fall through to the gh-pages restore below instead of letting
+            # set -e kill the step. Clear any partial slicer-mt.* first so a
+            # half-written file can't reach the cache-key hash / smoke test.
+            if ! gh release download "$MT_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --pattern "slicer-mt.*" \
+                --dir public/wasm; then
+              echo "::warning::MT download from $MT_TAG failed — falling back to gh-pages restore"
+              rm -f public/wasm/slicer-mt.js public/wasm/slicer-mt.wasm
+              MT_TAG=""
+            else
+              echo "Downloaded MT WASM from release $MT_TAG"
+            fi
+          fi
+          if [ -z "$MT_TAG" ]; then
             echo "::warning::No -multithreaded release found for $ORCA_VERSION — trying to restore slicer-mt.* from previous gh-pages deploy"
             git fetch origin gh-pages 2>/dev/null || true
             for f in slicer-mt.js slicer-mt.wasm; do

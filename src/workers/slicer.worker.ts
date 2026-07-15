@@ -14,10 +14,10 @@ import { logInfo, logWarn, logError } from '../lib/log'
 // download is never aborted once it starts.
 const FETCH_RESPONSE_TIMEOUT_MS = 30_000
 
-function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+function fetchWithTimeout(url: string, timeoutMs: number, init: RequestInit = {}): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
-  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer))
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer))
 }
 
 let orcaModule: OrcaModule | null = null
@@ -130,18 +130,14 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       let variant: 'slicer' | 'slicer-mt' = 'slicer'
       if (canUseThreads) {
         try {
-          let probe: Response
-          try {
-            probe = await fetch(`${wasmBase}/slicer-mt.js${v}`, { method: 'HEAD' })
-            if (!probe.ok) {
-              probe = await fetch(`${wasmBase}/slicer-mt.js${v}`, {
-                headers: { Range: 'bytes=0-0' },
-              })
-            }
-          } catch {
-            probe = await fetch(`${wasmBase}/slicer-mt.js${v}`, {
-              headers: { Range: 'bytes=0-0' },
-            })
+          const probeUrl = `${wasmBase}/slicer-mt.js${v}`
+          // Prefer a HEAD (no body); some static hosts answer HEAD with 405,
+          // so fall back to a 1-byte Range GET. A single catch covers both a
+          // HEAD that throws and a HEAD that returns !ok.
+          let probe = await fetchWithTimeout(probeUrl, FETCH_RESPONSE_TIMEOUT_MS, { method: 'HEAD' })
+            .catch(() => null)
+          if (!probe?.ok) {
+            probe = await fetchWithTimeout(probeUrl, FETCH_RESPONSE_TIMEOUT_MS, { headers: { Range: 'bytes=0-0' } })
           }
           const contentType = probe.headers.get('content-type') ?? ''
           if (probe.ok && !contentType.includes('text/html')) variant = 'slicer-mt'
@@ -185,6 +181,21 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         { type: 'application/javascript' },
       )
       const blobUrl = URL.createObjectURL(blob)
+
+      // Same-origin classic-worker script for Emscripten's pthread pool (MT
+      // only). Emscripten spawns pool workers with `new Worker(mainScriptUrl
+      // OrBlob)`; a classic Worker whose script URL is CROSS-origin throws a
+      // SecurityError, so we must NOT hand it the cross-origin engine URL —
+      // on the Cloudflare mirror `wasmBase` is the GitHub Pages origin, so the
+      // raw URL string would fail there (never hit locally, where wasmBase is
+      // same-origin). Passing a Blob makes Emscripten mint a same-origin
+      // blob: URL for each worker instead. It's the *raw* glue (no ESM
+      // `export default`, which would be a syntax error in a classic worker,
+      // unlike the import blob above). Module retains this Blob, so any later
+      // on-demand pool growth can still spawn workers from it.
+      const pthreadScriptBlob = variant === 'slicer-mt'
+        ? new Blob([jsText], { type: 'application/javascript' })
+        : null
 
       let factory: OrcaModuleFactory
       try {
@@ -230,13 +241,13 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
             wasmCrashed = true
             send({ type: 'WASM_ERROR', message: `Slicer engine crashed: ${m}` })
           },
-          // Needed with MODULARIZE + pthreads: this glue script is loaded via
-          // a blob: URL (see below), so Emscripten's runtime can't infer its
-          // real network URL to reload itself into nested pthread Workers
-          // without this — found the hard way building poc/wasm-threads/
-          // (see public/worker.js there for the same fix). Harmless/unused on
-          // the ST variant, so it's fine to just always pass it.
-          ...(variant === 'slicer-mt' ? { mainScriptUrlOrBlob: `${wasmBase}/${variant}.js${v}` } : {}),
+          // Needed with MODULARIZE + pthreads: the main glue is imported from a
+          // blob: URL, so Emscripten can't infer a script URL to spawn pthread
+          // workers from. We hand it a same-origin Blob (see pthreadScriptBlob
+          // above) rather than the engine URL, which is cross-origin on the
+          // Cloudflare mirror and would make `new Worker(url)` throw. Only set
+          // for MT (ST has no pthreads).
+          ...(pthreadScriptBlob ? { mainScriptUrlOrBlob: pthreadScriptBlob } : {}),
         }),
         instantiateFailed,
       ])

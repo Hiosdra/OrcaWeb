@@ -23,7 +23,10 @@
 
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { createRequire } from 'node:module'
+import {
+  icosphere, trianglesToStl, loadModule, writeBytes, decodeError,
+  initSession, sliceOnce, sliceMultiOnce,
+} from './lib/engine-harness.mjs'
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
@@ -39,74 +42,8 @@ function parseArgs(argv) {
 // ── test meshes ──────────────────────────────────────────────────────────────
 // A fixed set of STLs (small cube, a >100k-triangle organic mesh, a
 // multi-object plate through orc_slice_multi) — see orca-wasm/MT-PLAN.md.
-// Generated in memory (no repo bloat, fully offline) — same icosphere
-// generator as smoke-test.mjs, duplicated rather than imported for the same
-// reason smoke-test.mjs gives for its own duplication from wasm-loader.ts:
-// this is plain Node ESM with no TS build step and no other caller (yet) to
-// justify a shared module.
-
-function icosphere(subdivisions) {
-  const t = (1 + Math.sqrt(5)) / 2
-  let verts = [
-    [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
-    [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
-    [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1],
-  ]
-  let faces = [
-    [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
-    [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
-    [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
-    [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
-  ]
-
-  const midpointCache = new Map()
-  const midpoint = (a, b) => {
-    const key = a < b ? `${a}_${b}` : `${b}_${a}`
-    if (midpointCache.has(key)) return midpointCache.get(key)
-    const [ax, ay, az] = verts[a], [bx, by, bz] = verts[b]
-    verts.push([(ax + bx) / 2, (ay + by) / 2, (az + bz) / 2])
-    const idx = verts.length - 1
-    midpointCache.set(key, idx)
-    return idx
-  }
-
-  for (let s = 0; s < subdivisions; s++) {
-    const nextFaces = []
-    for (const [a, b, c] of faces) {
-      const ab = midpoint(a, b), bc = midpoint(b, c), ca = midpoint(c, a)
-      nextFaces.push([a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca])
-    }
-    faces = nextFaces
-  }
-
-  return { verts, faces }
-}
-
-function trianglesToStl(verts, faces) {
-  const buf = new ArrayBuffer(84 + faces.length * 50)
-  const dv = new DataView(buf)
-  let off = 80
-  dv.setUint32(off, faces.length, true)
-  off += 4
-  for (const [i1, i2, i3] of faces) {
-    const p1 = verts[i1], p2 = verts[i2], p3 = verts[i3]
-    const ax = p2[0] - p1[0], ay = p2[1] - p1[1], az = p2[2] - p1[2]
-    const bx = p3[0] - p1[0], by = p3[1] - p1[1], bz = p3[2] - p1[2]
-    const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx
-    const nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1
-    dv.setFloat32(off, nx / nl, true); off += 4
-    dv.setFloat32(off, ny / nl, true); off += 4
-    dv.setFloat32(off, nz / nl, true); off += 4
-    for (const p of [p1, p2, p3]) {
-      dv.setFloat32(off, p[0], true); off += 4
-      dv.setFloat32(off, p[1], true); off += 4
-      dv.setFloat32(off, p[2], true); off += 4
-    }
-    dv.setUint16(off, 0, true); off += 2
-  }
-  return new Uint8Array(buf)
-}
-
+// icosphere()/trianglesToStl() live in ./lib/engine-harness.mjs; the
+// mesh builders below (sphereStl/cubeStl) wrap them.
 function sphereStl(subdivisions, radiusMm) {
   const { verts, faces } = icosphere(subdivisions)
   const scaled = verts.map(([x, y, z]) => {
@@ -140,123 +77,8 @@ const MESHES = {
   'organic mesh (~328k tris)': () => sphereStl(7, 15),
 }
 
-// ── WASM module loading (Node) ────────────────────────────────────────────────
-// See smoke-test.mjs for why this shape (data: URL + require/__dirname
-// polyfills) is needed instead of a plain import().
-
-globalThis.require ??= createRequire(import.meta.url)
-globalThis.__dirname ??= '.'
-globalThis.__filename ??= ''
-
-async function loadModule(wasmDir, engine) {
-  const jsPath = resolve(wasmDir, `${engine}.js`)
-  const wasmPath = resolve(wasmDir, `${engine}.wasm`)
-  if (!existsSync(jsPath) || !existsSync(wasmPath)) {
-    throw new Error(`${engine}.js/${engine}.wasm not found in ${wasmDir}`)
-  }
-  const jsText = readFileSync(jsPath, 'utf8')
-  const wasmBinary = readFileSync(wasmPath)
-  const dataUrl = 'data:text/javascript;charset=utf-8,' +
-    encodeURIComponent(`${jsText}\nexport default OrcaModule;`)
-  const { default: factory } = await import(dataUrl)
-  return factory({
-    wasmBinary,
-    // See smoke-test.mjs's loadModule() for why this is required for mt:
-    // Node's pthread worker spawn defaults to `_scriptName` (derived from
-    // the polyfilled, empty __filename above), which throws ERR_WORKER_PATH.
-    mainScriptUrlOrBlob: jsPath,
-    printErr: (m) => console.warn(`[OrcaWASM/${engine}]`, m),
-    onAbort: (m) => { throw new Error(`WASM module (${engine}) aborted: ${m}`) },
-  })
-}
-
-// ── minimal heap marshaling (duplicated from smoke-test.mjs) ─────────────────
-
-function writeBytes(module, bytes) {
-  const ptr = module._malloc(bytes.length)
-  module.HEAPU8.set(bytes, ptr)
-  return ptr
-}
-
-function decodeError(module, session) {
-  try {
-    const ptr = module._orc_decode_exception(session)
-    return ptr ? module.UTF8ToString(ptr) : '(no message)'
-  } catch {
-    return '(failed to decode error)'
-  }
-}
-
-function initSession(module, session, configJson) {
-  const configBytes = new TextEncoder().encode(configJson)
-  const configPtr = writeBytes(module, configBytes)
-  const rc = module._orc_init(session, configPtr, configBytes.length)
-  module._free(configPtr)
-  if (rc !== 0) throw new Error(`orc_init failed (${rc}): ${decodeError(module, session)}`)
-}
-
-function sliceOnce(module, session, stlBytes) {
-  const stlPtr = writeBytes(module, stlBytes)
-  const outPtrPtr = module._malloc(4)
-  const outLenPtr = module._malloc(4)
-  const rc = module._orc_slice(session, stlPtr, stlBytes.length, outPtrPtr, outLenPtr)
-  module._free(stlPtr)
-  if (rc !== 0) {
-    const msg = decodeError(module, session)
-    module._free(outPtrPtr)
-    module._free(outLenPtr)
-    throw new Error(`orc_slice failed (${rc}): ${msg}`)
-  }
-  const gcodePtr = module.getValue(outPtrPtr, 'i32')
-  const gcodeLen = module.getValue(outLenPtr, 'i32')
-  const gcode = module.UTF8ToString(gcodePtr, gcodeLen)
-  module._orc_free(gcodePtr)
-  module._free(outPtrPtr)
-  module._free(outLenPtr)
-  return gcode
-}
-
-function sliceMultiOnce(module, session, stlBytesArr) {
-  const totalLen = stlBytesArr.reduce((sum, b) => sum + b.length, 0)
-  const combined = new Uint8Array(totalLen)
-  const offsets = new Int32Array(stlBytesArr.length * 2)
-  let pos = 0
-  for (let i = 0; i < stlBytesArr.length; i++) {
-    combined.set(stlBytesArr[i], pos)
-    offsets[i * 2] = pos
-    offsets[i * 2 + 1] = stlBytesArr[i].length
-    pos += stlBytesArr[i].length
-  }
-  const dataPtr = writeBytes(module, combined)
-  const offsetsPtr = module._malloc(offsets.length * 4)
-  for (let i = 0; i < offsets.length; i++) module.setValue(offsetsPtr + i * 4, offsets[i], 'i32')
-  const outPtrPtr = module._malloc(4)
-  const outLenPtr = module._malloc(4)
-  const rc = module._orc_slice_multi(
-    session, dataPtr, combined.length, offsetsPtr, stlBytesArr.length, 0, outPtrPtr, outLenPtr,
-  )
-  module._free(dataPtr)
-  module._free(offsetsPtr)
-  if (rc !== 0) {
-    const msg = decodeError(module, session)
-    module._free(outPtrPtr)
-    module._free(outLenPtr)
-    throw new Error(`orc_slice_multi failed (${rc}): ${msg}`)
-  }
-  const gcodePtr = module.getValue(outPtrPtr, 'i32')
-  const gcodeLen = module.getValue(outLenPtr, 'i32')
-  const gcode = module.UTF8ToString(gcodePtr, gcodeLen)
-  module._orc_free(gcodePtr)
-  module._free(outPtrPtr)
-  module._free(outLenPtr)
-  return gcode
-}
-
-// ── G-code structural comparison ──────────────────────────────────────────────
-// Layer count: same "; total layers count = N" comment the app itself reads
-// (see src/components/SlicePanel.tsx), falling back to counting
-// ;LAYER_CHANGE markers exactly like that same component does, so this
-// script's notion of "layer count" always matches what a user would see.
+// ── engine harness ──────────────────────────────────────────────────────────
+// loadModule() + orc_* heap marshaling live in ./lib/engine-harness.mjs.
 
 function layerCount(gcode) {
   const m = gcode.match(/;\s*total layers count\s*=\s*(\d+)/i)

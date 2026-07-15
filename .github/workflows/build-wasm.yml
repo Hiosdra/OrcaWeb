@@ -75,12 +75,16 @@ jobs:
       ONETBB_VERSION: "v2021.13.2"
       EMSDK: /opt/emsdk
       # ── Variant-derived settings ─────────────────────────────────────
-      # Everything that differs between st/mt boils down to these four
-      # values; every step below reads them instead of hardcoding "slicer"
-      # or the shim path, so the two variants share one script.
+      # Everything that differs between st/mt boils down to these values;
+      # every step below reads them instead of hardcoding "slicer" or the
+      # shim path, so the two variants share one script. EXTRA_CXX_FLAGS
+      # carries -pthread for mt (empty for st) so every dep + the engine
+      # compile with pthread-consistent codegen — mixing pthread and
+      # non-pthread objects doesn't link (see MT-PLAN.md).
       OUTPUT_NAME: ${{ matrix.variant == 'mt' && 'slicer-mt' || 'slicer' }}
       BOOST_THREADING: ${{ matrix.variant == 'mt' && 'multi' || 'single' }}
       SLIC3R_WASM_MT: ${{ matrix.variant == 'mt' && 'ON' || 'OFF' }}
+      EXTRA_CXX_FLAGS: ${{ matrix.variant == 'mt' && '-pthread' || '' }}
 
     steps:
       - uses: actions/checkout@v7
@@ -331,11 +335,6 @@ jobs:
           DL=/tmp/math-dl
           mkdir -p "${DL}"
 
-          EXTRA_CXX_FLAGS=""
-          if [[ "${{ matrix.variant }}" == "mt" ]]; then
-            EXTRA_CXX_FLAGS="-pthread"
-          fi
-
           # ── GMP ──────────────────────────────────────────────────────
           echo "[gmp] building GMP ${GMP_VERSION}…"
           # Use GNU FTP mirror (gmplib.org blocks GitHub Actions runners)
@@ -403,11 +402,6 @@ jobs:
           # restore-keys.
           STAMP="${INSTALL}/.headers_built_eigen5.0.1_nlohmann3.11.3_expat2.5.0_nlopt2.7.1_cereal1.3.2_${{ matrix.variant }}"
           [[ -f "${STAMP}" ]] && echo "[headers+expat+nlopt] cached" && exit 0
-
-          EXTRA_CXX_FLAGS=""
-          if [[ "${{ matrix.variant }}" == "mt" ]]; then
-            EXTRA_CXX_FLAGS="-pthread"
-          fi
 
           # ── Eigen3 (header-only, install cmake config) ────────────────
           echo "[eigen3] installing…"
@@ -484,11 +478,6 @@ jobs:
           INSTALL="$(pwd)/orca-wasm/deps-install"
           STAMP="${INSTALL}/.libnoise_built_${{ matrix.variant }}"
           [[ -f "${STAMP}" ]] && echo "[libnoise] stamp exists — skip" && exit 0
-
-          EXTRA_CXX_FLAGS=""
-          if [[ "${{ matrix.variant }}" == "mt" ]]; then
-            EXTRA_CXX_FLAGS="-pthread"
-          fi
 
           echo "[libnoise] downloading Orca-deps-libnoise 1.0…"
           curl -fL --retry 3 \
@@ -575,10 +564,6 @@ jobs:
           # bug) ruled out a stale-cache explanation — confirmed via
           # "Install Emscripten" actually running (not cache-hit-skipped) on
           # the run that still failed this way.
-          EXTRA_CXX_FLAGS=""
-          if [[ "${{ matrix.variant }}" == "mt" ]]; then
-            EXTRA_CXX_FLAGS="-pthread"
-          fi
           cmake \
             -S /tmp/occt/occt-src \
             -B /tmp/occt/build \
@@ -824,11 +809,9 @@ jobs:
           # include dir (real oneTBB headers instead of the ST shims) +
           # SLIC3R_WASM_MT compile define (see orca-wasm/bridge/CMakeLists.txt)
           # so the one threading-aware bridge line flips.
-          EXTRA_CXX_FLAGS=""
           COMMON_SHIM_DIR="${WORK}/orca-wasm/wasm/shims-common"
           TBB_INCLUDE_DIR="${WORK}/orca-wasm/wasm/shims"
           if [[ "${{ matrix.variant }}" == "mt" ]]; then
-            EXTRA_CXX_FLAGS="-pthread"
             TBB_INCLUDE_DIR="${DEP_INSTALL}/include"
           fi
 

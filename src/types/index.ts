@@ -251,6 +251,10 @@ export interface OrcaModuleOptions {
   locateFile?: (path: string) => string
   printErr?: (msg: string) => void
   onAbort?: (msg: string) => void
+  /** Emscripten pthread hook: script used to spawn pool workers. A Blob is
+   *  minted into a same-origin blob: URL per worker; a string is used as-is
+   *  (so it must be same-origin, else `new Worker()` throws cross-origin). */
+  mainScriptUrlOrBlob?: string | Blob
 }
 
 export type OrcaModuleFactory = (options?: OrcaModuleOptions) => Promise<OrcaModule>
