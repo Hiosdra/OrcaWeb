@@ -84,24 +84,51 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
     const loadStartedAt = performance.now()
     logInfo(`[OrcaWASM] loading engine ${msg.engineLabel} from ${msg.url}`)
 
+    // Resolved at runtime from engine-version.json below; msg.version /
+    // msg.engineLabel (baked into this app bundle at build time) are only the
+    // fallback. Declared out here so the catch block can log the label too.
+    let version = msg.version
+    let engineLabel = msg.engineLabel
+
     try {
       const wasmBase = msg.url.replace(/\/slicer\.js$/, '')
-      // slicer.js/slicer.wasm (and slicer-mt.js/slicer-mt.wasm) are served
-      // under fixed, unhashed filenames (they're downloaded from the
-      // wasm-v2.4.2 GitHub Release at deploy time, not processed by Vite's
-      // asset pipeline, so they get no content-hash filename the way JS/CSS
-      // bundles do). The PWA service worker caches them with a CacheFirst
-      // strategy (vite.config.ts) that never revalidates against the
-      // network — so without a cache-busting key in the URL, a browser that
-      // visited before this deploy keeps serving its stale cached engine
-      // binary indefinitely (up to the 30-day TTL), even after the rest of
-      // the app updates to a new version. msg.version is __WASM_VERSION__
-      // (the resolved WASM release tag, not the app version — see
-      // worker-singleton.ts / vite.config.ts), so this key changes whenever
-      // the engine binary changes, even between app releases. That makes
-      // each engine build's URL genuinely new, so CacheFirst treats it as a
-      // fresh entry instead of reusing a stale, API-mismatched one.
-      const v = `?v=${encodeURIComponent(msg.version)}`
+      // Resolve the engine version + label at RUNTIME from engine-version.json
+      // (published next to the binaries by deploy.yml), rather than trusting
+      // the value baked into this app bundle at build time. Why: the Cloudflare
+      // app shell and the engine are produced by two independent pipelines
+      // racing off the same push — the shell (a ~2 min Vite build) routinely
+      // finishes before build-wasm.yml has compiled and mirrored the new
+      // engine, so the baked __WASM_VERSION__ can point at a stale (even
+      // deadlocking) engine, and the CacheFirst ?v= key would stay stuck there
+      // until the shell is rebuilt. Reading the manifest here makes the shell
+      // track whatever engine is actually live, with no rebuild needed.
+      // engine-version.json is tiny and deliberately NOT service-worker cached
+      // (see vite.config.ts globIgnores/runtimeCaching); cache:'no-store' also
+      // bypasses the HTTP cache, so this is always fresh. Falls back to the
+      // baked values when the manifest is absent (local dev before
+      // `npm run setup`) or unreachable.
+      try {
+        const manifestRes = await fetchWithTimeout(
+          `${wasmBase}/engine-version.json`, FETCH_RESPONSE_TIMEOUT_MS, { cache: 'no-store' },
+        )
+        if (manifestRes.ok) {
+          const manifest = await manifestRes.json() as { version?: unknown; label?: unknown }
+          if (typeof manifest.version === 'string' && manifest.version) version = manifest.version
+          if (typeof manifest.label === 'string' && manifest.label) engineLabel = manifest.label
+        }
+      } catch {
+        // Manifest missing/unreachable — keep the build-time baked fallback.
+      }
+
+      // The engine files are served under fixed, unhashed filenames (downloaded
+      // from the GitHub Release at deploy time, not through Vite's asset
+      // pipeline, so they get no content-hash filename). The PWA service worker
+      // caches them CacheFirst (vite.config.ts) and never revalidates, so
+      // without a cache-busting key a browser that visited before an engine
+      // update keeps serving its stale cached binary. `version` (resolved just
+      // above) changes whenever the engine changes, making each engine's URL
+      // genuinely new so CacheFirst treats it as a fresh entry.
+      const v = `?v=${encodeURIComponent(version)}`
 
       // Dual-mode engine selection (see orca-wasm/MT-PLAN.md): the real
       // multithreaded engine (slicer-mt.*, built with -pthread against real
@@ -263,9 +290,9 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
 
       loadingWasm = false
       logInfo(
-        `[OrcaWASM] engine ${msg.engineLabel} ready in ${Math.round(performance.now() - loadStartedAt)}ms — session #${session}`,
+        `[OrcaWASM] engine ${engineLabel} ready in ${Math.round(performance.now() - loadStartedAt)}ms — session #${session}`,
       )
-      send({ type: 'WASM_LOADED' })
+      send({ type: 'WASM_LOADED', engineLabel })
 
       // Fire any requests that queued up during loading
       for (const pending of pendingObjConvertQueue) {
@@ -297,7 +324,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
     } catch (err) {
       loadingWasm = false
       logError(
-        `[OrcaWASM] engine ${msg.engineLabel} failed to load after ${Math.round(performance.now() - loadStartedAt)}ms:`,
+        `[OrcaWASM] engine ${engineLabel} failed to load after ${Math.round(performance.now() - loadStartedAt)}ms:`,
         err,
       )
       send({

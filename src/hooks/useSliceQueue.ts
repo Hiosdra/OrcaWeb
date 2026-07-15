@@ -221,6 +221,9 @@ export interface SliceQueue {
   items: QueueItem[]
   plate: PlateState
   wasmStatus: WasmStatus
+  /** Human-readable engine version for the header — the build-time baked
+   *  value until the worker resolves the live one from engine-version.json. */
+  engineLabel: string
   isSlicing: boolean
   addFiles: (files: File[]) => void
   removeItem: (id: string) => void
@@ -241,6 +244,9 @@ export function useSliceQueue(
 ): SliceQueue {
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE)
   const [wasmStatus, setWasmStatus] = useState<WasmStatus>(getWasmStatus)
+  // Starts as the build-time baked label; replaced by the runtime-resolved
+  // one the worker sends with WASM_LOADED (from engine-version.json).
+  const [engineLabel, setEngineLabel] = useState<string>(__ORCA_ENGINE_VERSION__)
 
   const configRef = useRef(config)
   useEffect(() => { configRef.current = config }, [config])
@@ -305,6 +311,7 @@ export function useSliceQueue(
       switch (msg.type) {
         case 'WASM_LOADED':
           setWasmStatus('ready')
+          if (msg.engineLabel) setEngineLabel(msg.engineLabel)
           return
         case 'WASM_ERROR':
           setWasmStatus('error')
@@ -585,6 +592,7 @@ export function useSliceQueue(
     items,
     plate,
     wasmStatus,
+    engineLabel,
     isSlicing: currentId !== null || running,
     addFiles,
     removeItem,

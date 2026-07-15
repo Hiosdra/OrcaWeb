@@ -390,10 +390,17 @@ Engine-side 3MF write + read (`orc_write_3mf` / `orc_read_3mf`, issue #108) are 
     # missing/stale MT mirror degrades gracefully rather than breaking the
     # app.
     #
-    # Cache key + header label come from app/wasm/engine-version.json,
-    # published by deploy.yml alongside the wasm files (fallbacks: GitHub
-    # Releases API, then the app version — the API is rate-limited from
-    # Cloudflare's shared build IPs, so the manifest is the reliable path).
+    # Cache key + header label ultimately come from app/wasm/engine-version.json.
+    # cf-build.mjs still bakes a value at build time (fallbacks: GitHub Releases
+    # API, then the app version) — but that is now only a FALLBACK: the worker
+    # (slicer.worker.ts) re-reads engine-version.json at RUNTIME on every load
+    # and uses that for the ?v= cache-buster + header. This decouples the app
+    # shell from the engine version: because the CF shell build (~2 min) races
+    # the multi-hour Build WASM, the shell used to bake a stale engine version
+    # and pin the CacheFirst cache to an old (possibly deadlocking) binary until
+    # the next shell rebuild. Runtime resolution means the shell always tracks
+    # whatever engine gh-pages currently serves, with no CF rebuild needed for
+    # an engine-only update. (engine-version.json is deliberately not SW-cached.)
     ```
 
 === "Build WASM engine"

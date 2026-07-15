@@ -69,11 +69,11 @@ export function getWorker(): Worker {
   const wasmBase = import.meta.env.VITE_WASM_BASE_URL
     ?? `${import.meta.env.BASE_URL}wasm`
   wasmStatus = 'loading'
-  // __WASM_VERSION__ (not __APP_VERSION__) — tracks the WASM engine build itself,
-  // so an engine-only change (bridge/API) busts the cache even without an app
-  // release. See vite.config.ts and deploy.yml's "Download WASM artifacts" step.
-  // __ORCA_ENGINE_VERSION__ is separate: a human-readable label for console
-  // diagnostics only, never used for the cache-busting URL itself.
+  // These are the build-time baked values; the worker resolves the live
+  // engine version + label at load from engine-version.json and only falls
+  // back to these if that fetch fails (see slicer.worker.ts). __WASM_VERSION__
+  // is the cache-busting key (tracks the engine build, not the app release);
+  // __ORCA_ENGINE_VERSION__ is the human-readable label shown in the header.
   worker.postMessage({
     type: 'LOAD_WASM',
     url: `${wasmBase}/slicer.js`,
