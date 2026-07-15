@@ -225,7 +225,7 @@ export function QueueItemCard({
           >
             {item.status === 'converting' && 'Converting…'}
             {item.status === 'ready' && 'Ready to slice'}
-            {item.status === 'slicing' && <SlicingLabel />}
+            {item.status === 'slicing' && <SlicingLabel progress={item.progress} />}
             {item.status === 'done' && (
               item.stale
                 ? 'Sliced with previous settings — re-slice to apply changes'
@@ -276,6 +276,12 @@ export function QueueItemCard({
           </div>
         )}
       </div>
+
+      {item.status === 'slicing' && item.progress && (
+        <div className="h-1 bg-slate-100" aria-label={`Slicing progress: ${item.progress.percent}%`}>
+          <div className="h-full bg-orca-500 transition-[width] duration-200" style={{ width: `${item.progress.percent}%` }} />
+        </div>
+      )}
 
       {export3mfError && (
         <div className="px-4 pb-3 -mt-1 text-xs text-red-500">
@@ -340,7 +346,7 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
             'text-amber-600': !plate.slicing && !!plate.gcode && plate.stale,
             'text-green-600': !plate.slicing && !!plate.gcode && !plate.stale,
           })}>
-            {plate.slicing && <SlicingLabel />}
+            {plate.slicing && <SlicingLabel progress={plate.progress} />}
             {!plate.slicing && plate.error}
             {!plate.slicing && plate.gcode && (
               plate.stale
@@ -368,6 +374,12 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
           </div>
         )}
       </div>
+
+      {plate.slicing && plate.progress && (
+        <div className="h-1 bg-slate-100" aria-label={`Plate slicing progress: ${plate.progress.percent}%`}>
+          <div className="h-full bg-orca-500 transition-[width] duration-200" style={{ width: `${plate.progress.percent}%` }} />
+        </div>
+      )}
 
       {expanded && plate.gcode && (
         <div className="border-t border-slate-100 bg-slate-900" style={{ height: 300 }}>
@@ -414,12 +426,14 @@ export function ConfigSummary({ config, fileCount }: { config: OrcaConfig; fileC
 
 // ── Shared bits ───────────────────────────────────────────────────────────────
 
-function SlicingLabel() {
+function SlicingLabel({ progress }: { progress?: { percent: number; stage: string } }) {
   const [elapsed, setElapsed] = useState(0)
   useEffect(() => {
     const start = Date.now()
     const id = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 250)
     return () => clearInterval(id)
   }, [])
-  return <>Slicing… ({elapsed}s)</>
+  return progress
+    ? <>{progress.stage || 'Slicing…'} ({progress.percent}%) · {elapsed}s</>
+    : <>Slicing… ({elapsed}s)</>
 }

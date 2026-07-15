@@ -35,12 +35,14 @@
  * orc_decode_exception(0) like orc_obj_to_stl / orc_cad_to_stl.
  */
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <stdexcept>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <sys/stat.h>
 
@@ -109,6 +111,47 @@ struct OrcSession {
     // "rectangle" or "circle" — read from bed_shape in the config JSON.
     std::string bed_shape = "rectangle";
 };
+
+// Slicing blocks the worker's event loop. MAIN_THREAD_EM_ASM delivers this
+// from both the single-threaded engine and a pthread back to that worker,
+// where postMessage reaches the browser's main thread immediately.
+static void post_slice_progress(int percent, const std::string& stage) {
+    MAIN_THREAD_EM_ASM({
+        // The build smoke test also runs this bridge in Node, where there is
+        // no Worker parent to receive browser UI messages.
+        if (typeof self !== 'undefined' && typeof self.postMessage === 'function') {
+            self.postMessage({ type: 'SLICE_PROGRESS', percent: $0, stage: UTF8ToString($1) });
+        }
+    }, percent, stage.c_str());
+}
+
+static void attach_progress_callback(Slic3r::Print& print) {
+    auto last_percent = std::make_shared<int>(-1);
+    auto last_stage = std::make_shared<std::string>();
+    auto last_update_ms = std::make_shared<double>(-100.0);
+    auto progress_mutex = std::make_shared<std::mutex>();
+
+    print.set_status_callback([last_percent, last_stage, last_update_ms, progress_mutex](const Slic3r::PrintBase::SlicingStatus& status) {
+        if (status.percent < 0)
+            return;
+
+        const double now = emscripten_get_now();
+        bool should_emit = false;
+        int percent = 0;
+        {
+            std::lock_guard<std::mutex> lock(*progress_mutex);
+            percent = std::max(*last_percent, std::min(status.percent, 100));
+            should_emit = percent != *last_percent || status.text != *last_stage || now - *last_update_ms >= 100.0;
+            if (should_emit) {
+                *last_percent = percent;
+                *last_stage = status.text;
+                *last_update_ms = now;
+            }
+        }
+        if (should_emit)
+            post_slice_progress(percent, status.text);
+    });
+}
 
 static OrcSession* as_session(void* ptr) { return static_cast<OrcSession*>(ptr); }
 
@@ -417,6 +460,7 @@ int orc_slice(void* session_ptr, const void* stl_data, int stl_len,
         Slic3r::Print print;
         print.apply(model, session->config);
         set_is_bbl_printer(print, session->config);
+        attach_progress_callback(print);
 
         {
             // Print::validate() returns a StringObjectException whose
@@ -703,6 +747,7 @@ int orc_slice_multi(
         Slic3r::Print print;
         print.apply(model, session->config);
         set_is_bbl_printer(print, session->config);
+        attach_progress_callback(print);
 
         {
             Slic3r::StringObjectException err = print.validate();
