@@ -242,7 +242,7 @@ export function parseGcode(gcode: string): ParseResult {
     }
 
     const nextE = hasE ? (extrusionRelative ? ce + e : e) : ce
-    const extrusionDelta = nextE - ce
+    const extrusionDelta = hasE ? (extrusionRelative ? e : nextE - ce) : 0
     const isTravel = g === 'G0' || extrusionDelta <= 0
 
     if (isLinear) {
