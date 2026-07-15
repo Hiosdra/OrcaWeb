@@ -140,7 +140,10 @@ export type WorkerInMessage =
   | { type: 'READ_3MF'; mf: ArrayBuffer; requestId: string }
 
 export type WorkerOutMessage =
-  | { type: 'WASM_LOADED' }
+  // engineLabel is the runtime-resolved human-readable engine version (from
+  // engine-version.json — see slicer.worker.ts); absent when the engine was
+  // already loaded (re-signalled) or on the baked-fallback path.
+  | { type: 'WASM_LOADED'; engineLabel?: string }
   | { type: 'WASM_ERROR'; message: string }
   | { type: 'SLICE_COMPLETE'; gcode: string }
   | { type: 'SLICE_ERROR'; code: number; message: string }

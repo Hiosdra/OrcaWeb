@@ -10,6 +10,7 @@
  */
 
 import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs'
+import { createHash } from 'crypto'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { REPO, resolveLatestWasmTag } from './lib/wasm-release.mjs'
@@ -108,6 +109,18 @@ async function main() {
     await download(name, approxSize, releaseBase, tag)
   }
   writeFileSync(TAG_MARKER, `${tag}\n`)
+
+  // Mirror the engine-version.json that deploy.yml publishes next to the
+  // engine on gh-pages (version = sha256 of the wasm bytes, first 16 hex;
+  // label = the resolved release tag). The worker resolves the engine version
+  // + header label from this manifest at RUNTIME (see slicer.worker.ts), so
+  // writing it here means local `npm run dev` and the e2e smoke run (which
+  // does `npm run setup`) exercise that real runtime-resolution path — and
+  // show the actual engine version in the header — instead of silently
+  // falling back to the build-time baked app version.
+  const version = createHash('sha256').update(readFileSync(join(WASM_DIR, 'slicer.wasm'))).digest('hex').slice(0, 16)
+  const label = tag.replace(/^wasm-/, '')
+  writeFileSync(join(WASM_DIR, 'engine-version.json'), `${JSON.stringify({ label, version })}\n`)
 
   console.log('\n  All artifacts ready.')
   console.log('  Run `npm run dev` to start the web UI\n')

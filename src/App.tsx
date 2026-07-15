@@ -135,7 +135,7 @@ export default function App() {
   }, [importNotice])
 
   const {
-    items: queue, plate, wasmStatus, addFiles, removeItem, sliceAll, slicePlate, cancel, export3mf,
+    items: queue, plate, wasmStatus, engineLabel, addFiles, removeItem, sliceAll, slicePlate, cancel, export3mf,
   } = useSliceQueue(config, handleSettingsImported)
 
   const bedX = config.bed_size_x ?? DISPLAY_DEFAULTS.bed_size_x
@@ -172,7 +172,7 @@ export default function App() {
                 </span>
               </div>
               <div className="text-xs text-slate-400 font-mono">
-                v{__APP_VERSION__} · {__APP_RELEASE_DATE__} · engine {__ORCA_ENGINE_VERSION__}
+                v{__APP_VERSION__} · {__APP_RELEASE_DATE__} · engine {engineLabel}
               </div>
             </div>
           </div>
