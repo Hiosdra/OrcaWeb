@@ -86,6 +86,7 @@ Ostatnia aktualizacja: **2026-07-15** · wersja silnika: **OrcaSlicer v2.4.2** (
 | Aspekt | Status |
 |--------|--------|
 | GitHub Actions CI (deploy.yml) | ✅ buduje i deployuje na każdy push do `master` |
+| Snapshot GitHub Pages dla PR | ✅ `pr-preview.yml` publikuje `previews/pr-<numer>/`, komentuje URL i usuwa snapshot po zamknięciu PR-a; tylko gałęzie z tego repozytorium |
 | Serwowanie WASM z tej samej origin | ✅ brak CORS — pliki w `gh-pages/app/wasm/` |
 | Release WASM `wasm-v2.4.2` | ✅ `slicer.js` + `slicer.wasm` (~29 MB łącznie, z OCCT STEP) |
 | Deploy resilience | ✅ fallback na poprzedni `gh-pages` gdy release nie istnieje |

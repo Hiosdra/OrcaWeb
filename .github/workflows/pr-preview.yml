@@ -1,0 +1,126 @@
+name: PR Preview
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# The production deploy and all previews update the same gh-pages branch.
+concurrency:
+  group: deploy-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Do not give write credentials to untrusted code from a fork.
+    if: >
+      github.event.action != 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build preview
+        run: npm run build
+        env:
+          VITE_BASE: /${{ github.event.repository.name }}/previews/pr-${{ github.event.pull_request.number }}/
+          # Reuse the deployed engine instead of publishing a ~36 MB WASM copy
+          # per PR. The worker refreshes engine-version.json at runtime.
+          VITE_WASM_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/app/wasm
+          VITE_ORCA_VERSION: Preview (production engine)
+
+      - name: Checkout GitHub Pages branch
+        uses: actions/checkout@v7
+        with:
+          ref: gh-pages
+          path: pages
+          fetch-depth: 1
+
+      - name: Publish preview files
+        env:
+          PREVIEW_DIR: previews/pr-${{ github.event.pull_request.number }}
+        run: |
+          rm -rf "pages/$PREVIEW_DIR"
+          mkdir -p "pages/$PREVIEW_DIR"
+          cp -r dist/. "pages/$PREVIEW_DIR/"
+          touch pages/.nojekyll
+
+      - name: Commit preview
+        env:
+          PREVIEW_DIR: previews/pr-${{ github.event.pull_request.number }}
+        run: |
+          git -C pages config user.name "github-actions[bot]"
+          git -C pages config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C pages add "$PREVIEW_DIR" .nojekyll
+          if ! git -C pages diff --cached --quiet; then
+            git -C pages commit -m "deploy(preview): PR #${{ github.event.pull_request.number }}"
+            git -C pages push
+          fi
+
+      - name: Comment preview URL
+        uses: actions/github-script@v8
+        env:
+          PREVIEW_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/previews/pr-${{ github.event.pull_request.number }}/
+        with:
+          script: |
+            const marker = '<!-- orcaweb-pr-preview -->'
+            const body = `${marker}\n✅ GitHub Pages snapshot: ${process.env.PREVIEW_URL}\n\nAktualizowany po każdym pushu do tego PR-a.`
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            })
+            const existing = comments.find((comment) => comment.user.type === 'Bot' && comment.body.includes(marker))
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              })
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              })
+            }
+
+  cleanup:
+    if: >
+      github.event.action == 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout GitHub Pages branch
+        uses: actions/checkout@v7
+        with:
+          ref: gh-pages
+          path: pages
+          fetch-depth: 1
+
+      - name: Remove preview files
+        env:
+          PREVIEW_DIR: previews/pr-${{ github.event.pull_request.number }}
+        run: |
+          rm -rf "pages/$PREVIEW_DIR"
+          git -C pages config user.name "github-actions[bot]"
+          git -C pages config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C pages add -A
+          if ! git -C pages diff --cached --quiet; then
+            git -C pages commit -m "deploy(preview): remove PR #${{ github.event.pull_request.number }}"
+            git -C pages push
+          fi

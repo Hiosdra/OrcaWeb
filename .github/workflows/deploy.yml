@@ -401,10 +401,22 @@ jobs:
           # Prevent Jekyll processing
           touch gh-pages/.nojekyll
 
+      # PR snapshots live under previews/ on the same Pages branch. Preserve
+      # them before force_orphan replaces the branch with the production tree.
+      - name: Restore PR previews
+        uses: actions/checkout@v7
+        with:
+          ref: gh-pages
+          path: pages
+          fetch-depth: 1
+
+      - name: Combine production site and PR previews
+        run: cp -r gh-pages/. pages/
+
       # ── Deploy ───────────────────────────────────────────────────────
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./gh-pages
+          publish_dir: ./pages
           force_orphan: true
