@@ -214,6 +214,17 @@ jobs:
       # that only touches UI/docs never fails just because the WASM release has
       # not been created yet (e.g. immediately after a PR merge before the
       # build-wasm workflow has run).
+      #
+      # The multithreaded (MT) engine is downloaded the same way, from the
+      # sibling "-multithreaded" release family, and mirrored onto gh-pages
+      # right alongside the ST engine. GitHub Pages itself never runs MT (it
+      # can't send the COOP/COEP headers SharedArrayBuffer needs — see
+      # public/_headers), but its CORS-enabled hosting is what lets the
+      # Cloudflare mirror (which DOES send those headers) load slicer-mt.*
+      # cross-origin — plain GitHub Releases assets send neither CORS nor
+      # CORP, so they can't be read cross-origin directly (verified live).
+      # MT is best-effort throughout: a missing/failed MT release must never
+      # fail this deploy, since ST-only is always a valid, working state.
       - name: Download WASM artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -259,22 +270,82 @@ jobs:
             # $ORCA_VERSION, which may not match whatever was actually restored.
             echo "ENGINE_LABEL=${ORCA_VERSION} (restored, unverified)" >> "$GITHUB_ENV"
           fi
+
+          # Same resolution against the "-multithreaded" release family.
+          # Independent from the ST lookup above — a missing/failed MT
+          # release never blocks or falls back onto the ST download.
+          # Same numeric-suffix guard as the ST WASM_TAG select above: only
+          # accept a purely numeric patch number before "-multithreaded", so a
+          # malformed tag (e.g. "-patchX-multithreaded") is skipped instead of
+          # crashing tonumber and, under set -e, killing this step.
+          MT_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq "
+            [.[] | .tagName | select(. == \"${BASE_TAG}-multithreaded\" or (startswith(\"${BASE_TAG}-patch\") and endswith(\"-multithreaded\") and (ltrimstr(\"${BASE_TAG}-patch\") | rtrimstr(\"-multithreaded\") | test(\"^[0-9]+\$\"))))]
+            | sort_by(
+                if . == \"${BASE_TAG}-multithreaded\" then 0
+                else (ltrimstr(\"${BASE_TAG}-patch\") | rtrimstr(\"-multithreaded\") | tonumber)
+                end
+              )
+            | last // empty
+          ")
+          if [ -n "$MT_TAG" ]; then
+            # Best-effort: a transient/partial MT download must NOT fail the
+            # deploy (ST-only is a valid state), so swallow a non-zero exit and
+            # fall through to the gh-pages restore below instead of letting
+            # set -e kill the step. Clear any partial slicer-mt.* first so a
+            # half-written file can't reach the cache-key hash / smoke test.
+            if ! gh release download "$MT_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --pattern "slicer-mt.*" \
+                --dir public/wasm; then
+              echo "::warning::MT download from $MT_TAG failed — falling back to gh-pages restore"
+              rm -f public/wasm/slicer-mt.js public/wasm/slicer-mt.wasm
+              MT_TAG=""
+            else
+              echo "Downloaded MT WASM from release $MT_TAG"
+            fi
+          fi
+          if [ -z "$MT_TAG" ]; then
+            echo "::warning::No -multithreaded release found for $ORCA_VERSION — trying to restore slicer-mt.* from previous gh-pages deploy"
+            git fetch origin gh-pages 2>/dev/null || true
+            for f in slicer-mt.js slicer-mt.wasm; do
+              git show "origin/gh-pages:app/wasm/$f" > "public/wasm/$f" 2>/dev/null \
+                && echo "  restored $f from gh-pages" \
+                || echo "::warning::  $f not found in gh-pages either — Cloudflare mirror will fall back to the ST engine (slicer.worker.ts probe)"
+            done
+          fi
+
+          # A failed `git show ... > file` above (redirect opens the file
+          # before the command runs and fails) leaves a 0-byte file behind
+          # rather than no file at all — strip those so downstream steps
+          # (cache-key hashing, smoke-testing) see a clean "not present"
+          # rather than a corrupt zero-length engine binary.
+          find public/wasm -maxdepth 1 -name 'slicer*' -size 0 -delete 2>/dev/null || true
           ls -lh public/wasm/ || true
 
       # ── Derive a cache-busting key for the WASM engine ────────────────
-      # Hashing the actual downloaded slicer.wasm bytes (rather than reusing
-      # $WASM_TAG or the app's package.json version) means the frontend's
-      # ?v=<key> query param — and therefore whether the PWA CacheFirst cache
-      # and the CDN edge treat it as a new URL — always tracks the engine
-      # binary that's actually being shipped, in both the release-download and
-      # the gh-pages-restore fallback path above. This is what closes the bug
-      # where a bridge/API change (395d3fe) landed on master, published a new
-      # WASM release, but package.json's version didn't change — so the old
-      # ?v=<app-version> query stayed identical and browsers/CDN kept serving
-      # the stale, ABI-mismatched engine indefinitely.
+      # Hashing the actual downloaded slicer.wasm (+ slicer-mt.wasm, when
+      # present) bytes — rather than reusing $WASM_TAG or the app's
+      # package.json version — means the frontend's ?v=<key> query param —
+      # and therefore whether the PWA CacheFirst cache and the CDN edge treat
+      # it as a new URL — always tracks the engine binaries actually being
+      # shipped, in both the release-download and the gh-pages-restore
+      # fallback path above. This is what closes the bug where a bridge/API
+      # change (395d3fe) landed on master, published a new WASM release, but
+      # package.json's version didn't change — so the old ?v=<app-version>
+      # query stayed identical and browsers/CDN kept serving the stale,
+      # ABI-mismatched engine indefinitely. ST and MT share one key rather
+      # than each getting its own: they ship from the same source commit /
+      # patch family (see build-wasm.yml), so a change to either warrants a
+      # fresh cache entry for both rather than tracking two keys through the
+      # rest of the pipeline (vite.config.ts, slicer.worker.ts) for no real
+      # benefit.
       - name: Compute WASM cache-busting key
         run: |
-          WASM_VERSION=$(sha256sum public/wasm/slicer.wasm | cut -c1-16)
+          if [ -f public/wasm/slicer-mt.wasm ]; then
+            WASM_VERSION=$(cat public/wasm/slicer.wasm public/wasm/slicer-mt.wasm | sha256sum | cut -c1-16)
+          else
+            WASM_VERSION=$(sha256sum public/wasm/slicer.wasm | cut -c1-16)
+          fi
           echo "WASM_VERSION=$WASM_VERSION" >> "$GITHUB_ENV"
           echo "Using WASM cache key: $WASM_VERSION"
           # Engine manifest, deployed next to the wasm files (public/ flows

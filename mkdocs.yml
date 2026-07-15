@@ -51,6 +51,7 @@ nav:
   - Building WASM: wasm-build.md
   - OrcaSlicer Patch Audit: orca-patch-audit.md
   - 'Benchmark: G-code Compression': gcode-compression-benchmark.md
+  - 'Benchmark: ST vs MT Engine': st-mt-benchmark.md
   - Architecture Decisions:
     - Overview: adr/index.md
     - 'ADR-001: Client-Side WASM': adr/adr-001-client-side-wasm.md
@@ -62,6 +63,8 @@ nav:
     - 'ADR-007: Sequential TBB Stubs': adr/adr-007-tbb-stubs.md
     - 'ADR-008: Session-Scoped Engine State': adr/adr-008-session-handle.md
     - 'ADR-009: WASM Build Smoke Test': adr/adr-009-wasm-smoke-test.md
+    - 'ADR-010: E2E UI Smoke Test': adr/adr-010-e2e-smoke-test.md
+    - 'ADR-011: Multithreaded Engine': adr/adr-011-multithreaded-engine.md
 
 markdown_extensions:
   - admonition

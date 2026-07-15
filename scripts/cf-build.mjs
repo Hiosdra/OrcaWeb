@@ -2,13 +2,19 @@
 /**
  * Vite build wrapper for Cloudflare Workers (static assets) deploys.
  *
- * Cloudflare cannot host the engine binary itself: slicer.wasm is ~36 MB and
- * Workers/Pages static assets are capped at 25 MiB per file. GitHub Pages —
- * the primary deployment, refreshed by deploy.yml on every master push —
- * already serves the exact engine bytes with `Access-Control-Allow-Origin: *`
- * and `Content-Type: application/wasm` (verified live; compileStreaming
- * works). So the Cloudflare build points VITE_WASM_BASE_URL at the GitHub
- * Pages copy instead of bundling the engine, and ships only the app shell.
+ * Cloudflare cannot host the engine binaries itself: both slicer.wasm (~36 MB
+ * ST) and slicer-mt.wasm (~36 MB MT) exceed Workers/Pages' 25 MiB per-file
+ * static asset cap. GitHub Pages — the primary deployment, refreshed by
+ * deploy.yml on every master push — already serves both variants with
+ * `Access-Control-Allow-Origin: *` and `Content-Type: application/wasm`
+ * (verified live; compileStreaming works, and the CORS header is what lets a
+ * COEP-isolated Cloudflare page read the bytes cross-origin at all — plain
+ * GitHub Releases assets send neither CORS nor CORP). So the Cloudflare build
+ * points VITE_WASM_BASE_URL at the GitHub Pages copy instead of bundling
+ * either engine, and ships only the app shell; `public/_headers` makes the
+ * Cloudflare page cross-origin-isolated so the worker's runtime probe
+ * (slicer.worker.ts) can select the MT engine there, while GitHub Pages
+ * itself stays ST-only (it cannot send the COOP/COEP headers MT needs).
  *
  * The cache-busting key (VITE_WASM_VERSION) and header label
  * (VITE_ORCA_VERSION) come from the engine-version.json manifest that
@@ -95,6 +101,6 @@ if (result.status !== 0) {
 // cross-origin from GitHub Pages. Without this, a local `wrangler deploy`
 // run against such a checkout would ship slicer.wasm (~36 MB) and blow past
 // Cloudflare's 25 MiB per-asset limit.
-for (const name of ['slicer.js', 'slicer.wasm', 'slicer.data', 'slicer.cjs', '.wasm-release-tag', 'engine-version.json']) {
+for (const name of ['slicer.js', 'slicer.wasm', 'slicer.data', 'slicer.cjs', 'slicer-mt.js', 'slicer-mt.wasm', '.wasm-release-tag', 'engine-version.json']) {
   rmSync(new URL(`../dist/wasm/${name}`, import.meta.url), { force: true })
 }

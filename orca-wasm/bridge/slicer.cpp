@@ -47,6 +47,9 @@
 #include <emscripten.h>
 
 // OrcaSlicer core
+// (note: an earlier attempt to cap oneTBB via tbb::global_control lived here;
+// it deadlocked — see wasm/CMakeLists.txt's PTHREAD_POOL_SIZE comment and
+// orca-wasm/MT-PLAN.md. The pool is sized to hardware_concurrency instead.)
 #include "libslic3r/libslic3r.h"
 #include "libslic3r/Model.hpp"
 #include "libslic3r/ModelArrange.hpp"
@@ -676,7 +679,16 @@ int orc_slice_multi(
 
         Slic3r::ArrangeParams params;
         params.min_obj_distance = static_cast<coord_t>(2.0 * 1e6); // 2 mm gap
+        // See orca-wasm/MT-PLAN.md / bridge/CMakeLists.txt's SLIC3R_WASM_MT
+        // option — the only threading-aware line in the entire bridge.
+        // Everything else runs in parallel automatically via real oneTBB
+        // (built from source in CI) once that option is set; the sequential
+        // build (default) is unaffected.
+#ifdef SLIC3R_WASM_MT
+        params.parallel         = true;
+#else
         params.parallel         = false; // WASM is single-threaded
+#endif
 
         // Objects that don't fit land at bed centre instead of throwing
         Slic3r::arrange_objects(model, bed, params,

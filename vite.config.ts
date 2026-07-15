@@ -49,27 +49,31 @@ export default defineConfig({
         navigateFallback: 'index.html',
         runtimeCaching: [
           {
-            // slicer.js + slicer.wasm — CacheFirst so SW installs without
-            // downloading the full engine bundle (~9 MB) upfront; both files
-            // are cached on first use and stay version-matched in the same
-            // cache entry, sharing the same 30-day TTL. Both are fetched with
-            // a ?v=<wasm-version> cache-busting query param (slicer.worker.ts,
-            // __WASM_VERSION__) so a new engine build's URL is a fresh cache
-            // entry rather than CacheFirst indefinitely reusing a stale
-            // pre-release binary — match the optional query string here too.
-            urlPattern: /\/wasm\/slicer\.(js|wasm)(\?.*)?$/,
+            // slicer.(js|wasm) (ST) + slicer-mt.(js|wasm) (MT, real oneTBB —
+            // see orca-wasm/MT-PLAN.md) — CacheFirst so SW installs without
+            // downloading the full engine bundle upfront; each variant's pair
+            // is cached on first use and stays version-matched, sharing the
+            // same 30-day TTL. Both are fetched with a ?v=<wasm-version>
+            // cache-busting query param (slicer.worker.ts, __WASM_VERSION__)
+            // so a new engine build's URL is a fresh cache entry rather than
+            // CacheFirst indefinitely reusing a stale pre-release binary —
+            // match the optional query string here too.
+            urlPattern: /\/wasm\/slicer(-mt)?\.(js|wasm)(\?.*)?$/,
             handler: 'CacheFirst',
             options: {
               cacheName: 'wasm-assets',
-              expiration: { maxEntries: 2, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              expiration: { maxEntries: 4, maxAgeSeconds: 60 * 60 * 24 * 30 },
               cacheableResponse: { statuses: [200] },
             },
           },
           {
             // Same engine files fetched CROSS-origin — the Cloudflare mirror
             // deploy loads them from GitHub Pages (scripts/cf-build.mjs sets
-            // VITE_WASM_BASE_URL; slicer.wasm exceeds Cloudflare's 25 MiB
-            // per-asset limit so it can't be served same-origin there).
+            // VITE_WASM_BASE_URL; both slicer.wasm and slicer-mt.wasm exceed
+            // Cloudflare's 25 MiB per-asset limit so neither can be served
+            // same-origin there). The Cloudflare mirror sends COOP/COEP
+            // (public/_headers), so it's the one host that actually fetches
+            // slicer-mt.* at runtime (slicer.worker.ts's canUseThreads probe).
             // A separate, origin-anchored pattern is required: Workbox only
             // applies RegExp routes to cross-origin requests when the match
             // starts at the first character of the URL, so the same-origin
@@ -78,11 +82,11 @@ export default defineConfig({
             // was added). Without it every cold visit on the mirror
             // re-downloads the ~36 MB binary (GitHub Pages caps HTTP caching
             // at max-age=600).
-            urlPattern: /^https:\/\/[^/]+\.github\.io\/.*\/wasm\/slicer\.(js|wasm)(\?.*)?$/,
+            urlPattern: /^https:\/\/[^/]+\.github\.io\/.*\/wasm\/slicer(-mt)?\.(js|wasm)(\?.*)?$/,
             handler: 'CacheFirst',
             options: {
               cacheName: 'wasm-assets',
-              expiration: { maxEntries: 2, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              expiration: { maxEntries: 4, maxAgeSeconds: 60 * 60 * 24 * 30 },
               cacheableResponse: { statuses: [200] },
             },
           },

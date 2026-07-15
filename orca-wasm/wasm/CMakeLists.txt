@@ -1,10 +1,23 @@
 # Final Emscripten WASM module target.
-# Links libslic3r + our bridge and emits slicer.js / slicer.wasm / slicer.data.
+# Links libslic3r + our bridge and emits <output name>.js / .wasm / .data.
 
 # Emscripten requires an "executable" target even though the output is a .js module.
 add_executable(slicer "${CMAKE_CURRENT_SOURCE_DIR}/empty_main.cpp")
 
 target_link_libraries(slicer PRIVATE orca_web_bridge)
+
+# Output filename stem — "slicer" for the default sequential build,
+# "slicer-mt" for the multithreaded variant (see orca-wasm/MT-PLAN.md
+# Phase 2), so both can be published/deployed side by side and
+# src/lib/wasm-loader.ts can pick one at runtime without either
+# overwriting the other in public/wasm/.
+if(NOT DEFINED ORCA_WEB_WASM_OUTPUT_NAME)
+  if(SLIC3R_WASM_MT)
+    set(ORCA_WEB_WASM_OUTPUT_NAME "slicer-mt")
+  else()
+    set(ORCA_WEB_WASM_OUTPUT_NAME "slicer")
+  endif()
+endif()
 
 # ── Emscripten link flags ────────────────────────────────────────────────────
 target_link_options(slicer PRIVATE
@@ -25,6 +38,35 @@ target_link_options(slicer PRIVATE
   -sMODULARIZE=1
   -sEXPORT_NAME=OrcaModule
   -sDISABLE_EXCEPTION_CATCHING=0
+  $<$<BOOL:${SLIC3R_WASM_MT}>:-pthread>
+  $<$<BOOL:${SLIC3R_WASM_MT}>:-sUSE_PTHREADS=1>
+  # Pre-spawns the pthread worker pool at module load instead of creating
+  # Web Workers lazily on first pthread_create() — required because the
+  # slicer's calling thread never yields to the JS event loop while blocked
+  # inside print.process() (see poc/wasm-threads/'s own README/
+  # INTEGRATION-NOTES.md and orca-wasm/MT-PLAN.md: without this, a
+  # lazily-created pthread worker never actually materializes and any
+  # blocking join/condvar wait on it hangs forever).
+  #
+  # Sized to the visitor's own core count (+headroom) so it always covers
+  # oneTBB's thread demand, which is hardware_concurrency (≈ core count) and
+  # can't be reliably bounded any other way: on the first parallel_for oneTBB
+  # eagerly pthread_create()s ~hardware_concurrency workers, and if that
+  # exceeds the pool the on-demand grow-the-pool path deadlocks a blocked
+  # caller. A fixed 8 was the original bug (desktop TBB wanted ~15). Capping
+  # TBB instead — tried via tbb::global_control(max_allowed_parallelism, 8) —
+  # made it WORSE: that starved oneTBB's nested parallelism and deadlocked
+  # even with a huge pool (verified on a 16-core machine; a pool-bumped,
+  # uncapped engine sliced fine at the same pool size). So: no TBB cap, and
+  # let the pool track the machine. `navigator.hardwareConcurrency` is
+  # evaluated at load in web/worker/node(22); +4 covers incidental non-TBB
+  # threads.
+  $<$<BOOL:${SLIC3R_WASM_MT}>:-sPTHREAD_POOL_SIZE=navigator.hardwareConcurrency+4>
+  # Turn any residual pool exhaustion into a loud, immediate abort (surfaced
+  # via onAbort → WASM_ERROR → the app falls back to reload) instead of the
+  # silent on-demand-Worker deadlock. With the pool tracking the machine this
+  # should never fire; a fast, debuggable failure still beats a UI hang.
+  $<$<BOOL:${SLIC3R_WASM_MT}>:-sPTHREAD_POOL_SIZE_STRICT=2>
   # EMULATE_FUNCTION_POINTER_CASTS + a raised max-func-params was tried here
   # to fix a real crash (slicing the official Voron Design Cube v7 STL traps
   # with "memory access out of bounds"), on the initial hypothesis that it
@@ -77,9 +119,9 @@ target_link_options(slicer PRIVATE
 ]"
 )
 
-# Rename Emscripten output to slicer.js/.wasm/.data
+# Rename Emscripten output to <ORCA_WEB_WASM_OUTPUT_NAME>.js/.wasm/.data
 set_target_properties(slicer PROPERTIES
-  OUTPUT_NAME slicer
+  OUTPUT_NAME "${ORCA_WEB_WASM_OUTPUT_NAME}"
   SUFFIX ".js"
 )
 
@@ -88,11 +130,11 @@ add_custom_command(TARGET slicer POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory
     "${CMAKE_CURRENT_SOURCE_DIR}/../../public/wasm"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    "${CMAKE_CURRENT_BINARY_DIR}/slicer.js"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../public/wasm/slicer.js"
+    "${CMAKE_CURRENT_BINARY_DIR}/${ORCA_WEB_WASM_OUTPUT_NAME}.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../public/wasm/${ORCA_WEB_WASM_OUTPUT_NAME}.js"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    "${CMAKE_CURRENT_BINARY_DIR}/slicer.wasm"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../public/wasm/slicer.wasm"
-  # No slicer.data: the engine is built without --preload-file.
+    "${CMAKE_CURRENT_BINARY_DIR}/${ORCA_WEB_WASM_OUTPUT_NAME}.wasm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../public/wasm/${ORCA_WEB_WASM_OUTPUT_NAME}.wasm"
+  # No .data output: the engine is built without --preload-file.
   COMMENT "Copying WASM artifacts to public/wasm/"
 )
