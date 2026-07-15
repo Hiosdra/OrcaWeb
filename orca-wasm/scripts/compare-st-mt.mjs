@@ -24,7 +24,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
-  icosphere, trianglesToStl, loadModule, writeBytes, decodeError,
+  trianglesToStl, sphereStl, loadModule, writeBytes, decodeError,
   initSession, sliceOnce, sliceMultiOnce,
 } from './lib/engine-harness.mjs'
 
@@ -42,16 +42,7 @@ function parseArgs(argv) {
 // ── test meshes ──────────────────────────────────────────────────────────────
 // A fixed set of STLs (small cube, a >100k-triangle organic mesh, a
 // multi-object plate through orc_slice_multi) — see orca-wasm/MT-PLAN.md.
-// icosphere()/trianglesToStl() live in ./lib/engine-harness.mjs; the
-// mesh builders below (sphereStl/cubeStl) wrap them.
-function sphereStl(subdivisions, radiusMm) {
-  const { verts, faces } = icosphere(subdivisions)
-  const scaled = verts.map(([x, y, z]) => {
-    const len = Math.sqrt(x * x + y * y + z * z) || 1
-    return [(x / len) * radiusMm, (y / len) * radiusMm, (z / len) * radiusMm + radiusMm]
-  })
-  return trianglesToStl(scaled, faces)
-}
+// sphereStl()/trianglesToStl() live in ./lib/engine-harness.mjs.
 
 function cubeStl(sizeMm) {
   const s = sizeMm

@@ -48,16 +48,25 @@ export function icosphere(subdivisions) {
     faces = nextFaces
   }
 
-  // Normalize to unit sphere, scale to a 10mm-radius solid, lift so min z = 0
-  // (matches how the real bridge expects/centers a model — see orc_slice's
-  // center_object_xy_only() call, which handles X/Y but leaves Z as-is).
-  const radius = 10
-  verts = verts.map(([x, y, z]) => {
-    const len = Math.sqrt(x * x + y * y + z * z) || 1
-    return [(x / len) * radius, (y / len) * radius, (z / len) * radius + radius]
-  })
-
+  // Returns the RAW subdivided icosahedron (verts on a ~unit-ish icosahedron,
+  // NOT normalized to a sphere). Callers that want a printable sphere use
+  // sphereStl(), which projects onto a sphere of a given radius and lifts it
+  // onto the bed — do NOT re-normalize the output of this function.
   return { verts, faces }
+}
+
+// A printable sphere STL: projects the raw icosphere onto a sphere of the
+// given radius and lifts it so min z = 0 (matches how the bridge centers a
+// model — see orc_slice's center_object_xy_only(), which handles X/Y but
+// leaves Z as-is). Both smoke-test.mjs (radius 10) and compare-st-mt.mjs
+// (radius 15) build their sphere meshes through here.
+export function sphereStl(subdivisions, radiusMm) {
+  const { verts, faces } = icosphere(subdivisions)
+  const scaled = verts.map(([x, y, z]) => {
+    const len = Math.sqrt(x * x + y * y + z * z) || 1
+    return [(x / len) * radiusMm, (y / len) * radiusMm, (z / len) * radiusMm + radiusMm]
+  })
+  return trianglesToStl(scaled, faces)
 }
 
 export function trianglesToStl(verts, faces) {

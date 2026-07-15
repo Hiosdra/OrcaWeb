@@ -42,7 +42,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
-  icosphere, trianglesToStl, loadModule, writeBytes, decodeError,
+  sphereStl, loadModule, writeBytes, decodeError,
   initSession, sliceOnce, sliceMultiOnce,
 } from './lib/engine-harness.mjs'
 
@@ -59,11 +59,11 @@ function parseArgs(argv) {
 }
 
 // ── synthetic torture-test mesh (subdivided icosphere) ───────────────────────
-// icosphere() / trianglesToStl() live in ./lib/engine-harness.mjs.
+// sphereStl() (and its icosphere/trianglesToStl building blocks) live in
+// ./lib/engine-harness.mjs.
 
 function generateTortureStl() {
-  const { verts, faces } = icosphere(4) // 20 * 4^4 = 5120 triangles
-  return trianglesToStl(verts, faces)
+  return sphereStl(4, 10) // 20 * 4^4 = 5120 triangles, 10mm-radius sphere
 }
 
 // ── engine harness ──────────────────────────────────────────────────────────
