@@ -3,68 +3,68 @@
 // orc_* bridge exports plus their error decoding.
 import type { OrcaModule } from '../types'
 
-export function sliceStl(
-  module: OrcaModule,
-  session: number,
-  stlData: Uint8Array,
-  configJson: string,
-): string {
-  const encoder = new TextEncoder()
-  const configBytes = encoder.encode(configJson)
+type Allocate = (size: number, label: string) => number
 
-  // Write config to WASM heap
-  const configPtr = module._malloc(configBytes.length)
-  module.HEAPU8.set(configBytes, configPtr)
-
-  const initResult = module._orc_init(session, configPtr, configBytes.length)
-  module._free(configPtr)
-
-  if (initResult !== 0) {
-    throw new OrcaSliceError(initResult, wasmError(module, session, initResult))
-  }
-
-  // Write STL data to WASM heap
-  const stlPtr = module._malloc(stlData.length)
-  module.HEAPU8.set(stlData, stlPtr)
-
-  const outPtrPtr = module._malloc(4)
-  const outLenPtr = module._malloc(4)
-
-  const sliceResult = module._orc_slice(session, stlPtr, stlData.length, outPtrPtr, outLenPtr)
-
-  module._free(stlPtr)
-
-  if (sliceResult !== 0) {
-    module._free(outPtrPtr)
-    module._free(outLenPtr)
-    throw new OrcaSliceError(sliceResult, wasmError(module, session, sliceResult))
-  }
-
-  const gcodePtr = module.getValue(outPtrPtr, 'i32')
-  const gcodeLen = module.getValue(outLenPtr, 'i32')
-  const gcode = module.UTF8ToString(gcodePtr, gcodeLen)
-
-  module._orc_free(gcodePtr)
-  module._free(outPtrPtr)
-  module._free(outLenPtr)
-
-  return gcode
+function checkedMalloc(module: OrcaModule, size: number, label: string): number {
+  const ptr = module._malloc(size)
+  if (ptr === 0 && size !== 0) throw new Error(`Out of memory allocating ${label} (${size} bytes)`)
+  return ptr
 }
 
-export function objToStl(module: OrcaModule, objData: Uint8Array): Uint8Array {
-  const objPtr = module._malloc(objData.length)
-  module.HEAPU8.set(objData, objPtr)
-
-  const outPtrPtr = module._malloc(4)
-  const outLenPtr = module._malloc(4)
-
+function withAllocations<T>(module: OrcaModule, operation: (allocate: Allocate) => T): T {
+  const pointers: number[] = []
+  const allocate: Allocate = (size, label) => {
+    const ptr = checkedMalloc(module, size, label)
+    if (ptr !== 0) pointers.push(ptr)
+    return ptr
+  }
   try {
-    const result = module._orc_obj_to_stl(objPtr, objData.length, outPtrPtr, outLenPtr)
-    if (result !== 0) {
-      // No session — orc_obj_to_stl never touches slicer config state.
-      throw new OrcaSliceError(result, wasmError(module, 0, result))
-    }
+    return operation(allocate)
+  } finally {
+    for (const ptr of pointers.reverse()) module._free(ptr)
+  }
+}
 
+function initSession(module: OrcaModule, session: number, configJson: string): void {
+  const configBytes = new TextEncoder().encode(configJson)
+  const result = withAllocations(module, (allocate) => {
+    const configPtr = allocate(configBytes.length, 'config')
+    module.HEAPU8.set(configBytes, configPtr)
+    return module._orc_init(session, configPtr, configBytes.length)
+  })
+  if (result !== 0) throw new OrcaSliceError(result, wasmError(module, session, result))
+}
+
+export function sliceStl(module: OrcaModule, session: number, stlData: Uint8Array, configJson: string): string {
+  initSession(module, session, configJson)
+  return withAllocations(module, (allocate) => {
+    const stlPtr = allocate(stlData.length, 'STL data')
+    module.HEAPU8.set(stlData, stlPtr)
+    const outPtrPtr = allocate(4, 'G-code output pointer')
+    const outLenPtr = allocate(4, 'G-code output length')
+    const result = module._orc_slice(session, stlPtr, stlData.length, outPtrPtr, outLenPtr)
+    if (result !== 0) throw new OrcaSliceError(result, wasmError(module, session, result))
+    const gcodePtr = module.getValue(outPtrPtr, 'i32')
+    const gcodeLen = module.getValue(outLenPtr, 'i32')
+    try {
+      return module.UTF8ToString(gcodePtr, gcodeLen)
+    } finally {
+      module._orc_free(gcodePtr)
+    }
+  })
+}
+
+function convertToStl(
+  module: OrcaModule, data: Uint8Array, label: string,
+  convert: (dataPtr: number, outPtrPtr: number, outLenPtr: number) => number,
+): Uint8Array {
+  return withAllocations(module, (allocate) => {
+    const dataPtr = allocate(data.length, label)
+    module.HEAPU8.set(data, dataPtr)
+    const outPtrPtr = allocate(4, 'STL output pointer')
+    const outLenPtr = allocate(4, 'STL output length')
+    const result = convert(dataPtr, outPtrPtr, outLenPtr)
+    if (result !== 0) throw new OrcaSliceError(result, wasmError(module, 0, result))
     const stlPtr = module.getValue(outPtrPtr, 'i32')
     const stlLen = module.getValue(outLenPtr, 'i32')
     try {
@@ -72,106 +72,57 @@ export function objToStl(module: OrcaModule, objData: Uint8Array): Uint8Array {
     } finally {
       module._orc_free(stlPtr)
     }
-  } finally {
-    module._free(objPtr)
-    module._free(outPtrPtr)
-    module._free(outLenPtr)
-  }
+  })
+}
+
+export function objToStl(module: OrcaModule, objData: Uint8Array): Uint8Array {
+  return convertToStl(module, objData, 'OBJ data', (objPtr, outPtrPtr, outLenPtr) =>
+    module._orc_obj_to_stl(objPtr, objData.length, outPtrPtr, outLenPtr))
 }
 
 export function sliceMultiStl(
-  module: OrcaModule,
-  session: number,
-  data: Uint8Array,
-  offsets: Int32Array,
-  nFiles: number,
-  configJson: string,
-  // Optional per-object "extruder" override, one 1-based index per file
-  // (0 = inherit default). See orc_slice_multi in orca-wasm/bridge/slicer.cpp
-  // for exactly what this does (single-nozzle multi-material filament
-  // assignment) and does not do (it does not enable multi-nozzle machines).
-  extruderIds?: Int32Array,
+  module: OrcaModule, session: number, data: Uint8Array, offsets: Int32Array, nFiles: number,
+  configJson: string, extruderIds?: Int32Array,
 ): string {
-  const encoder = new TextEncoder()
-  const configBytes = encoder.encode(configJson)
+  initSession(module, session, configJson)
+  return withAllocations(module, (allocate) => {
+    const dataPtr = allocate(data.length, 'combined STL data')
+    module.HEAPU8.set(data, dataPtr)
+    const offsetsPtr = allocate(offsets.length * 4, 'STL offset table')
+    for (let i = 0; i < offsets.length; i++) module.setValue(offsetsPtr + i * 4, offsets[i], 'i32')
 
-  const configPtr = module._malloc(configBytes.length)
-  module.HEAPU8.set(configBytes, configPtr)
-  const initResult = module._orc_init(session, configPtr, configBytes.length)
-  module._free(configPtr)
-  if (initResult !== 0) throw new OrcaSliceError(initResult, wasmError(module, session, initResult))
-
-  const dataPtr = module._malloc(data.length)
-  module.HEAPU8.set(data, dataPtr)
-
-  // Write int32 offset pairs to WASM heap using setValue so endianness is always correct
-  const offsetsPtr = module._malloc(offsets.length * 4)
-  for (let i = 0; i < offsets.length; i++) {
-    module.setValue(offsetsPtr + i * 4, offsets[i], 'i32')
-  }
-
-  let extruderIdsPtr = 0
-  if (extruderIds && extruderIds.length > 0) {
-    extruderIdsPtr = module._malloc(extruderIds.length * 4)
-    for (let i = 0; i < extruderIds.length; i++) {
-      module.setValue(extruderIdsPtr + i * 4, extruderIds[i], 'i32')
+    const extruderIdsPtr = extruderIds?.length
+      ? allocate(extruderIds.length * 4, 'extruder ID table')
+      : 0
+    if (extruderIds) {
+      for (let i = 0; i < extruderIds.length; i++) module.setValue(extruderIdsPtr + i * 4, extruderIds[i], 'i32')
     }
-  }
 
-  const outPtrPtr = module._malloc(4)
-  const outLenPtr = module._malloc(4)
-
-  const result = module._orc_slice_multi(
-    session, dataPtr, data.length, offsetsPtr, nFiles, extruderIdsPtr, outPtrPtr, outLenPtr,
-  )
-  module._free(dataPtr)
-  module._free(offsetsPtr)
-  if (extruderIdsPtr) module._free(extruderIdsPtr)
-
-  if (result !== 0) {
-    module._free(outPtrPtr)
-    module._free(outLenPtr)
-    throw new OrcaSliceError(result, wasmError(module, session, result))
-  }
-
-  const gcodePtr = module.getValue(outPtrPtr, 'i32')
-  const gcodeLen = module.getValue(outLenPtr, 'i32')
-  const gcode = module.UTF8ToString(gcodePtr, gcodeLen)
-
-  module._orc_free(gcodePtr)
-  module._free(outPtrPtr)
-  module._free(outLenPtr)
-
-  return gcode
+    const outPtrPtr = allocate(4, 'G-code output pointer')
+    const outLenPtr = allocate(4, 'G-code output length')
+    const result = module._orc_slice_multi(
+      session, dataPtr, data.length, offsetsPtr, nFiles, extruderIdsPtr, outPtrPtr, outLenPtr,
+    )
+    if (result !== 0) throw new OrcaSliceError(result, wasmError(module, session, result))
+    const gcodePtr = module.getValue(outPtrPtr, 'i32')
+    const gcodeLen = module.getValue(outLenPtr, 'i32')
+    try {
+      return module.UTF8ToString(gcodePtr, gcodeLen)
+    } finally {
+      module._orc_free(gcodePtr)
+    }
+  })
 }
 
-export function write3mf(
-  module: OrcaModule,
-  session: number,
-  stlData: Uint8Array,
-  configJson: string,
-): Uint8Array {
-  const encoder = new TextEncoder()
-  const configBytes = encoder.encode(configJson)
-
-  const configPtr = module._malloc(configBytes.length)
-  module.HEAPU8.set(configBytes, configPtr)
-  const initResult = module._orc_init(session, configPtr, configBytes.length)
-  module._free(configPtr)
-  if (initResult !== 0) throw new OrcaSliceError(initResult, wasmError(module, session, initResult))
-
-  const stlPtr = module._malloc(stlData.length)
-  module.HEAPU8.set(stlData, stlPtr)
-
-  const outPtrPtr = module._malloc(4)
-  const outLenPtr = module._malloc(4)
-
-  try {
+export function write3mf(module: OrcaModule, session: number, stlData: Uint8Array, configJson: string): Uint8Array {
+  initSession(module, session, configJson)
+  return withAllocations(module, (allocate) => {
+    const stlPtr = allocate(stlData.length, 'STL data')
+    module.HEAPU8.set(stlData, stlPtr)
+    const outPtrPtr = allocate(4, '3MF output pointer')
+    const outLenPtr = allocate(4, '3MF output length')
     const result = module._orc_write_3mf(session, stlPtr, stlData.length, outPtrPtr, outLenPtr)
-    if (result !== 0) {
-      throw new OrcaSliceError(result, wasmError(module, session, result))
-    }
-
+    if (result !== 0) throw new OrcaSliceError(result, wasmError(module, session, result))
     const dataPtr = module.getValue(outPtrPtr, 'i32')
     const dataLen = module.getValue(outLenPtr, 'i32')
     try {
@@ -179,103 +130,47 @@ export function write3mf(
     } finally {
       module._orc_free(dataPtr)
     }
-  } finally {
-    module._free(stlPtr)
-    module._free(outPtrPtr)
-    module._free(outLenPtr)
-  }
+  })
 }
 
-export interface Read3mfResult {
-  stl: Uint8Array
-  configJson: string
-}
+export interface Read3mfResult { stl: Uint8Array; configJson: string }
 
-// No session — orc_read_3mf is a pure format conversion, like objToStl/cadToStl.
 export function read3mf(module: OrcaModule, mfData: Uint8Array): Read3mfResult {
-  const mfPtr = module._malloc(mfData.length)
-  module.HEAPU8.set(mfData, mfPtr)
-
-  const outStlPtrPtr = module._malloc(4)
-  const outStlLenPtr = module._malloc(4)
-  const outConfigPtrPtr = module._malloc(4)
-  const outConfigLenPtr = module._malloc(4)
-
-  try {
-    const result = module._orc_read_3mf(
-      mfPtr, mfData.length, outStlPtrPtr, outStlLenPtr, outConfigPtrPtr, outConfigLenPtr,
-    )
-    if (result !== 0) {
-      throw new OrcaSliceError(result, wasmError(module, 0, result))
-    }
-
+  return withAllocations(module, (allocate) => {
+    const mfPtr = allocate(mfData.length, '3MF data')
+    module.HEAPU8.set(mfData, mfPtr)
+    const outStlPtrPtr = allocate(4, 'STL output pointer')
+    const outStlLenPtr = allocate(4, 'STL output length')
+    const outConfigPtrPtr = allocate(4, 'config output pointer')
+    const outConfigLenPtr = allocate(4, 'config output length')
+    const result = module._orc_read_3mf(mfPtr, mfData.length, outStlPtrPtr, outStlLenPtr, outConfigPtrPtr, outConfigLenPtr)
+    if (result !== 0) throw new OrcaSliceError(result, wasmError(module, 0, result))
     const stlPtr = module.getValue(outStlPtrPtr, 'i32')
     const stlLen = module.getValue(outStlLenPtr, 'i32')
     const configPtr = module.getValue(outConfigPtrPtr, 'i32')
     const configLen = module.getValue(outConfigLenPtr, 'i32')
     try {
-      return {
-        stl: module.HEAPU8.slice(stlPtr, stlPtr + stlLen),
-        configJson: module.UTF8ToString(configPtr, configLen),
-      }
+      return { stl: module.HEAPU8.slice(stlPtr, stlPtr + stlLen), configJson: module.UTF8ToString(configPtr, configLen) }
     } finally {
       module._orc_free(stlPtr)
       module._orc_free(configPtr)
     }
-  } finally {
-    module._free(mfPtr)
-    module._free(outStlPtrPtr)
-    module._free(outStlLenPtr)
-    module._free(outConfigPtrPtr)
-    module._free(outConfigLenPtr)
-  }
+  })
 }
 
 export function cadToStl(module: OrcaModule, cadData: Uint8Array): Uint8Array {
-  if (cadData.length === 0) {
-    throw new Error('CAD data is empty')
-  }
-
-  const cadPtr = module._malloc(cadData.length)
-  module.HEAPU8.set(cadData, cadPtr)
-
-  const outPtrPtr = module._malloc(4)
-  const outLenPtr = module._malloc(4)
-
-  try {
-    const result = module._orc_cad_to_stl(cadPtr, cadData.length, outPtrPtr, outLenPtr)
-    if (result !== 0) {
-      // No session — orc_cad_to_stl never touches slicer config state.
-      throw new OrcaSliceError(result, wasmError(module, 0, result))
-    }
-
-    const stlPtr = module.getValue(outPtrPtr, 'i32')
-    const stlLen = module.getValue(outLenPtr, 'i32')
-    try {
-      return module.HEAPU8.slice(stlPtr, stlPtr + stlLen)
-    } finally {
-      module._orc_free(stlPtr)
-    }
-  } finally {
-    module._free(cadPtr)
-    module._free(outPtrPtr)
-    module._free(outLenPtr)
-  }
+  if (cadData.length === 0) throw new Error('CAD data is empty')
+  return convertToStl(module, cadData, 'CAD data', (cadPtr, outPtrPtr, outLenPtr) =>
+    module._orc_cad_to_stl(cadPtr, cadData.length, outPtrPtr, outLenPtr))
 }
 
 export class OrcaSliceError extends Error {
-  constructor(
-    public readonly code: number,
-    message: string,
-  ) {
+  constructor(public readonly code: number, message: string) {
     super(message)
     this.name = 'OrcaSliceError'
   }
 }
 
-// Read the last error string stored by the C++ bridge via orc_decode_exception.
-// Falls back to a code-based description when the C string is empty.
-// Pass the session used for the failing call, or 0 for orc_obj_to_stl/orc_cad_to_stl.
 function wasmError(module: OrcaModule, session: number, code: number): string {
   try {
     const ptr = module._orc_decode_exception(session)
@@ -284,7 +179,6 @@ function wasmError(module: OrcaModule, session: number, code: number): string {
       if (msg) return msg
     }
   } catch { /* fall through to code-based fallback */ }
-  // Matches the error codes documented in orca-wasm/bridge/slicer.cpp
   switch (code) {
     case -1: return 'Invalid or uninitialized state'
     case -2: return 'Config JSON parse failure'

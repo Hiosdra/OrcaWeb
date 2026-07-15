@@ -152,9 +152,19 @@ export async function loadModule(wasmDir, engine) {
 // wasm-loader.ts is TypeScript.
 
 export function writeBytes(module, bytes) {
-  const ptr = module._malloc(bytes.length)
+  const ptr = checkedMalloc(module, bytes.length, 'input data')
   module.HEAPU8.set(bytes, ptr)
   return ptr
+}
+
+export function checkedMalloc(module, size, label) {
+  const ptr = module._malloc(size)
+  if (ptr === 0 && size !== 0) throw new Error(`Out of memory allocating ${label} (${size} bytes)`)
+  return ptr
+}
+
+export function free(module, ptr) {
+  if (ptr !== 0) module._free(ptr)
 }
 
 export function decodeError(module, session) {
@@ -170,29 +180,25 @@ export function initSession(module, session, configJson) {
   const configBytes = new TextEncoder().encode(configJson)
   const configPtr = writeBytes(module, configBytes)
   const rc = module._orc_init(session, configPtr, configBytes.length)
-  module._free(configPtr)
+  free(module, configPtr)
   if (rc !== 0) throw new Error(`orc_init failed (${rc}): ${decodeError(module, session)}`)
 }
 
 export function sliceOnce(module, session, stlBytes) {
   const stlPtr = writeBytes(module, stlBytes)
-  const outPtrPtr = module._malloc(4)
-  const outLenPtr = module._malloc(4)
-  const rc = module._orc_slice(session, stlPtr, stlBytes.length, outPtrPtr, outLenPtr)
-  module._free(stlPtr)
-  if (rc !== 0) {
-    const msg = decodeError(module, session)
-    module._free(outPtrPtr)
-    module._free(outLenPtr)
-    throw new Error(`orc_slice failed (${rc}): ${msg}`)
-  }
-  const gcodePtr = module.getValue(outPtrPtr, 'i32')
-  const gcodeLen = module.getValue(outLenPtr, 'i32')
-  const gcode = module.UTF8ToString(gcodePtr, gcodeLen)
-  module._orc_free(gcodePtr)
-  module._free(outPtrPtr)
-  module._free(outLenPtr)
-  return gcode
+  try {
+    const outPtrPtr = checkedMalloc(module, 4, 'G-code output pointer')
+    try {
+      const outLenPtr = checkedMalloc(module, 4, 'G-code output length')
+      try {
+        const rc = module._orc_slice(session, stlPtr, stlBytes.length, outPtrPtr, outLenPtr)
+        if (rc !== 0) throw new Error(`orc_slice failed (${rc}): ${decodeError(module, session)}`)
+        const gcodePtr = module.getValue(outPtrPtr, 'i32')
+        const gcodeLen = module.getValue(outLenPtr, 'i32')
+        try { return module.UTF8ToString(gcodePtr, gcodeLen) } finally { module._orc_free(gcodePtr) }
+      } finally { module._free(outLenPtr) }
+    } finally { module._free(outPtrPtr) }
+  } finally { free(module, stlPtr) }
 }
 
 export function sliceMultiOnce(module, session, stlBytesArr, extruderIds) {
@@ -207,34 +213,24 @@ export function sliceMultiOnce(module, session, stlBytesArr, extruderIds) {
     pos += stlBytesArr[i].length
   }
   const dataPtr = writeBytes(module, combined)
-  const offsetsPtr = module._malloc(offsets.length * 4)
-  for (let i = 0; i < offsets.length; i++) module.setValue(offsetsPtr + i * 4, offsets[i], 'i32')
-
-  let extruderIdsPtr = 0
-  if (extruderIds) {
-    extruderIdsPtr = module._malloc(extruderIds.length * 4)
-    for (let i = 0; i < extruderIds.length; i++) module.setValue(extruderIdsPtr + i * 4, extruderIds[i], 'i32')
-  }
-
-  const outPtrPtr = module._malloc(4)
-  const outLenPtr = module._malloc(4)
-  const rc = module._orc_slice_multi(
-    session, dataPtr, combined.length, offsetsPtr, stlBytesArr.length, extruderIdsPtr, outPtrPtr, outLenPtr,
-  )
-  module._free(dataPtr)
-  module._free(offsetsPtr)
-  if (extruderIdsPtr) module._free(extruderIdsPtr)
-  if (rc !== 0) {
-    const msg = decodeError(module, session)
-    module._free(outPtrPtr)
-    module._free(outLenPtr)
-    throw new Error(`orc_slice_multi failed (${rc}): ${msg}`)
-  }
-  const gcodePtr = module.getValue(outPtrPtr, 'i32')
-  const gcodeLen = module.getValue(outLenPtr, 'i32')
-  const gcode = module.UTF8ToString(gcodePtr, gcodeLen)
-  module._orc_free(gcodePtr)
-  module._free(outPtrPtr)
-  module._free(outLenPtr)
-  return gcode
+  try {
+    const offsetsPtr = checkedMalloc(module, offsets.length * 4, 'STL offset table')
+    try {
+      for (let i = 0; i < offsets.length; i++) module.setValue(offsetsPtr + i * 4, offsets[i], 'i32')
+      const extruderIdsPtr = extruderIds?.length ? checkedMalloc(module, extruderIds.length * 4, 'extruder ID table') : 0
+      try {
+        if (extruderIdsPtr) for (let i = 0; i < extruderIds.length; i++) module.setValue(extruderIdsPtr + i * 4, extruderIds[i], 'i32')
+        const outPtrPtr = checkedMalloc(module, 4, 'G-code output pointer')
+        try {
+          const outLenPtr = checkedMalloc(module, 4, 'G-code output length')
+          try {
+            const rc = module._orc_slice_multi(session, dataPtr, combined.length, offsetsPtr, stlBytesArr.length, extruderIdsPtr, outPtrPtr, outLenPtr)
+            if (rc !== 0) throw new Error(`orc_slice_multi failed (${rc}): ${decodeError(module, session)}`)
+            const gcodePtr = module.getValue(outPtrPtr, 'i32'), gcodeLen = module.getValue(outLenPtr, 'i32')
+            try { return module.UTF8ToString(gcodePtr, gcodeLen) } finally { module._orc_free(gcodePtr) }
+          } finally { module._free(outLenPtr) }
+        } finally { module._free(outPtrPtr) }
+      } finally { if (extruderIdsPtr) module._free(extruderIdsPtr) }
+    } finally { free(module, offsetsPtr) }
+  } finally { free(module, dataPtr) }
 }
