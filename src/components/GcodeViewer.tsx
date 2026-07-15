@@ -111,7 +111,7 @@ function tessellateArc(
   return out
 }
 
-function parseGcode(gcode: string): ParseResult {
+export function parseGcode(gcode: string): ParseResult {
   interface LayerAcc { z: number; features: Map<string, number[]>; travels: number[] }
 
   // OrcaSlicer output delimits layers with ";LAYER_CHANGE" + ";Z:<height>"
@@ -278,13 +278,11 @@ function parseGcode(gcode: string): ParseResult {
   return { layers, centerX, centerY, hasFeatureTypes, maxR }
 }
 
-interface LayerObj {
+interface SceneObjects {
   extrusion: LineSegments2 | null
   travel: THREE.LineSegments | null
-}
-
-interface SceneObjects {
-  layerObjs: LayerObj[]
+  extrusionEnds: number[]
+  travelEnds: number[]
   lineMat: LineMaterial
   layerPlane: THREE.Mesh
 }
@@ -292,10 +290,37 @@ interface SceneObjects {
 export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectangle' }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<SceneObjects | null>(null)
+  const parserWorkerRef = useRef<Worker | null>(null)
+  const parserCacheRef = useRef(new Map<string, ParseResult>())
+  const parseRequestRef = useRef(0)
+  const parsingGcodeRef = useRef('')
+  const [parsed, setParsed] = useState<ParseResult | null>(null)
   const [visibleLayers, setVisibleLayers] = useState(0)
   const [showTravels, setShowTravels] = useState(false)
 
-  const { layers, hasFeatureTypes, maxR } = useMemo(() => parseGcode(gcode), [gcode])
+  useEffect(() => {
+    const worker = new Worker(new URL('../workers/gcode-parser.worker.ts', import.meta.url), { type: 'module' })
+    parserWorkerRef.current = worker
+    worker.onmessage = ({ data }: MessageEvent<{ id: number; result: ParseResult }>) => {
+      if (data.id !== parseRequestRef.current) return
+      parserCacheRef.current.set(parsingGcodeRef.current, data.result)
+      setParsed(data.result)
+    }
+    return () => worker.terminate()
+  }, [])
+
+  useEffect(() => {
+    const id = ++parseRequestRef.current
+    const cached = parserCacheRef.current.get(gcode)
+    if (cached) { setParsed(cached); return }
+    setParsed(null)
+    parsingGcodeRef.current = gcode
+    parserWorkerRef.current?.postMessage({ id, gcode })
+  }, [gcode])
+
+  const layers = parsed?.layers ?? []
+  const hasFeatureTypes = parsed?.hasFeatureTypes ?? false
+  const maxR = parsed?.maxR ?? 10
 
   useEffect(() => {
     setVisibleLayers(layers.length)
@@ -382,15 +407,15 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
       resolution: new THREE.Vector2(w, h),
     })
 
-    const layerObjs: LayerObj[] = []
+    const positions: number[] = []
+    const colors: number[] = []
+    const travels: number[] = []
+    const extrusionEnds: number[] = []
+    const travelEnds: number[] = []
 
     for (let li = 0; li < layers.length; li++) {
       const layer = layers[li]
       const t = layers.length > 1 ? li / (layers.length - 1) : 0
-
-      // Merge all features for this layer into one geometry with per-vertex colors
-      const positions: number[] = []
-      const colors: number[] = []
 
       for (const feature of layer.features) {
         if (feature.segments.length < 6) continue
@@ -405,27 +430,27 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
           colors.push(col.r, col.g, col.b)
         }
       }
+      travels.push(...layer.travels)
+      extrusionEnds.push(positions.length / 6)
+      travelEnds.push(travels.length / 3)
+    }
 
-      let extrusion: LineSegments2 | null = null
-      if (positions.length >= 6) {
-        const geo = new LineSegmentsGeometry()
-        geo.setPositions(new Float32Array(positions))
-        geo.setColors(new Float32Array(colors))
-        extrusion = new LineSegments2(geo, lineMat)
-        scene.add(extrusion)
-      }
-
-      let travel: THREE.LineSegments | null = null
-      if (layer.travels.length >= 6) {
-        const tGeo = new THREE.BufferGeometry()
-        tGeo.setAttribute('position', new THREE.BufferAttribute(layer.travels, 3))
-        const tMat = new THREE.LineBasicMaterial({ color: 0x475569, transparent: true, opacity: 0.3 })
-        travel = new THREE.LineSegments(tGeo, tMat)
-        travel.visible = false
-        scene.add(travel)
-      }
-
-      layerObjs.push({ extrusion, travel })
+    let extrusion: LineSegments2 | null = null
+    if (positions.length >= 6) {
+      const geometry = new LineSegmentsGeometry()
+      geometry.setPositions(new Float32Array(positions))
+      geometry.setColors(new Float32Array(colors))
+      extrusion = new LineSegments2(geometry, lineMat)
+      scene.add(extrusion)
+    }
+    let travel: THREE.LineSegments | null = null
+    if (travels.length >= 6) {
+      const geometry = new THREE.BufferGeometry()
+      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(travels), 3))
+      geometry.setDrawRange(0, 0)
+      travel = new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color: 0x475569, transparent: true, opacity: 0.3 }))
+      travel.visible = false
+      scene.add(travel)
     }
 
     // Camera fit — Z-up: position camera above and to the side
@@ -435,7 +460,7 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
     controls.target.set(0, 0, maxZ / 2)
     controls.update()
 
-    sceneRef.current = { layerObjs, lineMat, layerPlane }
+    sceneRef.current = { extrusion, travel, extrusionEnds, travelEnds, lineMat, layerPlane }
 
     let animId: number
     const animate = () => {
@@ -461,11 +486,9 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
       renderer.dispose()
       sceneRef.current = null
       lineMat.dispose()
-      layerObjs.forEach(({ extrusion, travel }) => {
-        extrusion?.geometry.dispose()
-        travel?.geometry.dispose()
-        ;(travel?.material as THREE.Material | undefined)?.dispose()
-      })
+      extrusion?.geometry.dispose()
+      travel?.geometry.dispose()
+      ;(travel?.material as THREE.Material | undefined)?.dispose()
       bedGeo.dispose()
       bedMat.dispose()
       layerPlaneGeo.dispose()
@@ -485,11 +508,11 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
   useEffect(() => {
     const sc = sceneRef.current
     if (!sc) return
-    sc.layerObjs.forEach(({ extrusion, travel }, i) => {
-      const vis = i < visibleLayers
-      if (extrusion) extrusion.visible = vis
-      if (travel) travel.visible = vis && showTravels
-    })
+    if (sc.extrusion) sc.extrusion.geometry.instanceCount = sc.extrusionEnds[visibleLayers - 1] ?? 0
+    if (sc.travel) {
+      sc.travel.geometry.setDrawRange(0, showTravels ? (sc.travelEnds[visibleLayers - 1] ?? 0) : 0)
+      sc.travel.visible = showTravels
+    }
     const currentZ = layers[visibleLayers - 1]?.z ?? 0
     sc.layerPlane.position.z = currentZ + 0.3
   }, [visibleLayers, showTravels, layers])
@@ -505,6 +528,14 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
     }
     return Array.from(seen.entries())
   }, [layers, hasFeatureTypes])
+
+  if (!parsed) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">
+        Parsing preview…
+      </div>
+    )
+  }
 
   if (layers.length === 0) {
     return (

@@ -43,6 +43,8 @@ test('uploads the Voron Cube and slices it end-to-end through the UI', async ({ 
   // generous timeout to absorb CI variance, not indicative of expected latency.
   await expect(page.getByTestId('queue-item-status')).toContainText('Done', { timeout: 120_000 })
   await expect(page.getByTestId('download-gcode-button')).toBeVisible()
+  await page.getByTitle('Preview G-code').click()
+  await expect(page.getByText('Layer', { exact: true })).toBeVisible()
 
   expect(consoleErrors, `unexpected console errors:\n${consoleErrors.join('\n')}`).toEqual([])
 })

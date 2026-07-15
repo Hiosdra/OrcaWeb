@@ -264,7 +264,7 @@ Both viewers use a **Z-up** scene to match the slicer engine — G-code axes map
 
 **ModelViewer** positions the STL with its bottom face at Z=0, centered on X/Y.
 
-**GcodeViewer** parses G1 extrusion moves and G0/G1 travel moves, computes centroid of all X/Y toolpath points, subtracts it, and uses G-code axes directly (`gcodeX → x`, `gcodeY → y`, `gcodeZ → z`). Reads OrcaSlicer `;TYPE:` comments to colour extrusion segments by feature type; falls back to a blue→orange height gradient. Rendered with `LineSegments2` + `LineMaterial` for real screen-space line width.
+**GcodeViewer** sends G-code to its dedicated `gcode-parser.worker.ts` (separate from the slicer worker), which returns typed-array buffers as transferables so large previews never parse on the UI thread. It parses G1 extrusion moves and G0/G1 travel moves, computes centroid of all X/Y toolpath points, subtracts it, and uses G-code axes directly (`gcodeX → x`, `gcodeY → y`, `gcodeZ → z`). Reads OrcaSlicer `;TYPE:` comments to colour extrusion segments by feature type; falls back to a blue→orange height gradient. All extrusion segments are merged into one `LineSegments2` geometry and all travels into one `LineSegments` geometry; the layer slider adjusts their draw ranges, preserving two draw calls irrespective of layer count.
 
 ## Data flow
 
