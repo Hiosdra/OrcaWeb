@@ -167,8 +167,14 @@ async function loadModule(wasmDir) {
 }
 
 function writeBytes(module, bytes) {
-  const ptr = module._malloc(bytes.length)
+  const ptr = checkedMalloc(module, bytes.length, 'input data')
   module.HEAPU8.set(bytes, ptr)
+  return ptr
+}
+
+function checkedMalloc(module, size, label) {
+  const ptr = module._malloc(size)
+  if (ptr === 0) throw new Error(`Out of memory allocating ${label} (${size} bytes)`)
   return ptr
 }
 
@@ -191,23 +197,18 @@ function initSession(module, session, configJson) {
 
 function sliceOnce(module, session, stlBytes) {
   const stlPtr = writeBytes(module, stlBytes)
-  const outPtrPtr = module._malloc(4)
-  const outLenPtr = module._malloc(4)
-  const rc = module._orc_slice(session, stlPtr, stlBytes.length, outPtrPtr, outLenPtr)
-  module._free(stlPtr)
-  if (rc !== 0) {
-    const msg = decodeError(module, session)
-    module._free(outPtrPtr)
-    module._free(outLenPtr)
-    throw new Error(`orc_slice failed (${rc}): ${msg}`)
-  }
-  const gcodePtr = module.getValue(outPtrPtr, 'i32')
-  const gcodeLen = module.getValue(outLenPtr, 'i32')
-  const gcode = module.UTF8ToString(gcodePtr, gcodeLen)
-  module._orc_free(gcodePtr)
-  module._free(outPtrPtr)
-  module._free(outLenPtr)
-  return gcode
+  try {
+    const outPtrPtr = checkedMalloc(module, 4, 'G-code output pointer')
+    try {
+      const outLenPtr = checkedMalloc(module, 4, 'G-code output length')
+      try {
+        const rc = module._orc_slice(session, stlPtr, stlBytes.length, outPtrPtr, outLenPtr)
+        if (rc !== 0) throw new Error(`orc_slice failed (${rc}): ${decodeError(module, session)}`)
+        const gcodePtr = module.getValue(outPtrPtr, 'i32'), gcodeLen = module.getValue(outLenPtr, 'i32')
+        try { return module.UTF8ToString(gcodePtr, gcodeLen) } finally { module._orc_free(gcodePtr) }
+      } finally { module._free(outLenPtr) }
+    } finally { module._free(outPtrPtr) }
+  } finally { module._free(stlPtr) }
 }
 
 // ── base profile (matches orca-wasm/scripts/smoke-test.mjs's representative config) ──

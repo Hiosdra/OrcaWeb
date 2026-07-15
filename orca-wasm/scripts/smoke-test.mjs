@@ -43,7 +43,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   sphereStl, loadModule, writeBytes, decodeError,
-  initSession, sliceOnce, sliceMultiOnce,
+  initSession, sliceOnce, sliceMultiOnce, checkedMalloc,
 } from './lib/engine-harness.mjs'
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
@@ -72,54 +72,42 @@ function generateTortureStl() {
 
 function write3mfOnce(module, session, stlBytes) {
   const stlPtr = writeBytes(module, stlBytes)
-  const outPtrPtr = module._malloc(4)
-  const outLenPtr = module._malloc(4)
-  const rc = module._orc_write_3mf(session, stlPtr, stlBytes.length, outPtrPtr, outLenPtr)
-  module._free(stlPtr)
-  if (rc !== 0) {
-    const msg = decodeError(module, session)
-    module._free(outPtrPtr)
-    module._free(outLenPtr)
-    throw new Error(`orc_write_3mf failed (${rc}): ${msg}`)
-  }
-  const dataPtr = module.getValue(outPtrPtr, 'i32')
-  const dataLen = module.getValue(outLenPtr, 'i32')
-  const data = module.HEAPU8.slice(dataPtr, dataPtr + dataLen)
-  module._orc_free(dataPtr)
-  module._free(outPtrPtr)
-  module._free(outLenPtr)
-  return data
+  try {
+    const outPtrPtr = checkedMalloc(module, 4, '3MF output pointer')
+    try {
+      const outLenPtr = checkedMalloc(module, 4, '3MF output length')
+      try {
+        const rc = module._orc_write_3mf(session, stlPtr, stlBytes.length, outPtrPtr, outLenPtr)
+        if (rc !== 0) throw new Error(`orc_write_3mf failed (${rc}): ${decodeError(module, session)}`)
+        const dataPtr = module.getValue(outPtrPtr, 'i32')
+        const dataLen = module.getValue(outLenPtr, 'i32')
+        try { return module.HEAPU8.slice(dataPtr, dataPtr + dataLen) } finally { module._orc_free(dataPtr) }
+      } finally { module._free(outLenPtr) }
+    } finally { module._free(outPtrPtr) }
+  } finally { module._free(stlPtr) }
 }
 
 function read3mfOnce(module, mfBytes) {
   const mfPtr = writeBytes(module, mfBytes)
-  const outStlPtrPtr = module._malloc(4)
-  const outStlLenPtr = module._malloc(4)
-  const outConfigPtrPtr = module._malloc(4)
-  const outConfigLenPtr = module._malloc(4)
-  const rc = module._orc_read_3mf(mfPtr, mfBytes.length, outStlPtrPtr, outStlLenPtr, outConfigPtrPtr, outConfigLenPtr)
-  module._free(mfPtr)
-  if (rc !== 0) {
-    const msg = decodeError(module, 0)
-    module._free(outStlPtrPtr)
-    module._free(outStlLenPtr)
-    module._free(outConfigPtrPtr)
-    module._free(outConfigLenPtr)
-    throw new Error(`orc_read_3mf failed (${rc}): ${msg}`)
-  }
-  const stlPtr = module.getValue(outStlPtrPtr, 'i32')
-  const stlLen = module.getValue(outStlLenPtr, 'i32')
-  const configPtr = module.getValue(outConfigPtrPtr, 'i32')
-  const configLen = module.getValue(outConfigLenPtr, 'i32')
-  const stl = module.HEAPU8.slice(stlPtr, stlPtr + stlLen)
-  const configJson = module.UTF8ToString(configPtr, configLen)
-  module._orc_free(stlPtr)
-  module._orc_free(configPtr)
-  module._free(outStlPtrPtr)
-  module._free(outStlLenPtr)
-  module._free(outConfigPtrPtr)
-  module._free(outConfigLenPtr)
-  return { stl, configJson }
+  try {
+    const outStlPtrPtr = checkedMalloc(module, 4, 'STL output pointer')
+    try {
+      const outStlLenPtr = checkedMalloc(module, 4, 'STL output length')
+      try {
+        const outConfigPtrPtr = checkedMalloc(module, 4, 'config output pointer')
+        try {
+          const outConfigLenPtr = checkedMalloc(module, 4, 'config output length')
+          try {
+            const rc = module._orc_read_3mf(mfPtr, mfBytes.length, outStlPtrPtr, outStlLenPtr, outConfigPtrPtr, outConfigLenPtr)
+            if (rc !== 0) throw new Error(`orc_read_3mf failed (${rc}): ${decodeError(module, 0)}`)
+            const stlPtr = module.getValue(outStlPtrPtr, 'i32'), stlLen = module.getValue(outStlLenPtr, 'i32')
+            const configPtr = module.getValue(outConfigPtrPtr, 'i32'), configLen = module.getValue(outConfigLenPtr, 'i32')
+            try { return { stl: module.HEAPU8.slice(stlPtr, stlPtr + stlLen), configJson: module.UTF8ToString(configPtr, configLen) } } finally { module._orc_free(stlPtr); module._orc_free(configPtr) }
+          } finally { module._free(outConfigLenPtr) }
+        } finally { module._free(outConfigPtrPtr) }
+      } finally { module._free(outStlLenPtr) }
+    } finally { module._free(outStlPtrPtr) }
+  } finally { module._free(mfPtr) }
 }
 
 // Binary STL: 80-byte header + uint32 triangle count + N * 50 bytes.
