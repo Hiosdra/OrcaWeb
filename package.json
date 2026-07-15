@@ -15,6 +15,7 @@
     "setup": "node scripts/download-wasm.mjs",
     "smoke-test": "node orca-wasm/scripts/smoke-test.mjs",
     "test:e2e": "playwright test",
+    "test": "vitest run src",
     "generate-corpus": "node scripts/generate-corpus.mjs",
     "benchmark-gcode": "node scripts/benchmark-gcode-compression.mjs",
     "generate-pwa-assets": "pwa-assets-generator --config pwa-assets.config.ts"
@@ -37,6 +38,7 @@
     "@vitejs/plugin-react": "^6.0.3",
     "tailwindcss": "^4.3.2",
     "typescript": "^6.0.3",
+    "vitest": "^4.0.18",
     "vite": "^8.1.4",
     "vite-plugin-pwa": "^1.3.0"
   }

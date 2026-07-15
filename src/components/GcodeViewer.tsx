@@ -111,7 +111,7 @@ function tessellateArc(
   return out
 }
 
-function parseGcode(gcode: string): ParseResult {
+export function parseGcode(gcode: string): ParseResult {
   interface LayerAcc { z: number; features: Map<string, number[]>; travels: number[] }
 
   // OrcaSlicer output delimits layers with ";LAYER_CHANGE" + ";Z:<height>"
@@ -129,6 +129,8 @@ function parseGcode(gcode: string): ParseResult {
 
   let cx = 0, cy = 0, cz = 0
   let relative = false
+  let extrusionRelative = false
+  let ce = 0
   let currentFeature = ''
   let hasFeatureTypes = false
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
@@ -203,13 +205,23 @@ function parseGcode(gcode: string): ParseResult {
 
     if (g === 'G91') { relative = true; continue }
     if (g === 'G90') { relative = false; continue }
+    if (g === 'M83') { extrusionRelative = true; continue }
+    if (g === 'M82') { extrusionRelative = false; continue }
+    if (g === 'G92') {
+      for (let k = 1; k < cmd.length; k++) {
+        if (cmd[k][0]?.toUpperCase() !== 'E') continue
+        const e = parseFloat(cmd[k].slice(1))
+        if (!isNaN(e)) ce = e
+      }
+      continue
+    }
 
     const isLinear = g === 'G0' || g === 'G1'
     const isArc = g === 'G2' || g === 'G3'
     if (!isLinear && !isArc) continue
 
     let nx = cx, ny = cy, nz = cz
-    let hasXY = false, hasE = false
+    let hasXY = false, hasE = false, e = 0
     let ai: number | null = null, aj: number | null = null, ar: number | null = null
 
     for (let k = 1; k < cmd.length; k++) {
@@ -219,24 +231,28 @@ function parseGcode(gcode: string): ParseResult {
       if (c === 'X') { nx = relative ? cx + v : v; hasXY = true }
       else if (c === 'Y') { ny = relative ? cy + v : v; hasXY = true }
       else if (c === 'Z') { nz = relative ? cz + v : v }
-      else if (c === 'E') { hasE = true }
+      else if (c === 'E') { e = v; hasE = true }
       else if (c === 'I') ai = v // arc center offsets are always relative to the start point
       else if (c === 'J') aj = v
       else if (c === 'R') ar = v
     }
 
+    const nextE = hasE ? (extrusionRelative ? ce + e : e) : ce
+    const extrusionDelta = nextE - ce
+    const isTravel = g === 'G0' || extrusionDelta <= 0
+
     if (isLinear) {
-      if (hasXY) addSegment(g === 'G0' || !hasE, cx, cy, cz, nx, ny, nz)
+      if (hasXY) addSegment(isTravel, cx, cy, cz, nx, ny, nz)
     } else if (hasXY || ai !== null || aj !== null) {
       const waypoints = tessellateArc(cx, cy, cz, nx, ny, nz, ai, aj, ar, g === 'G2')
       let px = cx, py = cy, pz = cz
       for (let k = 0; k < waypoints.length; k += 3) {
-        addSegment(!hasE, px, py, pz, waypoints[k], waypoints[k + 1], waypoints[k + 2])
+        addSegment(isTravel, px, py, pz, waypoints[k], waypoints[k + 1], waypoints[k + 2])
         px = waypoints[k]; py = waypoints[k + 1]; pz = waypoints[k + 2]
       }
     }
 
-    cx = nx; cy = ny; cz = nz
+    cx = nx; cy = ny; cz = nz; ce = nextE
   }
 
   const centerX = isFinite(minX) ? (minX + maxX) / 2 : 0
