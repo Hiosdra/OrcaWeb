@@ -14,6 +14,13 @@ import { logInfo, logWarn, logError } from '../lib/log'
 // download is never aborted once it starts.
 const FETCH_RESPONSE_TIMEOUT_MS = 30_000
 
+// Separate, much shorter budget for the tiny engine-version.json manifest
+// (a few dozen bytes): if it's slow or stalled we want to fall back to the
+// build-time baked version fast rather than block the whole engine load — the
+// 30s engine-download budget above would be a worse UX than the staleness bug
+// the manifest is there to fix.
+const MANIFEST_FETCH_TIMEOUT_MS = 4_000
+
 function fetchWithTimeout(url: string, timeoutMs: number, init: RequestInit = {}): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -107,17 +114,24 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       // bypasses the HTTP cache, so this is always fresh. Falls back to the
       // baked values when the manifest is absent (local dev before
       // `npm run setup`) or unreachable.
+      // One small round-trip serialized in front of the engine download (the
+      // version must be known before the ?v= URL can be built), bounded by the
+      // short MANIFEST_FETCH_TIMEOUT_MS so a stalled manifest can't hold up the
+      // load — a deliberate trade-off for always tracking the live engine.
       try {
         const manifestRes = await fetchWithTimeout(
-          `${wasmBase}/engine-version.json`, FETCH_RESPONSE_TIMEOUT_MS, { cache: 'no-store' },
+          `${wasmBase}/engine-version.json`, MANIFEST_FETCH_TIMEOUT_MS, { cache: 'no-store' },
         )
         if (manifestRes.ok) {
-          const manifest = await manifestRes.json() as { version?: unknown; label?: unknown }
-          if (typeof manifest.version === 'string' && manifest.version) version = manifest.version
-          if (typeof manifest.label === 'string' && manifest.label) engineLabel = manifest.label
+          const manifest = await manifestRes.json() as unknown
+          if (manifest && typeof manifest === 'object') {
+            const m = manifest as { version?: unknown; label?: unknown }
+            if (typeof m.version === 'string' && m.version) version = m.version
+            if (typeof m.label === 'string' && m.label) engineLabel = m.label
+          }
         }
       } catch {
-        // Manifest missing/unreachable — keep the build-time baked fallback.
+        // Manifest missing/unreachable/slow — keep the build-time baked fallback.
       }
 
       // The engine files are served under fixed, unhashed filenames (downloaded
