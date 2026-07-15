@@ -126,9 +126,9 @@ OrcaSlicer C++ source is never modified. The WASM build uses a three-layer strat
 
 Added to the compiler search path before all other include paths (`BEFORE PUBLIC` in CMake), so these stubs shadow the real system headers.
 
-#### TBB — sequential stubs
+#### TBB — sequential stubs (ST engine)
 
-WASM is single-threaded. Every TBB parallel algorithm is replaced by a sequential equivalent that runs in the same thread.
+This section describes the single-threaded (ST) engine build, which is what GitHub Pages always serves and what the Cloudflare mirror falls back to. Every TBB parallel algorithm is replaced by a sequential equivalent that runs in the same thread. A separate multithreaded (MT) build links real oneTBB instead of these stubs and is served only where cross-origin isolation is available — see [ADR-011](adr/adr-011-multithreaded-engine.md).
 
 | Shim | Sequential equivalent |
 |------|-----------------------|
@@ -353,8 +353,13 @@ Engine-side 3MF write + read (`orc_write_3mf` / `orc_read_3mf`, issue #108) are 
 === "Production (GitHub Pages)"
     ```bash
     # Triggered automatically on push to master
-    # deploy.yml downloads slicer.js + slicer.wasm from release wasm-v2.4.2
-    # and embeds them in the gh-pages branch under app/wasm/
+    # deploy.yml downloads slicer.js + slicer.wasm (ST) from release
+    # wasm-v2.4.2, and slicer-mt.js + slicer-mt.wasm (MT) from the sibling
+    # wasm-v2.4.2-multithreaded release (best-effort — a missing MT release
+    # never fails the deploy), and embeds both in the gh-pages branch under
+    # app/wasm/. GitHub Pages cannot send custom response headers, so it can
+    # never be crossOriginIsolated — the app always selects the ST engine
+    # here regardless of which files are present (see ADR-011).
     ```
 
 === "Mirror (Cloudflare Workers)"
@@ -363,12 +368,27 @@ Engine-side 3MF write + read (`orc_write_3mf` / `orc_read_3mf`, issue #108) are 
     # Build command:  npm run build:cf   (scripts/cf-build.mjs)
     # Deploy command: npx wrangler deploy   (wrangler.jsonc, static assets)
     #
-    # Cloudflare serves only the app shell: slicer.wasm (~36 MB) exceeds
-    # the 25 MiB per-asset limit, so cf-build.mjs sets VITE_WASM_BASE_URL
-    # to the GitHub Pages copy (served with Access-Control-Allow-Origin: *
-    # and Content-Type: application/wasm) and the engine loads cross-origin.
-    # The GitHub Pages deploy therefore remains the source of truth for the
-    # engine binary — a Cloudflare-only deploy cannot ship a new engine.
+    # public/_headers sends Cross-Origin-Opener-Policy: same-origin +
+    # Cross-Origin-Embedder-Policy: require-corp on every response here —
+    # the one host in this deployment that's crossOriginIsolated, so it's
+    # the only place the real multithreaded (MT) engine actually runs
+    # (see ADR-011 / orca-wasm/MT-PLAN.md).
+    #
+    # Cloudflare serves only the app shell: both slicer.wasm and
+    # slicer-mt.wasm (~36 MB each) exceed the 25 MiB per-asset limit, so
+    # cf-build.mjs sets VITE_WASM_BASE_URL to the GitHub Pages copies
+    # (served with Access-Control-Allow-Origin: * and Content-Type:
+    # application/wasm — required for COEP to allow the cross-origin fetch
+    # at all; plain GitHub Releases assets send neither header and can't be
+    # read this way) and the app loads whichever engine it needs
+    # cross-origin. The GitHub Pages deploy therefore remains the source of
+    # truth for both engine binaries — a Cloudflare-only deploy cannot ship
+    # a new engine.
+    #
+    # slicer.worker.ts probes for slicer-mt.js before committing to it and
+    # falls back to the always-present ST engine on any failure, so a
+    # missing/stale MT mirror degrades gracefully rather than breaking the
+    # app.
     #
     # Cache key + header label come from app/wasm/engine-version.json,
     # published by deploy.yml alongside the wasm files (fallbacks: GitHub
@@ -380,10 +400,17 @@ Engine-side 3MF write + read (`orc_write_3mf` / `orc_read_3mf`, issue #108) are 
     ```bash
     # GitHub Actions → Build WASM → Run workflow
     # Or: git tag v2.4.2-ow1 && git push --tags
-    # Produces: slicer.js (~210 KB) + slicer.wasm (~29 MB)
-    # Runs orca-wasm/scripts/smoke-test.mjs before publishing (ADR-009) —
-    # a build that fails the smoke test never reaches the release step
-    # Published as GitHub Release wasm-v2.4.2
+    # Builds two matrix legs (variant: [st, mt]):
+    #   st: slicer.js (~210 KB) + slicer.wasm (~29 MB) — sequential TBB
+    #       stubs (ADR-007), unchanged.
+    #   mt: slicer-mt.js + slicer-mt.wasm (~36 MB) — real oneTBB built from
+    #       source, linked with Emscripten pthreads (ADR-011).
+    # Each leg runs orca-wasm/scripts/smoke-test.mjs before publishing
+    # (ADR-009) — a build that fails the smoke test never reaches the
+    # release step. A compare-outputs job then slices both variants'
+    # outputs and requires matching G-code structure.
+    # Published as GitHub Releases wasm-v2.4.2 (st) and
+    # wasm-v2.4.2-multithreaded (mt).
     ```
 
 ## Stack
@@ -394,6 +421,6 @@ Engine-side 3MF write + read (`orc_write_3mf` / `orc_read_3mf`, issue #108) are 
 | Styling | Tailwind CSS v4 | Custom `orca-*` colour scale |
 | 3D | Three.js 0.184 | STLLoader, OrbitControls, LineSegments2 (fat lines) |
 | Bundler | Vite 8 | Worker ES format, configurable base |
-| WASM | OrcaSlicer **v2.4.2** | Emscripten, single-threaded, self-built |
+| WASM | OrcaSlicer **v2.4.2** | Emscripten, self-built; single-threaded (ST) engine everywhere, plus a real-oneTBB multithreaded (MT) engine served only where cross-origin isolation is available (Cloudflare mirror — see ADR-011) |
 | Worker | Web Worker (ES module) | Blob URL for dynamic import |
 | License | AGPL-3.0-or-later | Source link in UI footer per §13 |

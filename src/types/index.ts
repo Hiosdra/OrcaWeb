@@ -238,10 +238,15 @@ export interface OrcaModule {
 
 export interface OrcaModuleOptions {
   /** Emscripten hook: caller supplies the compiled+instantiated wasm instance
-   *  via successCallback (lets us use WebAssembly.compileStreaming). */
+   *  via successCallback (lets us use WebAssembly.compileStreaming). The
+   *  module argument is required, not optional — Emscripten's internal
+   *  receiveInstance(instance, module) stores it as `wasmModule`, which
+   *  pthread worker spawning (MT builds) reads to share the compiled module
+   *  with new pthread workers; omitting it leaves pthread workers crashing
+   *  on an undefined module. */
   instantiateWasm?: (
     imports: WebAssembly.Imports,
-    successCallback: (instance: WebAssembly.Instance) => void,
+    successCallback: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void,
   ) => Record<string, never>
   locateFile?: (path: string) => string
   printErr?: (msg: string) => void

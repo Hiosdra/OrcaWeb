@@ -15,3 +15,4 @@ Each ADR explains the context, the decision taken, and the resulting trade-offs.
 | [ADR-008](adr-008-session-handle.md) | Session-Scoped Engine State | Accepted | 2026-07-04 |
 | [ADR-009](adr-009-wasm-smoke-test.md) | WASM Build Smoke Test | Accepted | 2026-07-04 |
 | [ADR-010](adr-010-e2e-smoke-test.md) | E2E UI Smoke Test with the Real WASM Engine | Accepted | 2026-07-05 |
+| [ADR-011](adr-011-multithreaded-engine.md) | Multithreaded Engine Variant (Real oneTBB) on the Cloudflare Mirror | Accepted | 2026-07-14 |

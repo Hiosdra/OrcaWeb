@@ -14,7 +14,13 @@
  * noticed until a live user's browser session failed.
  *
  * Usage:
- *   node orca-wasm/scripts/smoke-test.mjs [--wasm-dir public/wasm] [--fixture path/to.stl]
+ *   node orca-wasm/scripts/smoke-test.mjs [--wasm-dir public/wasm] [--engine slicer] [--fixture path/to.stl]
+ *
+ * --engine selects the output-name stem (see orca-wasm/wasm/CMakeLists.txt's
+ * ORCA_WEB_WASM_OUTPUT_NAME) — "slicer" (default, single-threaded) or
+ * "slicer-mt" (build-wasm.yml's mt matrix leg, real oneTBB — see
+ * orca-wasm/MT-PLAN.md). The mt build never produces a plain
+ * slicer.js/.wasm alias, so this must be passed explicitly for that variant.
  *
  * Without --fixture, every scenario runs against TWO meshes:
  *   1. A synthetic torture-test mesh (a subdivided icosphere, ~5120
@@ -40,9 +46,10 @@ import { createRequire } from 'node:module'
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
 function parseArgs(argv) {
-  const args = { wasmDir: 'public/wasm', fixture: null }
+  const args = { wasmDir: 'public/wasm', engine: 'slicer', fixture: null }
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--wasm-dir') args.wasmDir = argv[++i]
+    else if (argv[i] === '--engine') args.engine = argv[++i]
     else if (argv[i] === '--fixture') args.fixture = argv[++i]
   }
   return args
@@ -149,11 +156,11 @@ globalThis.require ??= createRequire(import.meta.url)
 globalThis.__dirname ??= '.'
 globalThis.__filename ??= ''
 
-async function loadModule(wasmDir) {
-  const jsPath = resolve(wasmDir, 'slicer.js')
-  const wasmPath = resolve(wasmDir, 'slicer.wasm')
+async function loadModule(wasmDir, engine) {
+  const jsPath = resolve(wasmDir, `${engine}.js`)
+  const wasmPath = resolve(wasmDir, `${engine}.wasm`)
   if (!existsSync(jsPath) || !existsSync(wasmPath)) {
-    throw new Error(`slicer.js/slicer.wasm not found in ${wasmDir} — build (build-wasm.yml) or download (npm run setup) the engine first`)
+    throw new Error(`${engine}.js/${engine}.wasm not found in ${wasmDir} — build (build-wasm.yml) or download (npm run setup) the engine first`)
   }
   const jsText = readFileSync(jsPath, 'utf8')
   const wasmBinary = readFileSync(wasmPath)
@@ -162,6 +169,17 @@ async function loadModule(wasmDir) {
   const { default: factory } = await import(dataUrl)
   return factory({
     wasmBinary,
+    // mt builds spawn pthread workers via `new Worker(pthreadMainJs, ...)`,
+    // where pthreadMainJs defaults to `_scriptName`, which Node's shell.js
+    // resolves from `__filename` — but that's polyfilled to '' above (only
+    // so the unconditional `__dirname + "/"` assignment doesn't throw), so
+    // without this override Node's Worker constructor rejects the empty
+    // path with ERR_WORKER_PATH. Same fix as src/workers/slicer.worker.ts
+    // uses for the browser build: hand Emscripten the real script path
+    // directly via the officially-supported override instead of relying on
+    // the __filename fallback. Harmless no-op for st (non-pthread) builds,
+    // whose output has no code path that reads this option.
+    mainScriptUrlOrBlob: jsPath,
     printErr: (m) => console.warn('[OrcaWASM]', m),
     onAbort: (m) => { throw new Error(`WASM module aborted: ${m}`) },
   })
@@ -453,9 +471,9 @@ function collectMeshes(fixture) {
 // ── main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const { wasmDir, fixture } = parseArgs(process.argv.slice(2))
-  console.log(`[smoke-test] loading engine from ${wasmDir}...`)
-  const module = await loadModule(wasmDir)
+  const { wasmDir, engine, fixture } = parseArgs(process.argv.slice(2))
+  console.log(`[smoke-test] loading engine "${engine}" from ${wasmDir}...`)
+  const module = await loadModule(wasmDir, engine)
   console.log('[smoke-test] engine loaded')
 
   const meshes = collectMeshes(fixture)

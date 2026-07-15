@@ -86,30 +86,79 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
 
     try {
       const wasmBase = msg.url.replace(/\/slicer\.js$/, '')
-      // slicer.js/slicer.wasm are served under a fixed, unhashed filename
-      // (they're downloaded from the wasm-v2.4.2 GitHub Release at deploy
-      // time, not processed by Vite's asset pipeline, so they get no
-      // content-hash filename the way JS/CSS bundles do). The PWA service
-      // worker caches them with a CacheFirst strategy (vite.config.ts) that
-      // never revalidates against the network — so without a cache-busting
-      // key in the URL, a browser that visited before this deploy keeps
-      // serving its stale cached engine binary indefinitely (up to the 30-day
-      // TTL), even after the rest of the app updates to a new version.
-      // msg.version is __WASM_VERSION__ (the resolved WASM release tag, not the
-      // app version — see worker-singleton.ts / vite.config.ts), so this key
-      // changes whenever the engine binary changes, even between app releases.
-      // That makes each engine build's URL genuinely new, so CacheFirst treats
-      // it as a fresh entry instead of reusing a stale, API-mismatched one.
+      // slicer.js/slicer.wasm (and slicer-mt.js/slicer-mt.wasm) are served
+      // under fixed, unhashed filenames (they're downloaded from the
+      // wasm-v2.4.2 GitHub Release at deploy time, not processed by Vite's
+      // asset pipeline, so they get no content-hash filename the way JS/CSS
+      // bundles do). The PWA service worker caches them with a CacheFirst
+      // strategy (vite.config.ts) that never revalidates against the
+      // network — so without a cache-busting key in the URL, a browser that
+      // visited before this deploy keeps serving its stale cached engine
+      // binary indefinitely (up to the 30-day TTL), even after the rest of
+      // the app updates to a new version. msg.version is __WASM_VERSION__
+      // (the resolved WASM release tag, not the app version — see
+      // worker-singleton.ts / vite.config.ts), so this key changes whenever
+      // the engine binary changes, even between app releases. That makes
+      // each engine build's URL genuinely new, so CacheFirst treats it as a
+      // fresh entry instead of reusing a stale, API-mismatched one.
       const v = `?v=${encodeURIComponent(msg.version)}`
 
-      // Compile slicer.wasm while slicer.js is still downloading.
+      // Dual-mode engine selection (see orca-wasm/MT-PLAN.md): the real
+      // multithreaded engine (slicer-mt.*, built with -pthread against real
+      // oneTBB) needs SharedArrayBuffer, which needs COOP/COEP response
+      // headers — unavailable on GitHub Pages (the primary deployment) but
+      // sent by the Cloudflare mirror (public/_headers; see cf-build.mjs and
+      // wrangler.jsonc for that host's setup). Same pattern already proven
+      // end-to-end in poc/wasm-threads/public/worker.js.
+      const canUseThreads =
+        typeof SharedArrayBuffer !== 'undefined' &&
+        (self as unknown as { crossOriginIsolated?: boolean }).crossOriginIsolated === true
+
+      // crossOriginIsolated tells us what the *browser* can do, not what
+      // files this *host* actually shipped — e.g. the Vite dev server (used
+      // by e2e/slice.spec.ts) always sends COOP/COEP, but `npm run setup`
+      // only ever downloads the ST slicer.js/slicer.wasm, and slicer-mt.*
+      // isn't published for PR builds at all (build-wasm.yml only publishes
+      // releases on non-PR events). Blindly requesting slicer-mt.js there
+      // fails to parse as a JS module with a cryptic "Unexpected token '<'"
+      // — Vite's dev server (and most static hosts' SPA fallback) answers a
+      // missing path with a 200 OK text/html page, not a 404, so checking
+      // `probe.ok` alone doesn't catch it; the content-type must be checked
+      // too. Probe for the real file first and fall back to the
+      // always-present ST engine rather than assuming capability implies
+      // availability.
+      let variant: 'slicer' | 'slicer-mt' = 'slicer'
+      if (canUseThreads) {
+        try {
+          let probe: Response
+          try {
+            probe = await fetch(`${wasmBase}/slicer-mt.js${v}`, { method: 'HEAD' })
+            if (!probe.ok) {
+              probe = await fetch(`${wasmBase}/slicer-mt.js${v}`, {
+                headers: { Range: 'bytes=0-0' },
+              })
+            }
+          } catch {
+            probe = await fetch(`${wasmBase}/slicer-mt.js${v}`, {
+              headers: { Range: 'bytes=0-0' },
+            })
+          }
+          const contentType = probe.headers.get('content-type') ?? ''
+          if (probe.ok && !contentType.includes('text/html')) variant = 'slicer-mt'
+          await probe.body?.cancel()
+        } catch {
+          // Network error probing — fall back to the ST engine.
+        }
+      }
+
+      // Compile <variant>.wasm while <variant>.js is still downloading.
       // compileStreaming overlaps download and compilation (a measurable win
       // on a ~29 MB binary over slow links); it requires an
       // `application/wasm` Content-Type, so fall back to buffered
       // WebAssembly.compile when a server (or a proxy) mislabels the file.
       const wasmModulePromise = (async () => {
-        const res = await fetchWithTimeout(`${wasmBase}/slicer.wasm${v}`, FETCH_RESPONSE_TIMEOUT_MS)
-        if (!res.ok) throw new Error(`HTTP ${res.status} fetching slicer.wasm`)
+        const res = await fetchWithTimeout(`${wasmBase}/${variant}.wasm${v}`, FETCH_RESPONSE_TIMEOUT_MS)
+        if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${variant}.wasm`)
         if (
           typeof WebAssembly.compileStreaming === 'function'
           && res.headers.get('content-type')?.includes('application/wasm')
@@ -119,8 +168,8 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         return WebAssembly.compile(await res.arrayBuffer())
       })()
 
-      const jsText = await fetchWithTimeout(`${wasmBase}/slicer.js${v}`, FETCH_RESPONSE_TIMEOUT_MS).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status} fetching slicer.js`)
+      const jsText = await fetchWithTimeout(`${wasmBase}/${variant}.js${v}`, FETCH_RESPONSE_TIMEOUT_MS).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status} fetching ${variant}.js`)
         return r.text()
       })
       logInfo(
@@ -160,8 +209,17 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         factory({
           instantiateWasm: (imports, successCallback) => {
             wasmModulePromise
-              .then((module) => WebAssembly.instantiate(module, imports))
-              .then((instance) => successCallback(instance))
+              .then((module) => WebAssembly.instantiate(module, imports).then((instance) => ({ instance, module })))
+              // Both instance AND module must reach successCallback — Emscripten's
+              // internal receiveInstance(instance, module) stores module as
+              // `wasmModule`, which pthread worker spawning (MT builds) reads to
+              // share the compiled module with new pthread workers. Passing only
+              // instance leaves wasmModule undefined and crashes every spawned
+              // pthread worker (observed live: "Cannot read properties of
+              // undefined (reading '...')" inside the newly spawned worker,
+              // surfacing to the main thread only via onAbort/printErr, not as a
+              // rejection here — hence the instantiateFailed race below).
+              .then(({ instance, module }) => successCallback(instance, module))
               .catch((err) => failInstantiate(err))
             return {} // instance is delivered asynchronously via successCallback
           },
@@ -172,6 +230,13 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
             wasmCrashed = true
             send({ type: 'WASM_ERROR', message: `Slicer engine crashed: ${m}` })
           },
+          // Needed with MODULARIZE + pthreads: this glue script is loaded via
+          // a blob: URL (see below), so Emscripten's runtime can't infer its
+          // real network URL to reload itself into nested pthread Workers
+          // without this — found the hard way building poc/wasm-threads/
+          // (see public/worker.js there for the same fix). Harmless/unused on
+          // the ST variant, so it's fine to just always pass it.
+          ...(variant === 'slicer-mt' ? { mainScriptUrlOrBlob: `${wasmBase}/${variant}.js${v}` } : {}),
         }),
         instantiateFailed,
       ])

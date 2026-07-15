@@ -72,7 +72,10 @@ a typical model in 50–500 ms, which is acceptable.
 - **Negative:** Multi-core speedup is lost. On complex models, slicing may be
   slower than on a native multi-threaded desktop build. This is an inherent
   constraint of single-threaded WASM.
-- **Future:** If `SharedArrayBuffer` + Atomics become reliably available (requires
-  COOP/COEP headers, already served by the app), real TBB or a
-  threading-capable Emscripten build could be explored. The stub headers could
-  then be replaced with a real TBB port without touching `libslic3r` callsites.
+- **Superseded (partially) by ADR-011:** a second, multithreaded engine
+  variant now exists alongside these stubs — real oneTBB linked against
+  Emscripten pthreads, served where `SharedArrayBuffer` is actually
+  available. These stub headers are unchanged and still exactly describe the
+  single-threaded engine, which remains the only variant GitHub Pages (the
+  primary deployment) serves; see ADR-011 for the MT variant and its
+  Cloudflare-only deployment.
