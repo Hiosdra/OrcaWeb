@@ -264,6 +264,10 @@ export function useSliceQueue(
 
   const configSnapshotRef = useRef({ config, epoch: 0 })
 
+  // A file read can outlive cancellation or a worker restart. Incrementing
+  // this generation invalidates the eventual postMessage from that read.
+  const sliceRequestGeneration = useRef(0)
+
   const onSettingsImportedRef = useRef(onSettingsImported)
   useEffect(() => { onSettingsImportedRef.current = onSettingsImported }, [onSettingsImported])
 
@@ -414,12 +418,15 @@ export function useSliceQueue(
 
     const configSnapshot = configSnapshotRef.current
     dispatch({ type: 'SLICE_STARTED', id: next.id, configEpoch: configSnapshot.epoch })
+    const requestGeneration = sliceRequestGeneration.current
     void (async () => {
       try {
         const stl = await next.stlFile!.arrayBuffer()
+        if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
         getWorker().postMessage({ type: 'SLICE', stl, config: configSnapshot.config }, [stl])
       } catch {
+        if (requestGeneration !== sliceRequestGeneration.current) return
         dispatch({ type: 'SLICE_FAILED', message: 'Failed to read file' })
       }
     })()
@@ -541,6 +548,7 @@ export function useSliceQueue(
 
   const cancel = useCallback(() => {
     if (!state.currentId && !state.plate.slicing) return
+    sliceRequestGeneration.current += 1
     terminateWorker()
     setWasmStatus('idle')
     dispatch({ type: 'CANCELLED' })
@@ -553,6 +561,7 @@ export function useSliceQueue(
       // Removing the item being sliced: only a worker restart can abort the
       // synchronous WASM call. The queue keeps running — the next ready item
       // is posted to the fresh worker automatically.
+      sliceRequestGeneration.current += 1
       terminateWorker()
       setWasmStatus('idle')
       repostConversions()
@@ -599,12 +608,15 @@ export function useSliceQueue(
 
     const configSnapshot = configSnapshotRef.current
     dispatch({ type: 'PLATE_STARTED', configEpoch: configSnapshot.epoch })
+    const requestGeneration = sliceRequestGeneration.current
     void (async () => {
       try {
         const stls = await Promise.all(readyItems.map((i) => i.stlFile!.arrayBuffer()))
+        if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
         getWorker().postMessage({ type: 'SLICE_MULTI', stls, config: configSnapshot.config }, stls)
       } catch (err) {
+        if (requestGeneration !== sliceRequestGeneration.current) return
         dispatch({ type: 'PLATE_FAILED', message: err instanceof Error ? err.message : String(err) })
       }
     })()
