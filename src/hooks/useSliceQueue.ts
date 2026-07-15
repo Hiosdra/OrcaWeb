@@ -48,14 +48,14 @@ type QueueAction =
   | { type: 'REMOVE_ITEM'; id: string }
   | { type: 'RUN_QUEUE' }
   | { type: 'QUEUE_IDLE' }
-  | { type: 'SLICE_STARTED'; id: string }
+  | { type: 'SLICE_STARTED'; id: string; configEpoch: number }
   | { type: 'SLICE_PROGRESS'; progress: SliceProgress }
   | { type: 'SLICE_DONE'; gcode: string }
   | { type: 'SLICE_FAILED'; message: string }
-  | { type: 'PLATE_STARTED' }
+  | { type: 'PLATE_STARTED'; configEpoch: number }
   | { type: 'PLATE_DONE'; gcode: string }
   | { type: 'PLATE_FAILED'; message: string }
-  | { type: 'CONFIG_CHANGED' }
+  | { type: 'CONFIG_CHANGED'; epoch: number }
   | { type: 'CANCELLED' }
   | { type: 'ENGINE_FAILED'; message: string }
 
@@ -123,7 +123,7 @@ function reducer(state: QueueState, action: QueueAction): QueueState {
       return {
         ...state,
         currentId: action.id,
-        sliceStartEpoch: state.configEpoch,
+        sliceStartEpoch: action.configEpoch,
         items: patchItem(state.items, action.id, { status: 'slicing', progress: undefined }),
       }
 
@@ -168,7 +168,7 @@ function reducer(state: QueueState, action: QueueAction): QueueState {
       return {
         ...state,
         plate: { slicing: true, gcode: null, error: null, stale: false, progress: undefined },
-        plateStartEpoch: state.configEpoch,
+        plateStartEpoch: action.configEpoch,
       }
 
     case 'PLATE_DONE':
@@ -187,12 +187,9 @@ function reducer(state: QueueState, action: QueueAction): QueueState {
       return { ...state, plate: { slicing: false, gcode: null, error: action.message, stale: false, progress: undefined } }
 
     case 'CONFIG_CHANGED': {
-      const hasResults = state.items.some((i) => i.status === 'done' && !i.stale) || state.plate.gcode
-      const hasInFlight = state.currentId !== null || state.plate.slicing
-      if (!hasResults && !hasInFlight) return state // nothing the epoch bump would affect
       return {
         ...state,
-        configEpoch: state.configEpoch + 1,
+        configEpoch: action.epoch,
         items: state.items.map((i) => (i.status === 'done' ? { ...i, stale: true } : i)),
         plate: state.plate.gcode ? { ...state.plate, stale: true } : state.plate,
       }
@@ -263,8 +260,7 @@ export function useSliceQueue(
   // one the worker sends with WASM_LOADED (from engine-version.json).
   const [engineLabel, setEngineLabel] = useState<string>(__ORCA_ENGINE_VERSION__)
 
-  const configRef = useRef(config)
-  useEffect(() => { configRef.current = config }, [config])
+  const configSnapshotRef = useRef({ config, epoch: 0 })
 
   const onSettingsImportedRef = useRef(onSettingsImported)
   useEffect(() => { onSettingsImportedRef.current = onSettingsImported }, [onSettingsImported])
@@ -308,14 +304,16 @@ export function useSliceQueue(
     }
   }, [])
 
-  // Mark results stale whenever the effective config changes after they were
-  // produced (skip the mount run — nothing has been sliced yet).
-  const configSeenRef = useRef<OrcaConfig | null>(null)
+  // Keep config and epoch as one snapshot so a delayed file read cannot send
+  // a newer config than the epoch recorded for its slice request.
   useEffect(() => {
-    if (configSeenRef.current !== null && configSeenRef.current !== config) {
-      dispatch({ type: 'CONFIG_CHANGED' })
+    if (configSnapshotRef.current.config === config) return
+    const snapshot = {
+      config,
+      epoch: configSnapshotRef.current.epoch + 1,
     }
-    configSeenRef.current = config
+    configSnapshotRef.current = snapshot
+    dispatch({ type: 'CONFIG_CHANGED', epoch: snapshot.epoch })
   }, [config])
 
   // ── Worker messages → reducer ─────────────────────────────────────────────
@@ -412,12 +410,13 @@ export function useSliceQueue(
       return
     }
 
-    dispatch({ type: 'SLICE_STARTED', id: next.id })
+    const configSnapshot = configSnapshotRef.current
+    dispatch({ type: 'SLICE_STARTED', id: next.id, configEpoch: configSnapshot.epoch })
     void (async () => {
       try {
         const stl = await next.stlFile!.arrayBuffer()
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
-        getWorker().postMessage({ type: 'SLICE', stl, config: configRef.current }, [stl])
+        getWorker().postMessage({ type: 'SLICE', stl, config: configSnapshot.config }, [stl])
       } catch {
         dispatch({ type: 'SLICE_FAILED', message: 'Failed to read file' })
       }
@@ -569,10 +568,11 @@ export function useSliceQueue(
     dispatch({ type: 'RUN_QUEUE' })
   }, [])
 
-  // Exports one queue item's current STL + the live config as a .3mf.
+  // Exports one queue item's current STL + config snapshot as a .3mf.
   // Independent of slicing — works on any item with STL data, sliced or not.
   const export3mf = useCallback((item: QueueItem): Promise<ArrayBuffer> => {
     if (!item.stlFile) return Promise.reject(new Error('No model data for this item'))
+    const configSnapshot = configSnapshotRef.current
     return new Promise<ArrayBuffer>((resolve, reject) => {
       const requestId = crypto.randomUUID()
       export3mfResolvers.current.set(requestId, { itemId: item.id, resolve, reject })
@@ -580,7 +580,7 @@ export function useSliceQueue(
         try {
           const stl = await item.stlFile!.arrayBuffer()
           if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
-          getWorker().postMessage({ type: 'WRITE_3MF', stl, config: configRef.current, requestId }, [stl])
+          getWorker().postMessage({ type: 'WRITE_3MF', stl, config: configSnapshot.config, requestId }, [stl])
         } catch (err) {
           export3mfResolvers.current.delete(requestId)
           reject(err instanceof Error ? err : new Error(String(err)))
@@ -594,12 +594,13 @@ export function useSliceQueue(
     const readyItems = state.items.filter((i) => i.status === 'ready' && i.stlFile != null)
     if (readyItems.length === 0) return
 
-    dispatch({ type: 'PLATE_STARTED' })
+    const configSnapshot = configSnapshotRef.current
+    dispatch({ type: 'PLATE_STARTED', configEpoch: configSnapshot.epoch })
     void (async () => {
       try {
         const stls = await Promise.all(readyItems.map((i) => i.stlFile!.arrayBuffer()))
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
-        getWorker().postMessage({ type: 'SLICE_MULTI', stls, config: configRef.current }, stls)
+        getWorker().postMessage({ type: 'SLICE_MULTI', stls, config: configSnapshot.config }, stls)
       } catch (err) {
         dispatch({ type: 'PLATE_FAILED', message: err instanceof Error ? err.message : String(err) })
       }
