@@ -224,8 +224,13 @@ jobs:
           # contains "." which is a regex metacharacter; matching it literally
           # this way sidesteps needing to escape it correctly in a jq/bash
           # string that's already been through one layer of interpolation.
+          # Tags must be the base tag or "-patchN" with a purely numeric N —
+          # startswith() alone also matched an unrelated "-patch2-multithreaded"
+          # release from other in-flight work, whose non-numeric suffix crashed
+          # the tonumber below and, under `set -e`, killed this step before it
+          # ever reached its own gh-pages fallback further down.
           WASM_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq "
-            [.[] | .tagName | select(. == \"${BASE_TAG}\" or startswith(\"${BASE_TAG}-patch\"))]
+            [.[] | .tagName | select(. == \"${BASE_TAG}\" or (startswith(\"${BASE_TAG}-patch\") and (ltrimstr(\"${BASE_TAG}-patch\") | test(\"^[0-9]+\$\"))))]
             | sort_by(if . == \"${BASE_TAG}\" then 0 else (ltrimstr(\"${BASE_TAG}-patch\") | tonumber) end)
             | last // empty
           ")
