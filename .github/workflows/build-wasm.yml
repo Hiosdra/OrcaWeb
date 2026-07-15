@@ -604,8 +604,12 @@ jobs:
         run: |
           BASE_TAG="wasm-$ORCA_VERSION"
           if gh release view "$BASE_TAG" --repo "$GITHUB_REPOSITORY" &>/dev/null; then
+            # Require a purely numeric "-patchN" suffix — startswith() alone
+            # also matches unrelated releases like "-patch2-multithreaded"
+            # from other in-flight work, whose non-numeric suffix would crash
+            # tonumber (see the matching fix in deploy.yml's WASM_TAG lookup).
             LATEST_PATCH=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq "
-              [.[] | .tagName | select(startswith(\"${BASE_TAG}-patch\")) | split(\"-patch\")[1] | tonumber]
+              [.[] | .tagName | select(startswith(\"${BASE_TAG}-patch\") and (split(\"-patch\")[1] | test(\"^[0-9]+\$\"))) | split(\"-patch\")[1] | tonumber]
               | max // 0
             ")
             NEXT_PATCH=$((LATEST_PATCH + 1))
