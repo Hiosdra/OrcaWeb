@@ -362,6 +362,16 @@ Engine-side 3MF write + read (`orc_write_3mf` / `orc_read_3mf`, issue #108) are 
     # here regardless of which files are present (see ADR-011).
     ```
 
+=== "PR snapshots (GitHub Pages)"
+    ```bash
+    # pr-preview.yml runs for PRs whose source branch is in this repository.
+    # Each push builds the UI into previews/pr-<number>/ on gh-pages and posts
+    # the URL on the PR. It reuses app/wasm/ from production, so snapshots do
+    # not publish another large WASM binary. Closing the PR removes the files.
+    # Fork PRs intentionally do not receive a snapshot: untrusted PR code is
+    # never run with credentials that can write to gh-pages.
+    ```
+
 === "Mirror (Cloudflare Workers)"
     ```bash
     # Cloudflare Workers Builds (Git integration), on push to master
