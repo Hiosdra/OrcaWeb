@@ -13,7 +13,7 @@ const state = {
 
 describe('slice queue mutual exclusion', () => {
   it('does not start a plate while single-file work is active', () => {
-    expect(sliceQueueReducer({ ...state, currentId: 'item-1', running: true }, { type: 'PLATE_STARTED' }))
+    expect(sliceQueueReducer({ ...state, currentId: 'item-1', running: true }, { type: 'PLATE_STARTED', configEpoch: 0 }))
       .toEqual({ ...state, currentId: 'item-1', running: true })
   })
 
