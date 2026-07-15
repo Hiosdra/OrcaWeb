@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Restore dep cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: orca-wasm/deps-install
           key: wasm-deps-Linux-orca-v2.4.0-occt-7.8.1-v16
@@ -21,7 +21,7 @@ jobs:
           ls -la orca-wasm/deps-install/lib || echo "No libs"
 
       - name: Upload deps as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wasm-deps-extracted
           path: orca-wasm/deps-install/
