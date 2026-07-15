@@ -48,3 +48,32 @@ test('uploads the Voron Cube and slices it end-to-end through the UI', async ({ 
 
   expect(consoleErrors, `unexpected console errors:\n${consoleErrors.join('\n')}`).toEqual([])
 })
+
+test('keeps an imported machine profile active when the filament changes', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('model-file-input').setInputFiles(VORON_CUBE_STL)
+  await page.getByTestId('tab-settings').click()
+
+  await page.getByTestId('profile-file-input').setInputFiles({
+    name: 'Voron 350.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({
+      type: 'machine',
+      name: 'Voron 350',
+      printer_model: 'Voron 2 350',
+      printable_area: '0x0,350x0,350x350,0x350',
+    })),
+  })
+
+  const profileChip = page.getByText(/Profile: Voron 350/)
+  await expect(profileChip).toBeVisible()
+  const selects = page.locator('select')
+  await expect(selects.nth(0)).toHaveValue('Imported: Voron 350')
+
+  await selects.nth(1).selectOption('PETG')
+
+  await expect(profileChip).toBeVisible()
+  await expect(selects.nth(0)).toHaveValue('Imported: Voron 350')
+  await page.getByTitle('Remove imported profile').click()
+  await expect(profileChip).toBeHidden()
+})

@@ -7,9 +7,17 @@ import { UploadIcon, ChevronIcon } from './icons'
 interface Props {
   config: OrcaConfig
   onChange: (patch: Partial<OrcaConfig>) => void
+  onProfileImport: (profile: {
+    name: string
+    type: 'machine' | 'filament' | 'process' | 'print'
+    settings: Partial<OrcaConfig>
+  }) => void
+  activeImport: { name: string; type: string; settingCount: number } | null
+  onRemoveImport: () => void
   selectedPreset: string
   onPresetChange: (name: string) => void
   selectedPrinter: string
+  importedPrinterLabel?: string
   onPrinterChange: (name: string) => void
   selectedFilament: string
   onFilamentChange: (name: string) => void
@@ -18,9 +26,13 @@ interface Props {
 export function SettingsPanel({
   config,
   onChange,
+  onProfileImport,
+  activeImport,
+  onRemoveImport,
   selectedPreset,
   onPresetChange,
   selectedPrinter,
+  importedPrinterLabel,
   onPrinterChange,
   selectedFilament,
   onFilamentChange,
@@ -46,14 +58,14 @@ export function SettingsPanel({
         if (total === 0) {
           setImportMsg({ ok: false, text: 'No recognised settings found in this JSON.' })
         } else {
-          onChange(patch)
+          const rawType = parsed?.type
+          const profileType = rawType === 'machine' || rawType === 'filament' || rawType === 'process'
+            ? rawType
+            : 'print'
           const profileName = typeof parsed?.name === 'string' ? parsed.name : null
-          const profileType = typeof parsed?.type === 'string' ? parsed.type : null
           const label = profileName ? `"${profileName}"` : `"${file.name}"`
-          const typeSuffix = profileType === 'machine'
-            ? ` · machine profile · ${total} settings`
-            : ` · ${total} settings`
-          setImportMsg({ ok: true, text: `Imported ${label}${typeSuffix}` })
+          onProfileImport({ name: profileName ?? file.name, type: profileType, settings: patch })
+          setImportMsg({ ok: true, text: `Imported ${label} · ${profileType} profile · ${total} settings` })
         }
       } catch {
         setImportMsg({ ok: false, text: 'Invalid JSON file.' })
@@ -69,6 +81,7 @@ export function SettingsPanel({
       <div>
         <input
           ref={fileInputRef}
+          data-testid="profile-file-input"
           type="file"
           accept=".json"
           className="hidden"
@@ -88,12 +101,29 @@ export function SettingsPanel({
         )}
       </div>
 
+      {activeImport && (
+        <div className="flex items-center justify-between gap-2 rounded-xl border border-orca-200 bg-orca-50 px-3 py-2 text-xs text-orca-700">
+          <span className="min-w-0 truncate font-medium">
+            Profile: {activeImport.name} · {activeImport.type} · {activeImport.settingCount} settings
+          </span>
+          <button
+            onClick={onRemoveImport}
+            title="Remove imported profile"
+            className="shrink-0 rounded px-1 text-orca-600 hover:bg-orca-100 hover:text-orca-800"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Printer */}
       <Section title="Printer">
         <SelectField
           label="Printer"
-          value={selectedPrinter}
-          options={Object.keys(PRINTER_PRESETS)}
+          value={importedPrinterLabel ?? selectedPrinter}
+          options={importedPrinterLabel
+            ? [...Object.keys(PRINTER_PRESETS), importedPrinterLabel]
+            : Object.keys(PRINTER_PRESETS)}
           onChange={onPrinterChange}
         />
       </Section>

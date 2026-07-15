@@ -21,7 +21,34 @@ interface SavedSettings {
   printer: string
   filament: string
   preset: string
-  overrides: Partial<OrcaConfig>
+  manualOverrides: Partial<OrcaConfig>
+  importedProfile?: ImportedProfile
+  overrides?: Partial<OrcaConfig>
+}
+
+type ProfileType = 'machine' | 'filament' | 'process' | 'print'
+
+interface ImportedProfile {
+  name: string
+  type: ProfileType
+  settings: Partial<OrcaConfig>
+}
+
+function isProfileType(value: unknown): value is ProfileType {
+  return value === 'machine' || value === 'filament' || value === 'process' || value === 'print'
+}
+
+function countProfileSettings(settings: Partial<OrcaConfig>): number {
+  const { _passthrough, ...known } = settings
+  return Object.keys(known).length + Object.keys(_passthrough ?? {}).length
+}
+
+function mergeConfigLayers(...layers: Partial<OrcaConfig>[]): OrcaConfig {
+  const passthrough = Object.assign({}, ...layers.map((layer) => layer._passthrough ?? {}))
+  return {
+    ...Object.assign({}, ...layers),
+    ...(Object.keys(passthrough).length > 0 ? { _passthrough: passthrough } : {}),
+  } as OrcaConfig
 }
 
 function loadSavedSettings(): SavedSettings | null {
@@ -40,7 +67,15 @@ function loadSavedSettings(): SavedSettings | null {
         ? s.filament : 'PLA',
       preset: typeof s.preset === 'string' && PRESETS.some((p) => p.name === s.preset)
         ? s.preset : 'standard',
-      overrides: s.overrides && typeof s.overrides === 'object' ? s.overrides : {},
+      manualOverrides: s.manualOverrides && typeof s.manualOverrides === 'object'
+        ? s.manualOverrides
+        : s.overrides && typeof s.overrides === 'object' ? s.overrides : {},
+      importedProfile: s.importedProfile && typeof s.importedProfile === 'object'
+        && typeof s.importedProfile.name === 'string'
+        && isProfileType(s.importedProfile.type)
+        && s.importedProfile.settings && typeof s.importedProfile.settings === 'object'
+        ? s.importedProfile as ImportedProfile
+        : undefined,
     }
   } catch {
     return null
@@ -79,7 +114,8 @@ export default function App() {
   const [selectedPreset, setSelectedPreset] = useState(saved?.preset ?? 'standard')
   const [selectedPrinter, setSelectedPrinter] = useState(saved?.printer ?? Object.keys(PRINTER_PRESETS)[0])
   const [selectedFilament, setSelectedFilament] = useState(saved?.filament ?? 'PLA')
-  const [configOverrides, setConfigOverrides] = useState<Partial<OrcaConfig>>(saved?.overrides ?? {})
+  const [manualOverrides, setManualOverrides] = useState<Partial<OrcaConfig>>(saved?.manualOverrides ?? {})
+  const [importedProfile, setImportedProfile] = useState<ImportedProfile | null>(saved?.importedProfile ?? null)
   const [importNotice, setImportNotice] = useState<string | null>(null)
 
   const baseConfig = useMemo(
@@ -87,8 +123,8 @@ export default function App() {
     [selectedPrinter, selectedFilament, selectedPreset],
   )
   const config: OrcaConfig = useMemo(
-    () => ({ ...baseConfig, ...configOverrides }),
-    [baseConfig, configOverrides],
+    () => mergeConfigLayers(baseConfig, importedProfile?.settings ?? {}, manualOverrides),
+    [baseConfig, importedProfile, manualOverrides],
   )
 
   useEffect(() => {
@@ -97,21 +133,16 @@ export default function App() {
         printer: selectedPrinter,
         filament: selectedFilament,
         preset: selectedPreset,
-        overrides: configOverrides,
+        manualOverrides,
+        ...(importedProfile ? { importedProfile } : {}),
       } satisfies SavedSettings))
     } catch { /* storage full or unavailable — settings just won't persist */ }
-  }, [selectedPrinter, selectedFilament, selectedPreset, configOverrides])
+  }, [selectedPrinter, selectedFilament, selectedPreset, manualOverrides, importedProfile])
 
-  // Settings embedded in an imported file (3MF) — merged on top of the
-  // user's current overrides, with a visible notice instead of a silent swap.
+  // Settings embedded in an imported file (3MF) form their own layer so later
+  // dropdown changes cannot silently erase them.
   const handleSettingsImported = useCallback((patch: Partial<OrcaConfig>, filename: string) => {
-    setConfigOverrides((prev) => ({
-      ...prev,
-      ...patch,
-      ...(prev._passthrough || patch._passthrough
-        ? { _passthrough: { ...prev._passthrough, ...patch._passthrough } }
-        : {}),
-    }))
+    setImportedProfile({ name: filename, type: 'print', settings: patch })
     // Sync the dropdowns too — without this, config.printer_model/filament_type
     // get overridden correctly (visible on the Slice tab) but the Settings tab
     // dropdowns keep showing whatever was selected before import, and touching
@@ -144,7 +175,34 @@ export default function App() {
 
   const handlePresetChange = (name: string) => {
     setSelectedPreset(name)
-    setConfigOverrides({})
+    setManualOverrides({})
+    setImportedProfile((profile) => profile?.type === 'process' ? null : profile)
+  }
+
+  const handleProfileImported = (profile: ImportedProfile) => {
+    setImportedProfile(profile)
+    setManualOverrides({})
+    const printer = profile.settings.printer_model === undefined
+      ? undefined
+      : findPresetKeyByField(PRINTER_PRESETS, 'printer_model', profile.settings.printer_model)
+    if (printer) setSelectedPrinter(printer)
+    const filament = profile.settings.filament_type === undefined
+      ? undefined
+      : findPresetKeyByField(FILAMENT_PRESETS, 'filament_type', profile.settings.filament_type)
+    if (filament) setSelectedFilament(filament)
+  }
+
+  const handlePrinterChange = (name: string) => {
+    if (name === `Imported: ${importedProfile?.name}`) return
+    setSelectedPrinter(name)
+    setManualOverrides({})
+    setImportedProfile((profile) => profile?.type === 'machine' ? null : profile)
+  }
+
+  const handleFilamentChange = (name: string) => {
+    setSelectedFilament(name)
+    setManualOverrides({})
+    setImportedProfile((profile) => profile?.type === 'filament' ? null : profile)
   }
 
   // ── Derived state ─────────────────────────────────────────────────────────
@@ -296,13 +354,21 @@ export default function App() {
             <div className="bg-white rounded-2xl border border-slate-200 p-5 overflow-y-auto">
               <SettingsPanel
                 config={config}
-                onChange={(patch) => setConfigOverrides((prev) => ({ ...prev, ...patch }))}
+                onChange={(patch) => setManualOverrides((prev) => mergeConfigLayers(prev, patch))}
+                onProfileImport={handleProfileImported}
+                activeImport={importedProfile && {
+                  name: importedProfile.name,
+                  type: importedProfile.type,
+                  settingCount: countProfileSettings(importedProfile.settings),
+                }}
+                onRemoveImport={() => setImportedProfile(null)}
                 selectedPreset={selectedPreset}
                 onPresetChange={handlePresetChange}
                 selectedPrinter={selectedPrinter}
-                onPrinterChange={(name) => { setSelectedPrinter(name); setConfigOverrides({}) }}
+                importedPrinterLabel={importedProfile?.type === 'machine' ? `Imported: ${importedProfile.name}` : undefined}
+                onPrinterChange={handlePrinterChange}
                 selectedFilament={selectedFilament}
-                onFilamentChange={(name) => { setSelectedFilament(name); setConfigOverrides({}) }}
+                onFilamentChange={handleFilamentChange}
               />
               <button
                 onClick={() => setActiveTab('slice')}
