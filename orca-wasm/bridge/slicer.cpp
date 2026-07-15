@@ -125,31 +125,33 @@ static void post_slice_progress(int percent, const std::string& stage) {
     }, percent, stage.c_str());
 }
 
-static void attach_progress_callback(Slic3r::Print& print) {
-    auto last_percent = std::make_shared<int>(-1);
-    auto last_stage = std::make_shared<std::string>();
-    auto last_update_ms = std::make_shared<double>(-100.0);
-    auto progress_mutex = std::make_shared<std::mutex>();
+struct ProgressState {
+    int last_percent = -1;
+    std::string last_stage;
+    double last_update_ms = -100.0;
+    std::mutex mutex;
+};
 
-    print.set_status_callback([last_percent, last_stage, last_update_ms, progress_mutex](const Slic3r::PrintBase::SlicingStatus& status) {
+static void attach_progress_callback(Slic3r::Print& print) {
+    auto state = std::make_shared<ProgressState>();
+
+    print.set_status_callback([state](const Slic3r::PrintBase::SlicingStatus& status) {
         if (status.percent < 0)
             return;
 
         const double now = emscripten_get_now();
-        bool should_emit = false;
-        int percent = 0;
-        {
-            std::lock_guard<std::mutex> lock(*progress_mutex);
-            percent = std::max(*last_percent, std::min(status.percent, 100));
-            should_emit = percent != *last_percent || status.text != *last_stage || now - *last_update_ms >= 100.0;
-            if (should_emit) {
-                *last_percent = percent;
-                *last_stage = status.text;
-                *last_update_ms = now;
-            }
-        }
-        if (should_emit)
+        std::lock_guard<std::mutex> lock(state->mutex);
+        const int percent = std::max(state->last_percent, std::min(status.percent, 100));
+        const bool should_emit =
+            status.text != state->last_stage
+            || (percent == 100 && state->last_percent != 100)
+            || (percent != state->last_percent && now - state->last_update_ms >= 100.0);
+        if (should_emit) {
+            state->last_percent = percent;
+            state->last_stage = status.text;
+            state->last_update_ms = now;
             post_slice_progress(percent, status.text);
+        }
     });
 }
 

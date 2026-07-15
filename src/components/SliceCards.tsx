@@ -278,7 +278,14 @@ export function QueueItemCard({
       </div>
 
       {item.status === 'slicing' && item.progress && (
-        <div className="h-1 bg-slate-100" aria-label={`Slicing progress: ${item.progress.percent}%`}>
+        <div
+          role="progressbar"
+          aria-valuenow={item.progress.percent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={`Slicing progress: ${item.progress.percent}%`}
+          className="h-1 bg-slate-100"
+        >
           <div className="h-full bg-orca-500 transition-[width] duration-200" style={{ width: `${item.progress.percent}%` }} />
         </div>
       )}
@@ -376,7 +383,14 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
       </div>
 
       {plate.slicing && plate.progress && (
-        <div className="h-1 bg-slate-100" aria-label={`Plate slicing progress: ${plate.progress.percent}%`}>
+        <div
+          role="progressbar"
+          aria-valuenow={plate.progress.percent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={`Plate slicing progress: ${plate.progress.percent}%`}
+          className="h-1 bg-slate-100"
+        >
           <div className="h-full bg-orca-500 transition-[width] duration-200" style={{ width: `${plate.progress.percent}%` }} />
         </div>
       )}
