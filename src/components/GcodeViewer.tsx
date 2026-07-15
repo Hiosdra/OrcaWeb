@@ -209,9 +209,13 @@ export function parseGcode(gcode: string): ParseResult {
     if (g === 'M82') { extrusionRelative = false; continue }
     if (g === 'G92') {
       for (let k = 1; k < cmd.length; k++) {
-        if (cmd[k][0]?.toUpperCase() !== 'E') continue
-        const e = parseFloat(cmd[k].slice(1))
-        if (!isNaN(e)) ce = e
+        const c = cmd[k][0]?.toUpperCase()
+        const v = parseFloat(cmd[k].slice(1))
+        if (isNaN(v)) continue
+        if (c === 'X') cx = v
+        else if (c === 'Y') cy = v
+        else if (c === 'Z') cz = v
+        else if (c === 'E') ce = v
       }
       continue
     }
