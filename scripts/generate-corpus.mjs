@@ -174,8 +174,12 @@ function writeBytes(module, bytes) {
 
 function checkedMalloc(module, size, label) {
   const ptr = module._malloc(size)
-  if (ptr === 0) throw new Error(`Out of memory allocating ${label} (${size} bytes)`)
+  if (ptr === 0 && size !== 0) throw new Error(`Out of memory allocating ${label} (${size} bytes)`)
   return ptr
+}
+
+function free(module, ptr) {
+  if (ptr !== 0) module._free(ptr)
 }
 
 function decodeError(module, session) {
@@ -191,7 +195,7 @@ function initSession(module, session, configJson) {
   const configBytes = new TextEncoder().encode(configJson)
   const configPtr = writeBytes(module, configBytes)
   const rc = module._orc_init(session, configPtr, configBytes.length)
-  module._free(configPtr)
+  free(module, configPtr)
   if (rc !== 0) throw new Error(`orc_init failed (${rc}): ${decodeError(module, session)}`)
 }
 
@@ -208,7 +212,7 @@ function sliceOnce(module, session, stlBytes) {
         try { return module.UTF8ToString(gcodePtr, gcodeLen) } finally { module._orc_free(gcodePtr) }
       } finally { module._free(outLenPtr) }
     } finally { module._free(outPtrPtr) }
-  } finally { module._free(stlPtr) }
+  } finally { free(module, stlPtr) }
 }
 
 // ── base profile (matches orca-wasm/scripts/smoke-test.mjs's representative config) ──

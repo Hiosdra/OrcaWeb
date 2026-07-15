@@ -7,7 +7,7 @@ function fakeModule(failAt: number) {
   const freed: number[] = []
   const module = {
     HEAPU8: {
-      set: (_bytes: Uint8Array, ptr: number) => expect(ptr).not.toBe(0),
+      set: (bytes: Uint8Array, ptr: number) => { if (bytes.length > 0) expect(ptr).not.toBe(0) },
       slice: () => new Uint8Array(),
     },
     _malloc: () => (++allocation === failAt ? 0 : allocation * 16),
@@ -42,4 +42,12 @@ describe('WASM allocation failures', () => {
       }
     })
   }
+
+  it('permits zero-sized allocations without freeing null pointers', () => {
+    const { module, freed } = fakeModule(Number.POSITIVE_INFINITY)
+    module._malloc = (size: number) => size === 0 ? 0 : 16
+    module.getValue = () => 32
+    expect(() => sliceMultiStl(module, 1, new Uint8Array(), new Int32Array(), 0, '{}')).not.toThrow()
+    expect(freed).toEqual([16, 16, 16])
+  })
 })

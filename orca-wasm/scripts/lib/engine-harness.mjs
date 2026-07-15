@@ -159,8 +159,12 @@ export function writeBytes(module, bytes) {
 
 export function checkedMalloc(module, size, label) {
   const ptr = module._malloc(size)
-  if (ptr === 0) throw new Error(`Out of memory allocating ${label} (${size} bytes)`)
+  if (ptr === 0 && size !== 0) throw new Error(`Out of memory allocating ${label} (${size} bytes)`)
   return ptr
+}
+
+export function free(module, ptr) {
+  if (ptr !== 0) module._free(ptr)
 }
 
 export function decodeError(module, session) {
@@ -176,7 +180,7 @@ export function initSession(module, session, configJson) {
   const configBytes = new TextEncoder().encode(configJson)
   const configPtr = writeBytes(module, configBytes)
   const rc = module._orc_init(session, configPtr, configBytes.length)
-  module._free(configPtr)
+  free(module, configPtr)
   if (rc !== 0) throw new Error(`orc_init failed (${rc}): ${decodeError(module, session)}`)
 }
 
@@ -194,7 +198,7 @@ export function sliceOnce(module, session, stlBytes) {
         try { return module.UTF8ToString(gcodePtr, gcodeLen) } finally { module._orc_free(gcodePtr) }
       } finally { module._free(outLenPtr) }
     } finally { module._free(outPtrPtr) }
-  } finally { module._free(stlPtr) }
+  } finally { free(module, stlPtr) }
 }
 
 export function sliceMultiOnce(module, session, stlBytesArr, extruderIds) {
@@ -213,9 +217,9 @@ export function sliceMultiOnce(module, session, stlBytesArr, extruderIds) {
     const offsetsPtr = checkedMalloc(module, offsets.length * 4, 'STL offset table')
     try {
       for (let i = 0; i < offsets.length; i++) module.setValue(offsetsPtr + i * 4, offsets[i], 'i32')
-      const extruderIdsPtr = extruderIds ? checkedMalloc(module, extruderIds.length * 4, 'extruder ID table') : 0
+      const extruderIdsPtr = extruderIds?.length ? checkedMalloc(module, extruderIds.length * 4, 'extruder ID table') : 0
       try {
-        if (extruderIds) for (let i = 0; i < extruderIds.length; i++) module.setValue(extruderIdsPtr + i * 4, extruderIds[i], 'i32')
+        if (extruderIdsPtr) for (let i = 0; i < extruderIds.length; i++) module.setValue(extruderIdsPtr + i * 4, extruderIds[i], 'i32')
         const outPtrPtr = checkedMalloc(module, 4, 'G-code output pointer')
         try {
           const outLenPtr = checkedMalloc(module, 4, 'G-code output length')
@@ -227,6 +231,6 @@ export function sliceMultiOnce(module, session, stlBytesArr, extruderIds) {
           } finally { module._free(outLenPtr) }
         } finally { module._free(outPtrPtr) }
       } finally { if (extruderIdsPtr) module._free(extruderIdsPtr) }
-    } finally { module._free(offsetsPtr) }
-  } finally { module._free(dataPtr) }
+    } finally { free(module, offsetsPtr) }
+  } finally { free(module, dataPtr) }
 }

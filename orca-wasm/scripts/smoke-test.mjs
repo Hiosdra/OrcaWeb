@@ -43,7 +43,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   sphereStl, loadModule, writeBytes, decodeError,
-  initSession, sliceOnce, sliceMultiOnce, checkedMalloc,
+  initSession, sliceOnce, sliceMultiOnce, checkedMalloc, free,
 } from './lib/engine-harness.mjs'
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
@@ -84,7 +84,7 @@ function write3mfOnce(module, session, stlBytes) {
         try { return module.HEAPU8.slice(dataPtr, dataPtr + dataLen) } finally { module._orc_free(dataPtr) }
       } finally { module._free(outLenPtr) }
     } finally { module._free(outPtrPtr) }
-  } finally { module._free(stlPtr) }
+  } finally { free(module, stlPtr) }
 }
 
 function read3mfOnce(module, mfBytes) {
@@ -107,7 +107,7 @@ function read3mfOnce(module, mfBytes) {
         } finally { module._free(outConfigPtrPtr) }
       } finally { module._free(outStlLenPtr) }
     } finally { module._free(outStlPtrPtr) }
-  } finally { module._free(mfPtr) }
+  } finally { free(module, mfPtr) }
 }
 
 // Binary STL: 80-byte header + uint32 triangle count + N * 50 bytes.

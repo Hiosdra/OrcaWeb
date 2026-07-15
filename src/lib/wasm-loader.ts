@@ -7,7 +7,7 @@ type Allocate = (size: number, label: string) => number
 
 function checkedMalloc(module: OrcaModule, size: number, label: string): number {
   const ptr = module._malloc(size)
-  if (ptr === 0) throw new Error(`Out of memory allocating ${label} (${size} bytes)`)
+  if (ptr === 0 && size !== 0) throw new Error(`Out of memory allocating ${label} (${size} bytes)`)
   return ptr
 }
 
@@ -15,7 +15,7 @@ function withAllocations<T>(module: OrcaModule, operation: (allocate: Allocate) 
   const pointers: number[] = []
   const allocate: Allocate = (size, label) => {
     const ptr = checkedMalloc(module, size, label)
-    pointers.push(ptr)
+    if (ptr !== 0) pointers.push(ptr)
     return ptr
   }
   try {
