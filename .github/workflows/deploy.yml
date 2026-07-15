@@ -198,7 +198,7 @@ jobs:
           echo "Deploying as v${NEW_VERSION}"
 
       # ── Node / Vite app ──────────────────────────────────────────────
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           # Match the version CI type-checks/builds against (ci.yml uses 22).
           node-version: '22'

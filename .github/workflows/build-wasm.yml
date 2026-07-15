@@ -95,7 +95,7 @@ jobs:
           fetch-depth: 0
 
       # ── Node (for the post-build smoke test) ─────────────────────────
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -1060,7 +1060,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -1077,13 +1077,13 @@ jobs:
       # just hit again here because this job downloads into a directory
       # that never got the same override.
       - name: Download st artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: orca-wasm-${{ env.ORCA_VERSION }}-st
           path: public/wasm
 
       - name: Download mt artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: orca-wasm-${{ env.ORCA_VERSION }}-mt
           path: public/wasm
