@@ -108,6 +108,13 @@ export interface QueueItem {
    *  longer reflects the current settings and Slice re-runs it. */
   stale?: boolean
   error?: string
+  /** Latest progress emitted by a progress-capable WASM engine while slicing. */
+  progress?: SliceProgress
+}
+
+export interface SliceProgress {
+  percent: number
+  stage: string
 }
 
 // --- Worker message protocol ---
@@ -145,6 +152,7 @@ export type WorkerOutMessage =
   // already loaded (re-signalled) or on the baked-fallback path.
   | { type: 'WASM_LOADED'; engineLabel?: string }
   | { type: 'WASM_ERROR'; message: string }
+  | { type: 'SLICE_PROGRESS'; percent: number; stage: string }
   | { type: 'SLICE_COMPLETE'; gcode: string }
   | { type: 'SLICE_ERROR'; code: number; message: string }
   | { type: 'SLICE_MULTI_COMPLETE'; gcode: string }

@@ -25,7 +25,8 @@ The React web UI is a temporary proof-of-concept to demonstrate the engine. It i
 │   │       PlateResultCard, ConfigSummary           │    │
 │   │                                                │    │
 │   │  hooks/useSliceQueue.ts (queue state machine:  │    │
-│   │    reducer + worker protocol + cancel/stale)   │    │
+│   │    reducer + worker protocol + cancel/stale +  │    │
+│   │    engine progress)                            │    │
 │   │  worker-singleton.ts (module-level singleton)  │    │
 │   └──────────────────┬─────────────────────────────┘    │
 │                      │ postMessage (ArrayBuffer)         │
@@ -35,6 +36,7 @@ The React web UI is a temporary proof-of-concept to demonstrate the engine. It i
 │   │      ├── _orc_session_create/destroy()          │    │
 │   │      ├── _orc_init(session, configJson)         │    │
 │   │      ├── _orc_slice(session, stl) → gcode       │    │
+│   │      │   + SLICE_PROGRESS { percent, stage }    │    │
 │   │      ├── _orc_slice_multi(session, stls,        │    │
 │   │      │       extruderIds) → gcode string        │    │
 │   │      ├── _orc_obj_to_stl(obj) → stl bytes      │    │
@@ -309,6 +311,7 @@ File drop
   │      │
   │      └─► worker.postMessage(SLICE, stl, config)
   │               │
+  │          SLICE_PROGRESS { percent, stage } → current item UI
   │          SLICE_COMPLETE { gcode }  →  item.status = 'done'
   │          startNextSlice() continues queue
   │
@@ -320,6 +323,7 @@ File drop
              [worker] concatenate + build int32 offset table
                   │
              _orc_slice_multi() → arrange_objects() + slice
+             SLICE_PROGRESS { percent, stage } → plate UI
                   │
              SLICE_MULTI_COMPLETE { gcode }
                   │

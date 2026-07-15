@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import type { OrcaConfig, QueueItem, WorkerOutMessage } from '../types'
+import type { OrcaConfig, QueueItem, SliceProgress, WorkerOutMessage } from '../types'
 import { parseOrcaProfileJson } from '../lib/profiles'
 import {
   getWorker,
@@ -15,6 +15,7 @@ export interface PlateState {
   error: string | null
   /** Config changed after this plate was sliced. */
   stale: boolean
+  progress?: SliceProgress
 }
 
 /**
@@ -48,6 +49,7 @@ type QueueAction =
   | { type: 'RUN_QUEUE' }
   | { type: 'QUEUE_IDLE' }
   | { type: 'SLICE_STARTED'; id: string }
+  | { type: 'SLICE_PROGRESS'; progress: SliceProgress }
   | { type: 'SLICE_DONE'; gcode: string }
   | { type: 'SLICE_FAILED'; message: string }
   | { type: 'PLATE_STARTED' }
@@ -122,8 +124,19 @@ function reducer(state: QueueState, action: QueueAction): QueueState {
         ...state,
         currentId: action.id,
         sliceStartEpoch: state.configEpoch,
-        items: patchItem(state.items, action.id, { status: 'slicing' }),
+        items: patchItem(state.items, action.id, { status: 'slicing', progress: undefined }),
       }
+
+    case 'SLICE_PROGRESS':
+      if (state.currentId) {
+        return {
+          ...state,
+          items: patchItem(state.items, state.currentId, { progress: action.progress }),
+        }
+      }
+      return state.plate.slicing
+        ? { ...state, plate: { ...state.plate, progress: action.progress } }
+        : state
 
     case 'SLICE_DONE': {
       if (!state.currentId) return state // cancelled while the result was in transit
@@ -137,6 +150,7 @@ function reducer(state: QueueState, action: QueueAction): QueueState {
               gcode: action.gcode,
               gcodeFilename: toGcodeFilename(item.name),
               stale: state.configEpoch !== state.sliceStartEpoch || undefined,
+              progress: undefined,
             })
           : state.items,
       }
@@ -147,13 +161,13 @@ function reducer(state: QueueState, action: QueueAction): QueueState {
       return {
         ...state,
         currentId: null,
-        items: patchItem(state.items, state.currentId, { status: 'error', error: action.message }),
+        items: patchItem(state.items, state.currentId, { status: 'error', error: action.message, progress: undefined }),
       }
 
     case 'PLATE_STARTED':
       return {
         ...state,
-        plate: { slicing: true, gcode: null, error: null, stale: false },
+        plate: { slicing: true, gcode: null, error: null, stale: false, progress: undefined },
         plateStartEpoch: state.configEpoch,
       }
 
@@ -165,11 +179,12 @@ function reducer(state: QueueState, action: QueueAction): QueueState {
           gcode: action.gcode,
           error: null,
           stale: state.configEpoch !== state.plateStartEpoch,
+          progress: undefined,
         },
       }
 
     case 'PLATE_FAILED':
-      return { ...state, plate: { slicing: false, gcode: null, error: action.message, stale: false } }
+      return { ...state, plate: { slicing: false, gcode: null, error: action.message, stale: false, progress: undefined } }
 
     case 'CONFIG_CHANGED': {
       const hasResults = state.items.some((i) => i.status === 'done' && !i.stale) || state.plate.gcode
@@ -189,9 +204,9 @@ function reducer(state: QueueState, action: QueueAction): QueueState {
         running: false,
         currentId: null,
         items: state.currentId
-          ? patchItem(state.items, state.currentId, { status: 'ready' })
+          ? patchItem(state.items, state.currentId, { status: 'ready', progress: undefined })
           : state.items,
-        plate: state.plate.slicing ? { ...state.plate, slicing: false } : state.plate,
+        plate: state.plate.slicing ? { ...state.plate, slicing: false, progress: undefined } : state.plate,
       }
 
     case 'ENGINE_FAILED':
@@ -317,6 +332,9 @@ export function useSliceQueue(
           setWasmStatus('error')
           dispatch({ type: 'ENGINE_FAILED', message: `Slicer engine failed: ${msg.message}` })
           rejectAllPendingMf(`Slicer engine failed: ${msg.message}`)
+          return
+        case 'SLICE_PROGRESS':
+          dispatch({ type: 'SLICE_PROGRESS', progress: { percent: msg.percent, stage: msg.stage } })
           return
         case 'SLICE_COMPLETE':
           dispatch({ type: 'SLICE_DONE', gcode: msg.gcode })
