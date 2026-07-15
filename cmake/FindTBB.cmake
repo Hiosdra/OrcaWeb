@@ -2,6 +2,18 @@
 # Creates interface targets TBB::tbb and TBB::tbbmalloc that satisfy
 # find_package(TBB REQUIRED) without linking any real threading library.
 
+if(SLIC3R_WASM_MT)
+  set(_TBB_CONFIG "${CMAKE_PREFIX_PATH}/lib/cmake/TBB/TBBConfig.cmake")
+  if(NOT EXISTS "${_TBB_CONFIG}")
+    message(FATAL_ERROR "MT build requires installed oneTBB: ${_TBB_CONFIG}")
+  endif()
+  include("${_TBB_CONFIG}")
+  set(TBB_FOUND TRUE)
+  set(TBB_INCLUDE_DIRS "${CMAKE_PREFIX_PATH}/include")
+  set(TBB_LIBRARIES TBB::tbb)
+  return()
+endif()
+
 if(NOT DEFINED TBB_SHIM_DIR)
   set(TBB_SHIM_DIR "${CMAKE_CURRENT_LIST_DIR}/../wasm/shims")
 endif()
