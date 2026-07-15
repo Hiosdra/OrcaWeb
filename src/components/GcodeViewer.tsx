@@ -291,7 +291,7 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
   const mountRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<SceneObjects | null>(null)
   const parserWorkerRef = useRef<Worker | null>(null)
-  const parserCacheRef = useRef(new Map<string, ParseResult>())
+  const parserCacheRef = useRef<{ gcode: string; result: ParseResult } | null>(null)
   const parseRequestRef = useRef(0)
   const parsingGcodeRef = useRef('')
   const [parsed, setParsed] = useState<ParseResult | null>(null)
@@ -303,7 +303,7 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
     parserWorkerRef.current = worker
     worker.onmessage = ({ data }: MessageEvent<{ id: number; result: ParseResult }>) => {
       if (data.id !== parseRequestRef.current) return
-      parserCacheRef.current.set(parsingGcodeRef.current, data.result)
+      parserCacheRef.current = { gcode: parsingGcodeRef.current, result: data.result }
       setParsed(data.result)
     }
     return () => worker.terminate()
@@ -311,8 +311,10 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
 
   useEffect(() => {
     const id = ++parseRequestRef.current
-    const cached = parserCacheRef.current.get(gcode)
-    if (cached) { setParsed(cached); return }
+    if (parserCacheRef.current?.gcode === gcode) {
+      setParsed(parserCacheRef.current.result)
+      return
+    }
     setParsed(null)
     parsingGcodeRef.current = gcode
     parserWorkerRef.current?.postMessage({ id, gcode })
@@ -430,7 +432,7 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
           colors.push(col.r, col.g, col.b)
         }
       }
-      travels.push(...layer.travels)
+      for (let i = 0; i < layer.travels.length; i++) travels.push(layer.travels[i])
       extrusionEnds.push(positions.length / 6)
       travelEnds.push(travels.length / 3)
     }

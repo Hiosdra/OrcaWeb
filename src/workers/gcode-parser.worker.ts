@@ -75,7 +75,12 @@ function parseGcode(gcode: string): ParseResult {
       minY = Math.min(minY, y0, y1); maxY = Math.max(maxY, y0, y1)
     }
   }
-  for (const rawLine of gcode.split('\n')) {
+  let position = 0
+  while (position < gcode.length) {
+    let nextNewline = gcode.indexOf('\n', position)
+    if (nextNewline === -1) nextNewline = gcode.length
+    const rawLine = gcode.slice(position, nextNewline)
+    position = nextNewline + 1
     if (rawLine.charCodeAt(0) === 59) {
       const typeMatch = rawLine.match(/^;\s*(?:TYPE|FEATURE):\s*(.+)/i)
       if (typeMatch) { currentFeature = typeMatch[1].trim(); hasFeatureTypes = true; continue }
