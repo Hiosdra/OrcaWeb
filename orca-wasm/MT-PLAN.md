@@ -225,4 +225,10 @@ heuristic rather than assuming MT is always faster.
 - The Cloudflare→GitHub-Pages cross-origin load path is exercised by CI's
   same-origin dev-server checks and by the live `compare-outputs` G-code
   check, but the actual cross-origin-under-COEP fetch is only proven on a
-  real Cloudflare deploy, not locally.
+  real Cloudflare deploy, not locally. Note the pthread pool is spawned from
+  a same-origin `Blob` of the glue (`slicer.worker.ts`), not the cross-origin
+  engine URL — a classic `new Worker(cross-origin-url)` throws SecurityError,
+  so the raw-URL form (used through an earlier revision) would have failed on
+  Cloudflare regardless of headers. The Blob form is the standard cross-origin
+  worker pattern and is verified same-origin; the cross-origin case still
+  needs a real CF deploy to confirm end-to-end.
