@@ -55,9 +55,9 @@ jobs:
 
     # Two variants built from the same source, same as
     # poc/wasm-threads/build.sh's dual-artifact pattern (see
-    # orca-wasm/MT-PLAN.md): "st" is today's existing sequential build
+    # ADR-011): "st" is today's existing sequential build
     # (unchanged behavior), "mt" links against real oneTBB (built from
-    # source below, real Emscripten pthreads — see MT-PLAN.md) for real
+    # source below, real Emscripten pthreads — see ADR-011) for real
     # multi-core slicing. fail-fast: false so an "mt"-only failure (the
     # newer, less-proven variant) never cancels the "st" build that
     # production already depends on.
@@ -80,7 +80,7 @@ jobs:
       # shim path, so the two variants share one script. EXTRA_CXX_FLAGS
       # carries -pthread for mt (empty for st) so every dep + the engine
       # compile with pthread-consistent codegen — mixing pthread and
-      # non-pthread objects doesn't link (see MT-PLAN.md).
+      # non-pthread objects doesn't link (see ADR-011).
       OUTPUT_NAME: ${{ matrix.variant == 'mt' && 'slicer-mt' || 'slicer' }}
       BOOST_THREADING: ${{ matrix.variant == 'mt' && 'multi' || 'single' }}
       SLIC3R_WASM_MT: ${{ matrix.variant == 'mt' && 'ON' || 'OFF' }}
@@ -216,7 +216,7 @@ jobs:
       # explicitly disables Boost.Thread's own pthread support) and adds
       # -pthread to Boost's own compile flags, since Emscripten's -pthread
       # affects codegen (TLS model, atomics) and mixing pthread/non-pthread
-      # object code is not safe to link — see MT-PLAN.md.
+      # object code is not safe to link — see ADR-011.
       #
       # BOOST_LOG_NO_THREADS stays defined for BOTH variants, unlike the
       # other two — found live when mt's link step failed with ~30
@@ -310,7 +310,7 @@ jobs:
           touch "${STAMP}"
 
       # ── GMP / MPFR / CGAL ────────────────────────────────────────────
-      # No threading-specific *code paths* (see MT-PLAN.md), but GMP/MPFR
+      # No threading-specific *code paths* (see ADR-011), but GMP/MPFR
       # are real compiled libraries statically
       # linked into the final slicer-mt.wasm — every object linked into a
       # --shared-memory binary must itself be compiled with atomics/
@@ -805,7 +805,7 @@ jobs:
 
           # mt adds -pthread at compile time for the whole tree (libslic3r,
           # bridge, and the final slicer target all need pthread-consistent
-          # object code — see orca-wasm/MT-PLAN.md) and switches the TBB
+          # object code — see ADR-011) and switches the TBB
           # include dir (real oneTBB headers instead of the ST shims) +
           # SLIC3R_WASM_MT compile define (see orca-wasm/bridge/CMakeLists.txt)
           # so the one threading-aware bridge line flips.
@@ -916,7 +916,7 @@ jobs:
       # The mt variant publishes to the SAME tag with a "-multithreaded"
       # suffix, sharing one patch counter with st (both matrix legs derive
       # the same next-patch number independently from the same st-tag-family
-      # scan — see orca-wasm/MT-PLAN.md — so "wasm-v2.4.0-patch5" and
+      # scan — see ADR-011 — so "wasm-v2.4.0-patch5" and
       # "wasm-v2.4.0-patch5-multithreaded" always describe the same source
       # commit, just two build variants of it). This mirrors the pattern
       # already proven out in poc/wasm-threads/'s
@@ -956,7 +956,7 @@ jobs:
           # --notes "...\n\n..." passed the backslash-n sequences literally,
           # so published notes showed a verbatim "\n\n" instead of a blank line.
           cat > release-notes.md <<EOF
-          Pre-built WASM artifacts for OrcaSlicer $ORCA_VERSION ($( [[ "${{ matrix.variant }}" == "mt" ]] && echo "multithreaded — requires COOP/COEP headers, see orca-wasm/MT-PLAN.md" || echo "single-threaded" )).
+          Pre-built WASM artifacts for OrcaSlicer $ORCA_VERSION ($( [[ "${{ matrix.variant }}" == "mt" ]] && echo "multithreaded — requires COOP/COEP headers, see ADR-011" || echo "single-threaded" )).
 
           Used internally by the deploy workflow. Immutable — a fix to orca-wasm/ publishes a new *-patchN release rather than overwriting this one.
           EOF

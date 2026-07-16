@@ -41,30 +41,33 @@ extra_css:
 
 nav:
   - Home: index.md
-  - Status: status.md
-  - Getting Started: getting-started.md
-  - User Guide: user-guide.md
-  - Architecture: architecture.md
-  - Integration Guide: integration.md
-  - API Reference: api-reference.md
-  - Profiles: profiles.md
-  - Building WASM: wasm-build.md
-  - OrcaSlicer Patch Audit: orca-patch-audit.md
-  - 'Benchmark: G-code Compression': gcode-compression-benchmark.md
-  - 'Benchmark: ST vs MT Engine': st-mt-benchmark.md
-  - Architecture Decisions:
-    - Overview: adr/index.md
-    - 'ADR-001: Client-Side WASM': adr/adr-001-client-side-wasm.md
-    - 'ADR-002: Technology Stack': adr/adr-002-tech-stack.md
-    - 'ADR-003: Web Worker + Singleton': adr/adr-003-web-worker.md
-    - 'ADR-004: Self-Built WASM': adr/adr-004-self-built-wasm.md
-    - 'ADR-005: No slicer.data': adr/adr-005-no-slicer-data.md
-    - 'ADR-006: Engine Patch Strategy': adr/adr-006-patch-strategy.md
-    - 'ADR-007: Sequential TBB Stubs': adr/adr-007-tbb-stubs.md
-    - 'ADR-008: Session-Scoped Engine State': adr/adr-008-session-handle.md
-    - 'ADR-009: WASM Build Smoke Test': adr/adr-009-wasm-smoke-test.md
-    - 'ADR-010: E2E UI Smoke Test': adr/adr-010-e2e-smoke-test.md
-    - 'ADR-011: Multithreaded Engine': adr/adr-011-multithreaded-engine.md
+  - Users:
+    - Getting Started: getting-started.md
+    - User Guide: user-guide.md
+    - Profiles: profiles.md
+  - Developers:
+    - Architecture: architecture.md
+    - Integration Guide: integration.md
+    - API Reference: api-reference.md
+    - Building WASM: wasm-build.md
+  - Project:
+    - Status: status.md
+    - Architecture Decisions:
+      - Overview: adr/index.md
+      - 'ADR-001: Client-Side WASM': adr/adr-001-client-side-wasm.md
+      - 'ADR-002: Technology Stack': adr/adr-002-tech-stack.md
+      - 'ADR-003: Web Worker + Singleton': adr/adr-003-web-worker.md
+      - 'ADR-004: Self-Built WASM': adr/adr-004-self-built-wasm.md
+      - 'ADR-005: No slicer.data': adr/adr-005-no-slicer-data.md
+      - 'ADR-006: Engine Patch Strategy': adr/adr-006-patch-strategy.md
+      - 'ADR-007: Sequential TBB Stubs': adr/adr-007-tbb-stubs.md
+      - 'ADR-008: Session-Scoped Engine State': adr/adr-008-session-handle.md
+      - 'ADR-009: WASM Build Smoke Test': adr/adr-009-wasm-smoke-test.md
+      - 'ADR-010: E2E UI Smoke Test': adr/adr-010-e2e-smoke-test.md
+      - 'ADR-011: Multithreaded Engine': adr/adr-011-multithreaded-engine.md
+  - Internals & Reports:
+    - 'Benchmark: ST vs MT Engine': st-mt-benchmark.md
+    - 'Benchmark: G-code Compression': gcode-compression-benchmark.md
 
 markdown_extensions:
   - admonition

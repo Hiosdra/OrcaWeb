@@ -3,6 +3,15 @@
 **Status:** Accepted  
 **Date:** 2026-06-13
 
+!!! note "OrcaSlicer version since upgraded"
+    This ADR records the decision made on 2026-06-13, when the pinned
+    `ORCA_VERSION` was v2.4.0. The pipeline it describes is unchanged in
+    structure, but the pinned version has since moved to **v2.4.2** (a routine
+    upgrade — see "Upgrading OrcaSlicer version" in
+    [Building WASM](../wasm-build.md#updating-the-orcaslicer-version), not a
+    new ADR). For the currently shipped version see
+    [status.md](../status.md) or [architecture.md](../architecture.md).
+
 ## Context
 
 The initial prototype used pre-built WASM artifacts from an external GitHub

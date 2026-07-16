@@ -1,216 +1,136 @@
-# Status — co działa, co nie działa
+# Status — what works, what doesn't
 
-Ten dokument opisuje aktualny stan projektu: zaimplementowane funkcje, znane ograniczenia i planowane ulepszenia.
+This page describes the current state of the project: implemented features and known limitations. Planned-but-not-yet-implemented work lives in GitHub issues, linked below, instead of an in-page roadmap.
 
-Ostatnia aktualizacja: **2026-07-16** · wersja silnika: **OrcaSlicer v2.4.2** (własny build, wdrożony na produkcji) · wersja aplikacji: **v0.7.57**
+Last updated: **2026-07-16** · engine version: **OrcaSlicer v2.4.2** (self-built, live in production) · app version: **v0.7.57**
 
 ---
 
-## ✅ Działa
+## ✅ Works
 
-### Interfejs użytkownika
+### User interface
 
-| Funkcja | Uwagi |
+| Feature | Notes |
 |---------|-------|
-| Drag & drop pliku STL | ASCII i binary STL; wiele plików naraz — kolejka sekwencyjna, każdy G-code do pobrania osobno |
-| Import pliku 3MF | Silnikowy odczyt (`orc_read_3mf`, natywny reader OrcaSlicera — poprawnie stosuje transformy per-obiekt/instancję); brak fallbacku JS — awaria silnika kończy się błędem importu |
-| Import OBJ | Konwersja OBJ → STL przez natywny parser OrcaSlicer (`objparser.cpp` + `OBJ.cpp`) skompilowany w WASM — bez dodatkowych zależności; obsługuje trójkąty, quady, multi-obiekt |
-| Import STEP | Konwersja STEP → STL przez OCCT 7.8.1 wkompilowane bezpośrednio w `slicer.wasm` (`Model::read_from_step`); bez osobnego pobierania. IGES nieobsługiwane (czytnik STEP OrcaSlicera nie obsługuje IGES) |
-| Podgląd 3D modelu (Three.js) | Model na wirtualnym stole drukarskim w skali mm, OrbitControls |
-| Siatka stołu — dynamiczny rozmiar | Rozmiar stołu pobierany z presetu drukarki lub profilu maszyny |
-| Kształt stołu (`bed_shape`) | Prostokątny lub okrągły (np. Bambu Lab P1S); wizualizacja w podglądzie 3D i G-code |
-| FuzzySkin (szorstkość powierzchni) | Tryby: none / external (tylko zewnętrzne ściany) / all; grubość 0.05–2 mm, rozstaw punktów 0.1–5 mm; libnoise skompilowane dla WASM (Perlin/Billow/RidgedMulti/Voronoi) — od PR #32 |
-| Multi-plik — kolejka sekwencyjna | Drag & drop wielu plików → każdy slice osobno, własny G-code do pobrania |
-| Multi-plik — jeden stół (One plate) | Przycisk „One plate (N)" → wszystkie STL auto-ułożone przez `arrange_objects()` (libnest2d), jeden G-code |
-| Zakładki Model / Settings / Slice | Płynna nawigacja, zakładki zablokowane do momentu wczytania pliku |
-| Panel ustawień | Wybór drukarki, filamentu, jakości |
-| Podgląd G-code (warstwa po warstwie) | Slider warstw, kolorowanie wg typu ruchu (perimeter/infill/support/travel), grube linie 3D, kursor warstwy — od PR #16 |
-| Podgląd G-code — oba dialekty komentarzy | Warstwy wg markerów `;LAYER_CHANGE` / `; CHANGE_LAYER`, typy ruchów z `;TYPE:` **i** `; FEATURE:` (dialekt Bambu — wcześniej kolory typów nie działały dla drukarek BBL), tesselacja łuków `G2`/`G3`, poprawny render trybu wazy/spirali |
-| Statystyki G-code | Czas druku, warstwy, filament (mm/g) na karcie pliku — parsowane z nagłówka i końcówki G-code (oba dialekty komentarzy czasu) |
-| Widok model + G-code obok siebie | Po slicowaniu — synchronizowany układ obok siebie |
-| Pobieranie G-code | Przycisk „Download" z poprawną nazwą pliku; „Download All (.zip)" pakuje wszystkie wyniki do jednego archiwum |
-| Eksport pliku .3mf | Przycisk „.3mf" na sliced karcie — silnik zapisuje siatkę + wbudowane ustawienia OrcaSlicera (`orc_write_3mf`); bez danych stołu/G-code/miniatur (patrz niżej) |
-| Anulowanie slicowania | Przycisk „Cancel" — restart Workera (synchronicznej pętli WASM nie da się przerwać inaczej); oczekujące konwersje OBJ/STEP są ponawiane automatycznie |
-| Wykrywanie nieaktualnych wyników | Zmiana ustawień po slicingu oznacza wynik jako „Sliced with previous settings", przycisk zmienia się w „Re-slice" |
-| Zapamiętywanie ustawień | Drukarka, filament, preset jakości i nadpisania trzymane w `localStorage`, przywracane przy kolejnej wizycie |
-| Kolejka jako maszyna stanów | `useSliceQueue` (reducer) — korelacja odpowiedzi Workera po `requestId`, błąd silnika ubija wszystkie wiszące elementy zamiast zostawiać wieczne spinnery |
-| Status silnika (badge) | „Loading engine…" / „Engine error" w nagłówku |
-| Wersja silnika w nagłówku | `v{app} · {data} · engine v{orca}` pod logo — ten sam tekst na każdej szerokości ekranu (mobile/tablet/desktop) |
-| Stopka — link do źródeł (AGPL) | Widoczny link „Source (AGPL-3.0)" → repo GitHub |
+| Drag & drop STL | ASCII and binary STL; multiple files at once — sequential queue, each G-code downloadable separately |
+| 3MF import | Engine-side read (`orc_read_3mf`, OrcaSlicer's native reader — applies per-object/instance transforms correctly); no JS fallback — an engine failure surfaces as an import error |
+| OBJ import | OBJ → STL conversion via OrcaSlicer's native parser (`objparser.cpp` + `OBJ.cpp`) compiled into WASM — no extra dependencies; supports triangles, quads, multi-object |
+| STEP import | STEP → STL conversion via OCCT 7.8.1 compiled directly into `slicer.wasm` (`Model::read_from_step`); no separate download. IGES unsupported (OrcaSlicer's STEP reader doesn't read IGES) |
+| 3D model preview (Three.js) | Model on a virtual print bed at real mm scale, OrbitControls |
+| Bed grid — dynamic size | Bed size read from the printer preset or machine profile |
+| Bed shape (`bed_shape`) | Rectangular or circular (e.g. Bambu Lab P1S); visualised in both the 3D preview and G-code viewer |
+| Fuzzy skin (surface roughness) | Modes: none / external (outer walls only) / all; thickness 0.05–2 mm, point spacing 0.1–5 mm; libnoise compiled for WASM (Perlin/Billow/RidgedMulti/Voronoi) — since PR #32 |
+| Multi-file — sequential queue | Drag & drop multiple files → each sliced separately, own G-code to download |
+| Multi-file — one plate | "One plate (N)" button — all STLs auto-arranged via `arrange_objects()` (libnest2d), one G-code |
+| Model / Settings / Slice tabs | Smooth navigation, tabs locked until a file is loaded |
+| Settings panel | Printer, filament, and quality selection |
+| G-code preview (layer by layer) | Layer slider, colouring by move type (perimeter/infill/support/travel), thick 3D lines, layer cursor — since PR #16 |
+| G-code preview — both comment dialects | Layers from `;LAYER_CHANGE` / `; CHANGE_LAYER` markers, move types from `;TYPE:` **and** `; FEATURE:` (Bambu dialect — type colours previously didn't work for BBL printers), `G2`/`G3` arc tessellation, correct vase/spiral mode rendering |
+| G-code statistics | Print time, layers, filament (mm/g) on the file card — parsed from the G-code header and footer (both time-comment dialects) |
+| Side-by-side model + G-code view | Synchronised layout after slicing |
+| G-code download | "Download" button with the correct filename; "Download All (.zip)" bundles every result into one archive |
+| .3mf export | ".3mf" button on a sliced card — the engine writes the mesh + embedded OrcaSlicer settings (`orc_write_3mf`); no bed/G-code/thumbnail data (see below) |
+| Slice cancellation | "Cancel" button — restarts the worker (the synchronous WASM slice loop can't be interrupted any other way); pending OBJ/STEP conversions are retried automatically |
+| Stale-result detection | Changing settings after slicing marks a result "Sliced with previous settings"; the button becomes "Re-slice" |
+| Settings persistence | Printer, filament, quality preset, and overrides kept in `localStorage`, restored on the next visit |
+| Queue as a state machine | `useSliceQueue` (reducer) — correlates worker responses by `requestId`; an engine error fails every pending item instead of leaving spinners running forever |
+| Engine status badge | "Loading engine…" / "Engine error" in the header |
+| Engine version in header | `v{app} · {date} · engine v{orca}` under the logo — same text at every screen width |
+| Footer — source link (AGPL) | Visible "Source (AGPL-3.0)" link → GitHub repo |
 
-### Silnik WASM
+### WASM engine
 
-| Funkcja | Uwagi |
+| Feature | Notes |
 |---------|-------|
-| Slicowanie STL → G-code | W Web Workerze, nie blokuje UI |
-| Własny build OrcaSlicer **v2.4.2** | Zbudowany przez `orca-wasm/` + Emscripten; artefakty w release `wasm-v2.4.2` |
-| `orc_obj_to_stl` | Nowy eksport WASM: konwersja OBJ → binary STL bez potrzeby `orc_init`; wynik zwracany jako `ArrayBuffer` do workera |
-| `orc_slice_multi` | Wiele STL → jeden G-code: auto-arrange przez `arrange_objects()` (libnest2d + NLopt); wynik identyczny jak `orc_slice` |
-| `orc_write_3mf` | Nowy eksport WASM: zapis siatki + wbudowanego configu jako `.3mf` przez `Slic3r::store_bbs_3mf()` — bez danych płyty/G-code/miniatur (brak `PartPlateList` w headless bridge); zweryfikowane przez smoke test (rozpakowanie ZIP, obecność `3D/3dmodel.model` + `Metadata/*.config`) |
-| `orc_read_3mf` | Nowy import WASM: odczyt `.3mf` przez `Slic3r::load_bbs_3mf()` — scalona binarna STL (transformy per-instancję/wolumen naniesione przez `ModelObject::mesh()`) + JSON configu (te same klucze co natywny `.config` OrcaSlicera, parsowane istniejącym `parseOrcaProfileJson()`); zweryfikowane przez smoke test (round-trip: liczba trójkątów + klucze configu) |
-| Brak `slicer.data` | Headless flat-config slicer nie czyta `orca/resources` → plik danych zredukowany **200 MB → 0** |
-| Singleton Worker | Jeden Worker przez cały czas sesji |
-| Obsługa błędów | Kody błędów `-1`…`-9`, czytelne komunikaty |
-| Wczytanie WASM gdy slicowanie w trakcie | Kolejkowanie żądania `SLICE` gdy WASM jeszcze się ładuje |
-| Streaming compile WASM | `WebAssembly.compileStreaming` kompiluje `slicer.wasm` równolegle z pobieraniem (i z pobieraniem `slicer.js`); fallback na buforowane `compile` przy złym Content-Type |
-| JPEG miniatury G-code | Prawdziwy JPEG (RGBA→RGB, standard libjpeg) — od PR #13 |
-| Licznik czasu slicowania | Przycisk pokazuje `Slicing… (12s)` — rzetelna informacja bez fikcyjnych etapów — od PR #15 |
-| PWA / tryb offline | Service Worker (Workbox) pre-cache'uje wszystkie assety + WASM przy pierwszej wizycie; instalacja jako aplikacja natywna |
-| Silnik sesyjny (`orc_session_create`/`orc_session_destroy`) | Stan silnika (config, bed, last error) przeniesiony z globalnych statyków C++ do uchwytu sesji — patrz [ADR-008](adr/adr-008-session-handle.md) |
-| Odzyskiwanie po awarii WASM | `onAbort` realnie zgłasza `WASM_ERROR` do głównego wątku; martwy Worker jest odrzucany i zastępowany świeżym przy kolejnej próbie |
-| Smoke test silnika w CI | `orca-wasm/scripts/smoke-test.mjs` — realny `orc_init`/`orc_slice(_multi)` po każdym buildzie, przed publikacją release'u — patrz [ADR-009](adr/adr-009-wasm-smoke-test.md) |
-| E2E smoke test UI w CI | Playwright (`e2e/slice.spec.ts`) — upload prawdziwego modelu Voron Design Cube v7 → slice → G-code przez prawdziwy silnik WASM, na każdym otwartym PR — patrz [ADR-010](adr/adr-010-e2e-smoke-test.md) |
+| STL → G-code slicing | Runs in a Web Worker, doesn't block the UI |
+| Self-built OrcaSlicer **v2.4.2** | Built via `orca-wasm/` + Emscripten; artifacts in the `wasm-v2.4.2` release |
+| ST / MT engine variants | Single-threaded (ST, `slicer.js`/`slicer.wasm`) served everywhere; multithreaded (MT, `slicer-mt.js`/`slicer-mt.wasm`, real oneTBB) served only where the page is cross-origin isolated (currently the Cloudflare mirror) — see [ADR-011](adr/adr-011-multithreaded-engine.md) and the [ST vs MT benchmark](st-mt-benchmark.md) |
+| `orc_obj_to_stl` | WASM export: OBJ → binary STL conversion without needing `orc_init`; result returned as an `ArrayBuffer` to the worker |
+| `orc_slice_multi` | Multiple STLs → one G-code: auto-arrange via `arrange_objects()` (libnest2d + NLopt); output identical in shape to `orc_slice` |
+| `orc_write_3mf` | WASM export: writes the mesh + embedded config as `.3mf` via `Slic3r::store_bbs_3mf()` — no plate/G-code/thumbnail data (no `PartPlateList` in the headless bridge); verified by the smoke test (ZIP unpacks, `3D/3dmodel.model` + `Metadata/*.config` present) |
+| `orc_read_3mf` | WASM import: reads `.3mf` via `Slic3r::load_bbs_3mf()` — merged binary STL (per-instance/volume transforms applied by `ModelObject::mesh()`) + config JSON (same keys as OrcaSlicer's native `.config`, parsed by the existing `parseOrcaProfileJson()`); verified by the smoke test (round-trip: triangle count + config keys) |
+| No `slicer.data` | The headless flat-config slicer never reads `orca/resources` → data file reduced **200 MB → 0** |
+| Singleton worker | One worker for the whole session |
+| Error handling | Error codes `-1`…`-9`, readable messages |
+| WASM load while slicing is requested | `SLICE` requests are queued while WASM is still loading |
+| Streaming WASM compile | `WebAssembly.compileStreaming` compiles `slicer.wasm` in parallel with the download (and with fetching `slicer.js`); falls back to buffered `compile` on a wrong Content-Type |
+| G-code JPEG thumbnails | Real JPEG (RGBA→RGB, standard libjpeg) — since PR #13 |
+| Slice timer | Button shows `Slicing… (12s)` — honest elapsed time, no fake stage names — since PR #15 |
+| PWA / offline mode | Service Worker (Workbox) pre-caches all assets + WASM on first visit; installable as a native app |
+| Session-scoped engine (`orc_session_create`/`orc_session_destroy`) | Engine state (config, bed, last error) moved from global C++ statics to a session handle — see [ADR-008](adr/adr-008-session-handle.md) |
+| WASM crash recovery | `onAbort` reliably reports `WASM_ERROR` to the main thread; the dead worker is dropped and replaced with a fresh one on the next attempt |
+| Engine smoke test in CI | `orca-wasm/scripts/smoke-test.mjs` — real `orc_init`/`orc_slice(_multi)` after every build, before publishing a release — see [ADR-009](adr/adr-009-wasm-smoke-test.md) |
+| E2E UI smoke test in CI | Playwright (`e2e/slice.spec.ts`) — uploads the real Voron Design Cube v7 model → slices → gets G-code through the real WASM engine, on every open PR — see [ADR-010](adr/adr-010-e2e-smoke-test.md) |
 
-### Override approach (engine clean layer)
+### Engine clean layer (patches vs. overrides)
 
-| Aspekt | Szczegóły |
-|--------|-----------|
-| Brak modyfikacji kodu OrcaSlicer | Źródła C++ pozostają nienaruszone; stubs w `orca-wasm/overrides/` |
-| Wyłączone zależności WASM | OCCT, OpenVDB, OpenCV, Draco — zastąpione stubami; libnoise skompilowane dla WASM |
-| Aktualizacja do nowej wersji | Tylko `ORCA_VERSION` w workflow + ewentualna korekta stubów |
-| Zgodność AGPL-3.0 | `LICENSE`, `NOTICE.md`, link do źródeł w UI — `§13` network copyleft spełniony |
+OrcaSlicer's C++ source is patched in place (`orca-wasm/patches/apply.py`) for WASM-compatibility fixes (narrowing, ABI, platform guards), while whole files whose implementation depends on a library unavailable in WASM (OCCT-dependent SVG/text export, OpenVDB, OpenCV, Draco) are replaced wholesale by no-op overrides in `orca-wasm/overrides/`. These are two distinct mechanisms — see [ADR-006](adr/adr-006-patch-strategy.md) for the full three-layer strategy (header shims + C++ overrides + in-place patches) and [architecture.md](architecture.md#engine-clean-layer-override-approach) for the current table of stubs.
 
-### Profile OrcaSlicera
+| Aspect | Details |
+|--------|---------|
+| Disabled WASM dependencies | OpenVDB, OpenCV, Draco replaced by overrides; OCCT and libnoise **are** compiled in |
+| Upgrading to a new version | Just `ORCA_VERSION` in the workflow, plus any stub adjustments |
+| AGPL-3.0 compliance | `LICENSE`, `NOTICE.md`, source link in the UI — §13 network copyleft satisfied |
 
-| Funkcja | Uwagi |
+### OrcaSlicer profiles
+
+| Feature | Notes |
 |---------|-------|
-| Wbudowane presety jakości | Draft (0.3 mm) / Standard (0.2 mm) / Fine (0.1 mm) |
-| Wbudowane filamenty | PLA, PETG, ABS, TPU |
-| Wbudowane drukarki | Generic 0.4/0.6, Bambu Lab P1S/X1C, Prusa MK4, Ender 3, Voron 2.4 |
-| Import profilu JSON z OrcaSlicera | Plik `.json` z instalacji desktop; mapowanie `ORCA_FIELD_MAP` + passthrough wszystkich pozostałych pól |
-| Import profilu maszyny | Pola `gcode_flavor`, `retract_length/speed`, `lift_z`, `machine_start/end_gcode`, `machine_max_speed_*`, `printable_height` — wszystkie trafiają do silnika |
-| Ekstrakcja profili z 3MF | Silnikowo przez `orc_read_3mf` (z fallbackiem na JS-owy odczyt `Metadata/*.json/.config` z archiwum, gdy silnik zawiedzie) |
+| Built-in quality presets | Draft (0.3 mm) / Standard (0.2 mm) / Fine (0.1 mm) |
+| Built-in filaments | PLA, PETG, ABS, TPU |
+| Built-in printers | Generic 0.4/0.6, Bambu Lab P1S/X1C, Prusa MK4, Ender 3, Voron 2.4 |
+| JSON profile import from OrcaSlicer | `.json` file from a desktop install; `ORCA_FIELD_MAP` mapping + passthrough of all other fields |
+| Machine profile import | `gcode_flavor`, `retract_length/speed`, `lift_z`, `machine_start/end_gcode`, `machine_max_speed_*`, `printable_height` — all reach the engine |
+| Profile extraction from 3MF | Via `orc_read_3mf` (falls back to a JS read of `Metadata/*.json/.config` from the archive if the engine fails) |
 
 ### Deployment
 
-| Aspekt | Status |
+| Aspect | Status |
 |--------|--------|
-| GitHub Actions CI (deploy.yml) | ✅ buduje i deployuje na każdy push do `master` |
-| Snapshot GitHub Pages dla PR | ✅ `pr-preview.yml` publikuje `previews/pr-<numer>/`, komentuje URL i usuwa snapshot po zamknięciu PR-a; tylko gałęzie z tego repozytorium |
-| Serwowanie WASM z tej samej origin | ✅ brak CORS — pliki w `gh-pages/app/wasm/` |
-| Release WASM `wasm-v2.4.2` | ✅ `slicer.js` + `slicer.wasm` (~29 MB łącznie, z OCCT STEP) |
-| Deploy resilience | ✅ fallback na poprzedni `gh-pages` gdy release nie istnieje |
-| CI build na PRach (ścieżki orca-wasm/) | ✅ każdy PR dotykający silnika uruchamia ~12 min build |
-| E2E smoke test na PRach (e2e-smoke.yml) | ✅ każdy otwarty PR — pobiera opublikowany silnik WASM i slicuje Voron Design Cube v7 przez prawdziwe UI (Playwright) |
-| Auto-bump wersji aplikacji | ✅ każdy deploy sam podbija patch w `package.json`/`status.md` i taguje `vX.Y.Z` — bez ręcznej edycji (patrz `/release` tylko dla świadomego minor/major) |
-| Auto-rebuild silnika po zmianie `orca-wasm/` | ✅ push na `master` dotykający `orca-wasm/**` sam odpala `build-wasm.yml`; `deploy.yml` czeka na jego wynik (`workflow_run`) zamiast ścigać się ze starym silnikiem |
-| Strona promująca (landing) | ✅ `hiosdra.github.io/OrcaWeb/` |
-| Dokumentacja MkDocs | ✅ `hiosdra.github.io/OrcaWeb/docs/` |
-| Dependabot + grupowanie zależności | ✅ tygodniowy harmonogram |
+| GitHub Actions CI (deploy.yml) | ✅ builds and deploys on every push to `master` |
+| PR snapshot on GitHub Pages | ✅ `pr-preview.yml` publishes `previews/pr-<number>/`, comments the URL, removes the snapshot when the PR closes; same-repository branches only |
+| Same-origin WASM serving | ✅ no CORS — files live in `gh-pages/app/wasm/` |
+| WASM release `wasm-v2.4.2` | ✅ `slicer.js` + `slicer.wasm` (~29 MB total, includes OCCT for STEP) |
+| Deploy resilience | ✅ falls back to the previous `gh-pages` state if the release is missing |
+| CI build on PRs touching `orca-wasm/**` | ✅ every PR touching the engine runs a ~12 min build |
+| E2E smoke test on PRs (`e2e-smoke.yml`) | ✅ every open PR — downloads the published WASM engine and slices the Voron Design Cube v7 through the real UI (Playwright) |
+| App version auto-bump | ✅ every deploy bumps the patch version in `package.json`/`status.md` and tags `vX.Y.Z` automatically (see the `/release` skill for a deliberate minor/major bump) |
+| Engine auto-rebuild on `orca-wasm/` changes | ✅ a push to `master` touching `orca-wasm/**` triggers `build-wasm.yml`; `deploy.yml` waits for its result (`workflow_run`) instead of racing an older engine |
+| Landing page | ✅ `hiosdra.github.io/OrcaWeb/` |
+| MkDocs documentation | ✅ `hiosdra.github.io/OrcaWeb/docs/` |
+| Dependabot + dependency grouping | ✅ weekly schedule |
 
 ---
 
-## ⚠️ Częściowo działa / znane ograniczenia
+## ⚠️ Partially working / known limitations
 
-### Ustawienia drukarki
+| Area | Details |
+|------|---------|
+| Printer temperature ranges | Not independently verified — printer+filament preset combinations may be inconsistent for exotic pairings |
+| Large STL files (>50 MB) | May cause stutter during preview |
 
-| Problem | Szczegóły |
-|---------|-----------|
-| Zakres temperatur niezweryfikowany | Presety printer+filament mogą być niespójne dla egzotycznych kombinacji |
+### Multi-extruder / multi-material
 
-### Inne UI
+The bridge exposes `orc_slice_multi`'s `extruder_ids` — per-object assignment to OrcaSlicer's `"extruder"` config key (`ModelConfig::set`, `PrintConfig.cpp`), which the engine already normalises to `*_filament_id` (`normalize_fdm()`). This is the "single nozzle, multiple filament slots" (AMS-style) path — it does **not** touch `nozzle_diameter`, so it doesn't exercise `support_different_extruders()`, the code path behind a previously confirmed crash on a real Bambu Lab H2D profile (see `isMultiExtruderProfile()` in `src/lib/profiles.ts` and [ADR-008](adr/adr-008-session-handle.md)).
 
-| Problem | Szczegóły |
-|---------|-----------|
-| Duże pliki STL (>50 MB) | Mogą powodować zacinanie się podczas podglądu |
-
-### Multi-ekstruder / multi-material
-
-Bridge udostępnia teraz `orc_slice_multi`'s `extruder_ids` — per-obiektowe przypisanie do klucza konfiguracyjnego OrcaSlicera `"extruder"` (`ModelConfig::set`, `PrintConfig.cpp`), które silnik i tak już normalizuje do `*_filament_id` (`normalize_fdm()`). To jest ścieżka "jedna dysza, wiele slotów filamentu" (AMS-style) — **nie** dotyka `nozzle_diameter`, więc nie wchodzi w kod `support_different_extruders()` odpowiedzialny za wcześniej potwierdzony crash na prawdziwym profilu Bambu Lab H2D (patrz `isMultiExtruderProfile()` w `src/lib/profiles.ts` i [ADR-008](adr/adr-008-session-handle.md)).
-
-| Element | Status |
-|---------|--------|
-| Bridge: `orc_slice_multi(..., extruder_ids, ...)` | ✅ zaimplementowane, zweryfikowane przez smoke test (scenariusz "plate: 2 objects, per-object extruder override") |
-| Prawdziwe drukarki wielo-dyszowe (`nozzle_diameter` > 1 wpis) + UI do przypisania ekstrudera/filamentu per obiekt w kolejce | ❌ świadomie zablokowane — `isMultiExtruderProfile()` odrzuca passthrough takich profili; wymaga debug builda WASM (`-O0 -g`) i sesji root-cause, której nie da się przeprowadzić bez lokalnego toolchaina Emscripten. UI nie ma sensu budować przed odblokowaniem silnika |
+| Item | Status |
+|------|--------|
+| Bridge: `orc_slice_multi(..., extruder_ids, ...)` | ✅ implemented, verified by the smoke test ("plate: 2 objects, per-object extruder override") |
+| Real multi-nozzle printers + per-object extruder/filament assignment UI | ❌ deliberately blocked — see [#141](https://github.com/Hiosdra/OrcaWeb/issues/141) |
 
 ---
 
-## ❌ Nie zaimplementowane
+## Not yet implemented
 
-### Zaawansowane funkcje slicowania
+Tracked in GitHub issues rather than listed here, so this page doesn't drift into a stale roadmap:
 
-| Funkcja | Priorytet |
-|---------|-----------|
-| Variable layer height | 🟡 średni |
-| Support enforcement / blocking | 🟡 średni |
-
-### 3MF — zakres eksportu/importu silnikowego (issue #108)
-
-`orc_write_3mf` i `orc_read_3mf` pokrywają siatkę + wbudowany config, bez danych płyty. Świadomie poza zakresem:
-
-| Funkcja | Priorytet |
-|---------|-----------|
-| Eksport pełnego "sliced project" 3MF (G-code per-płyta, miniatury płyt, `PlateDataPtrs`) | 🔴 niski — wymaga plumbingu `PartPlateList`, którego headless bridge nie buduje; desktop OrcaSlicer nie otworzy eksportu tej funkcji jako "project ze slice'em". Udokumentowany non-goal, nie zaległość. |
+- [#138](https://github.com/Hiosdra/OrcaWeb/issues/138) — Variable layer height
+- [#139](https://github.com/Hiosdra/OrcaWeb/issues/139) — Support enforcement / blocking
+- [#141](https://github.com/Hiosdra/OrcaWeb/issues/141) — Real multi-nozzle / multi-extruder printers
+- [#108](https://github.com/Hiosdra/OrcaWeb/issues/108) — Full "sliced project" 3MF export (per-plate G-code, plate thumbnails); `orc_write_3mf`/`orc_read_3mf` intentionally cover mesh + embedded config only, since the headless bridge has no `PartPlateList` to source that from — this is a documented non-goal for the current bridge shape, not a plain backlog item
 
 ---
 
-## 🗺️ Roadmap
+## Architecture note
 
-```
-v0.1  ── ✅ STL import, 3D viewer, slicing, G-code viewer, download
-      ── ✅ Preset quality / filament / printer profiles
-      ── ✅ JSON profile import from OrcaSlicer
-
-v0.2  ── ✅ 3MF import (mesh + embedded profile extraction)
-      ── ✅ Per-printer bed size
-      ── ✅ Statystyki G-code
-
-v0.3  ── ✅ Własny build WASM v2.4.0 (bez slicer.data)
-      ── ✅ AGPL-3.0 compliance
-      ── ✅ Override approach (engine clean layer)
-      ── ✅ Prawdziwy JPEG (PR #13)
-      ── ✅ Import pełnych profili maszyny z OrcaSlicera (PR #14)
-      ── ✅ Licznik czasu slicowania (PR #15)
-      ── ✅ Kolorowanie G-code wg typu ruchu, travel moves, grube linie 3D (PR #16)
-      ── ✅ PWA / Service Worker — pre-cache WASM przy pierwszej wizycie
-      ── ✅ Import STEP (OCCT 7.8.1 wkompilowane w silnik, `Model::read_from_step`; zastępuje occt-import-js z PR #19)
-
-v0.4  ── ✅ Import OBJ (natywny parser OrcaSlicer w WASM, `orc_obj_to_stl`)
-      ── ✅ bed_shape — okrągły stół (P1S) wizualizowany w podglądzie 3D i G-code
-      ── ✅ FuzzySkin UI — none/external/all, thickness + point_dist (PR #32)
-      ── ✅ Multi-object plate — „One plate (N)" auto-arrange przez `orc_slice_multi`
-      ── ✅ Presety drukarek/filamentów/jakości pobrane z prawdziwych profili OrcaSlicer (resources/profiles/) zamiast ręcznie wpisanych wartości
-      ── Variable layer height UI
-
-      ── ✅ Sesyjny stan silnika — orc_session_create/destroy zamiast globalnych statyków C++ (ADR-008)
-      ── ✅ Odzyskiwanie po awarii WASM — worker martwy po abort() jest odrzucany i zastępowany
-      ── ✅ Smoke test silnika w CI — realny orc_init/orc_slice(_multi) po każdym buildzie (ADR-009)
-      ── ✅ Bridge: per-obiektowe przypisanie ekstrudera/filamentu (orc_slice_multi extruder_ids) — jedna dysza, wiele slotów filamentu
-      ── Prawdziwe drukarki wielo-dyszowe — zablokowane do czasu root-cause session z debug buildem WASM
-      ── ✅ Bridge: eksport 3MF (orc_write_3mf) — siatka + wbudowany config, re-openable w desktop OrcaSlicer (issue #108)
-      ── ✅ Bridge: silnikowy odczyt 3MF (orc_read_3mf) — natywny reader OrcaSlicera, transformy per-instancję/wolumen, fallback na JS (issue #108)
-```
-
----
-
-## 🏗️ Architektura — status komponentów
-
-```
-src/
-├── App.tsx                ✅ kolejka wieloplikowa + tryb "one plate"; WASM orchestration, 3MF loading
-├── components/
-│   ├── FileUpload.tsx     ✅ drag & drop multi-file, STL + 3MF + OBJ + STEP, kolejka sekwencyjna
-│   ├── ModelViewer.tsx    ✅ Three.js, STLLoader, dynamiczny rozmiar stołu, okrągły stół (bed_shape)
-│   ├── GcodeViewer.tsx    ✅ toolpaths, layer slider, feature-type colors, travel moves, grube linie 3D, okrągły stół
-│   ├── SettingsPanel.tsx  ✅ presety, import profili — passthrough wszystkich pól OrcaSlicera
-│   └── SlicePanel.tsx     ✅ progress states, statystyki G-code, download
-├── lib/
-│   ├── profiles.ts        ✅ presety z rozmiarami + kształtem stołu, 30+ pól + passthrough wszystkich pozostałych
-│   ├── wasm-loader.ts     ✅ sesja (orc_session_create/destroy) + orc_init / orc_slice / orc_slice_multi (extruder_ids) / orc_obj_to_stl / orc_cad_to_stl (STEP) / write3mf / read3mf / error codes
-│   └── worker-singleton.ts ✅ singleton, preload WASM, drop+respawn workera po WASM_ERROR
-├── workers/
-│   └── slicer.worker.ts   ✅ WASM load + tworzenie sesji + SLICE + SLICE_MULTI + OBJ_TO_STL + WRITE_3MF + READ_3MF
-└── types/index.ts         ✅ OrcaConfig, GcodeStats, WorkerMessages, SliceStatus
-
-orca-wasm/                 ✅ aktywny pipeline buildowy
-├── bridge/slicer.cpp      ✅ orc_session_create/destroy + orc_init / orc_slice / orc_slice_multi / orc_obj_to_stl / orc_write_3mf / orc_read_3mf bridge
-├── scripts/smoke-test.mjs ✅ post-build regression test (patrz ADR-009)
-├── wasm/                  ✅ CMakeLists, link flags, shims
-├── wasm/shims/tbb/        ✅ sekwencyjne stuby TBB
-├── overrides/             ✅ C++ stuby (OCCT/OpenVDB/OpenCV/Draco)
-└── patches/apply.py       ✅ patcher CMake + bugfixów
-
-public/wasm/               ✅ artefakty z release wasm-v2.4.2 (slicer.js + slicer.wasm)
-```
-
-Brak katalogu `cli/` jest świadomy — CLI zostało zaimplementowane, a następnie w całości usunięte (`chore: remove CLI` — frontend → bridge → engine only). Nie jest to cel projektu.
+There is no `cli/` directory — a Node CLI wrapper existed early on and was deliberately removed in its entirety (`chore: remove CLI` — frontend → bridge → engine only). It is not a project goal; see [agents.md](https://github.com/Hiosdra/OrcaWeb/blob/master/agents.md#project-vision). For the current component breakdown, see [architecture.md](architecture.md).

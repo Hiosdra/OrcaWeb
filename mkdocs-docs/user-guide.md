@@ -92,7 +92,7 @@ Click **Show advanced settings** for:
 
 - Speed overrides (default, outer wall, first layer, travel)
 - Seam position
-- Fuzzy skin (szorstkość powierzchni)
+- Fuzzy skin (surface roughness)
 - Ironing (top surface)
 
 ##### Fuzzy skin
@@ -182,4 +182,4 @@ saves them together as one ZIP archive.
 - WASM loads once per browser session (~10–30 s on first visit depending on connection, then cached)
 - Slicing a small model (10 mm cube): ~150 ms
 - Slicing a complex model (500k triangles): ~2–5 s
-- All processing is single-threaded (no SharedArrayBuffer required)
+- Slicing runs single-threaded in your browser session unless you're on a cross-origin-isolated deployment (currently the Cloudflare mirror), where a multithreaded engine variant is used transparently for a speed-up on complex models — see the [ST vs MT benchmark](st-mt-benchmark.md). Either way, no action is required on your part; the app selects the right engine automatically.

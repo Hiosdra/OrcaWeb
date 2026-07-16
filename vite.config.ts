@@ -50,7 +50,7 @@ export default defineConfig({
         runtimeCaching: [
           {
             // slicer.(js|wasm) (ST) + slicer-mt.(js|wasm) (MT, real oneTBB —
-            // see orca-wasm/MT-PLAN.md) — CacheFirst so SW installs without
+            // see ADR-011) — CacheFirst so SW installs without
             // downloading the full engine bundle upfront; each variant's pair
             // is cached on first use and stays version-matched, sharing the
             // same 30-day TTL. Both are fetched with a ?v=<wasm-version>

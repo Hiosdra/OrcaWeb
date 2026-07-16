@@ -26,17 +26,8 @@ Slice STL files locally — no server, no account, no upload. Your files never l
 
 ## Quick start
 
-```bash
-git clone https://github.com/Hiosdra/OrcaWeb.git
-cd OrcaWeb
-npm install
-node scripts/download-wasm.mjs   # ~29 MB, one-time
-npm run dev
-```
-
-Then open [http://localhost:5173](http://localhost:5173).
-
-→ [Full setup guide](getting-started.md)
+Clone, install, download the WASM engine, and run the dev server — see the
+[full setup guide](getting-started.md) for the commands and prerequisites.
 
 ## Try it online
 
@@ -46,19 +37,7 @@ On first load, the browser downloads ~29 MB of WASM data from GitHub Releases. S
 
 ## How it works
 
-```
-Browser
-├── React UI  (main thread)
-│   ├── ModelViewer   → Three.js, STL on print bed
-│   ├── GcodeViewer   → toolpaths, layer slider
-│   └── SettingsPanel → presets + profile import
-│
-└── Web Worker
-    └── OrcaSlicer v2.4.2 core (WebAssembly)
-        ├── slicer.js    ~210 KB  Emscripten glue
-        └── slicer.wasm  ~29 MB   compiled slicer + OCCT (STEP)
-```
-
-No `slicer.data` — the headless slicer never reads `orca/resources` at runtime.
+A React UI on the main thread hands STL/3MF/OBJ/STEP files to a Web Worker
+running the OrcaSlicer engine compiled to WebAssembly, and gets G-code back.
 
 → [Full architecture docs](architecture.md)

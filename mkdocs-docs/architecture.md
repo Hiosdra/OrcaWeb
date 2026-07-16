@@ -386,7 +386,7 @@ Engine-side 3MF write + read (`orc_write_3mf` / `orc_read_3mf`, issue #108) are 
     # Cross-Origin-Embedder-Policy: require-corp on every response here —
     # the one host in this deployment that's crossOriginIsolated, so it's
     # the only place the real multithreaded (MT) engine actually runs
-    # (see ADR-011 / orca-wasm/MT-PLAN.md).
+    # (see ADR-011).
     #
     # Cloudflare serves only the app shell: both slicer.wasm and
     # slicer-mt.wasm (~36 MB each) exceed the 25 MiB per-asset limit, so
