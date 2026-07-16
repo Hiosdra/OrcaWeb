@@ -2,7 +2,7 @@
 
 This page describes the current state of the project: implemented features and known limitations. Planned-but-not-yet-implemented work lives in GitHub issues, linked below, instead of an in-page roadmap.
 
-Last updated: **2026-07-16** · engine version: **OrcaSlicer v2.4.2** (self-built, live in production) · app version: **v0.7.57**
+Last updated: **2026-07-16** · engine version: **OrcaSlicer v2.4.2** (self-built, live in production) · app version: **v0.7.58**
 
 ---
 
