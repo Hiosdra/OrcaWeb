@@ -26,3 +26,17 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - run: pip install mkdocs-material
+
+      - name: Build docs (strict — fails on broken links/nav references)
+        run: mkdocs build --config-file mkdocs.yml --site-dir /tmp/dist-docs --strict

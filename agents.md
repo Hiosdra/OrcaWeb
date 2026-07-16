@@ -9,14 +9,27 @@ AI coding agent instructions for this project.
 - `mkdocs-docs/architecture.md` — update when the architecture, WASM API, file structure, or key dependencies change
 - `mkdocs-docs/status.md` — update the feature checklist and version when shipping a release
 - `mkdocs-docs/adr/` — add a new ADR when a significant architectural decision is made
+- `mkdocs-docs/integration.md` + `mkdocs-docs/api-reference.md` — update when a bridge export (`orc_*`) is added, removed, or changes signature
+- If a change affects the **ST vs MT engine split** specifically (thread pool sizing, `SLIC3R_WASM_MT`, COOP/COEP/deployment requirements, the ST/MT probe-and-fallback logic) — update [ADR-011](mkdocs-docs/adr/adr-011-multithreaded-engine.md) rather than adding a new standalone design doc; it's the single source of truth for MT design constraints (see #110 — this is exactly the kind of doc that used to drift into a second file)
 
 If you touch the WASM pipeline, CI workflow, shims, or UI — check whether any `mkdocs-docs/` file needs updating before closing the task.
+
+### When to touch which doc
+
+| You changed... | Update... |
+|---|---|
+| WASM bridge exports (`orca-wasm/bridge/slicer.cpp`) | `integration.md`, `api-reference.md`, `orca-wasm/README.md` (C API section) |
+| Build pipeline / shims / overrides / patches | `architecture.md` (engine clean layer), `wasm-build.md` |
+| ST/MT engine split, thread pool, deployment headers | `ADR-011` only — not a new file |
+| A shipped feature (UI or engine) | `status.md`'s feature table |
+| A significant architectural decision | A new file in `mkdocs-docs/adr/` + a row in `adr/index.md` |
+| Anything under `mkdocs-docs/**` | Run `mkdocs build --strict` locally (or let CI do it — see `ci.yml`) before opening the PR, to catch broken internal links |
 
 ## Setup
 
 ```bash
 npm install
-node scripts/download-wasm.mjs   # downloads ~9 MB WASM artifacts (slicer.js + slicer.wasm) into public/wasm/
+node scripts/download-wasm.mjs   # downloads ~29 MB WASM artifacts (slicer.js + slicer.wasm) into public/wasm/
 npm run dev                      # Vite dev server at http://localhost:5173
 ```
 
@@ -42,12 +55,12 @@ Architecture decisions (ADRs): [`mkdocs-docs/adr/index.md`](mkdocs-docs/adr/inde
 
 ## WASM build
 
-CI builds the WASM engine via `.github/workflows/build-wasm.yml`.
+CI builds the WASM engine via `.github/workflows/build-wasm.yml`, as two variants: single-threaded (ST — `slicer.js`/`slicer.wasm`, served everywhere) and multithreaded (MT — `slicer-mt.js`/`slicer-mt.wasm`, real oneTBB, served only on cross-origin-isolated hosts such as the Cloudflare mirror). See [ADR-011](mkdocs-docs/adr/adr-011-multithreaded-engine.md).
 
 Key pieces:
 - `orca-wasm/patches/apply.py` — regex patches applied to OrcaSlicer source before cmake
 - `orca-wasm/cmake/wasm_find_paths.cmake` — loaded via `CMAKE_PROJECT_INCLUDE_BEFORE`; sets compile definitions (`SLIC3R_WASM`, `SLIC3R_NO_OCCT`, `SLIC3R_NO_OPENVDB`, `SLIC3R_NO_OPENCV`)
-- `orca-wasm/wasm/shims/` — header-only TBB stubs and other WASM compatibility shims
+- `orca-wasm/wasm/shims/` — header-only TBB stubs (ST engine) and other WASM compatibility shims
 
 ## Code style
 
@@ -66,7 +79,7 @@ Scope examples: `(wasm)`, `(ui)`, `(ci)`.
 Use the `/release` skill to cut a new app version. It handles:
 
 1. `package.json` version bump
-2. `mkdocs-docs/status.md` — updates `Ostatnia aktualizacja` date and `wersja aplikacji`
+2. `mkdocs-docs/status.md` — updates the `Last updated` date and `app version`
 3. Commit (`chore(release): bump to vX.Y.Z`) + optional push + GitHub tag
 
 > WASM engine releases are separate — trigger `build-wasm.yml` manually with the
@@ -74,7 +87,8 @@ Use the `/release` skill to cut a new app version. It handles:
 
 ## PR checklist
 
-- [ ] `mkdocs-docs/` updated if architecture or a major feature changed
+- [ ] `mkdocs-docs/` updated if architecture or a major feature changed (see "When to touch which doc" above)
 - [ ] Types pass (`npm run typecheck` or `tsc --noEmit`)
 - [ ] No console errors in the browser on the happy path
 - [ ] If you touched `FileUpload`/`App.tsx`/worker/WASM-loading code, run `npm run test:e2e` locally (needs `npm run setup` + `npx playwright install chromium` first) — this also runs on every PR via `.github/workflows/e2e-smoke.yml`
+- [ ] If you touched `mkdocs-docs/**`, `mkdocs build --strict` passes (CI enforces this on every PR — see `ci.yml`'s `docs` job)

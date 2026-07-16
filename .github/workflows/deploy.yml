@@ -130,8 +130,8 @@ jobs:
           TODAY=$(date -u +%Y-%m-%d)
           jq --arg v "$NEW_VERSION" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
           jq --arg v "$NEW_VERSION" '.version = $v | .packages[""].version = $v' package-lock.json > package-lock.json.tmp && mv package-lock.json.tmp package-lock.json
-          sed -i -E "s/Ostatnia aktualizacja: \*\*[0-9-]+\*\*/Ostatnia aktualizacja: **${TODAY}**/" mkdocs-docs/status.md
-          sed -i -E "s/wersja aplikacji: \*\*v[0-9]+\.[0-9]+\.[0-9]+\*\*/wersja aplikacji: **v${NEW_VERSION}**/" mkdocs-docs/status.md
+          sed -i -E "s/Last updated: \*\*[0-9-]+\*\*/Last updated: **${TODAY}**/" mkdocs-docs/status.md
+          sed -i -E "s/app version: \*\*v[0-9]+\.[0-9]+\.[0-9]+\*\*/app version: **v${NEW_VERSION}**/" mkdocs-docs/status.md
 
           git add package.json package-lock.json mkdocs-docs/status.md
           if git diff --cached --quiet; then

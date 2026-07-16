@@ -36,8 +36,8 @@ WASM builds), or resolve unconditionally through the stub `Find*.cmake`
 modules in `orca-wasm/cmake/` (which `orca-wasm/CMakeLists.txt` always
 prepends to `CMAKE_MODULE_PATH`, taking priority over anything OrcaSlicer's
 own `CMakeLists.txt` appends to that path later) — either way `apply.py`
-doesn't need its own guard. See [the patch audit](../orca-patch-audit.md) for
-the full reasoning and how each was verified.
+doesn't need its own guard. See the commit history on `apply.py` and
+`orca-wasm/cmake/` for how each of these was verified.
 
 Compile definitions `SLIC3R_WASM`, `SLIC3R_NO_OPENVDB`, `SLIC3R_NO_OPENCV` are
 injected as `PUBLIC` into `libslic3r`'s `target_compile_definitions`, making
@@ -63,9 +63,9 @@ excluded from the build and replaced with minimal stubs:
 the WASM engine (see the "Build WASM deps — OCCT" step in
 `.github/workflows/build-wasm.yml`), so the real STEP import/export code
 compiles and runs as-is, unstubbed. `svg.cpp` depends only on OCCT + the
-bundled `nanosvg` header, so it may also be restorable now — flagged as an
-open question in [the patch audit](../orca-patch-audit.md) rather than acted
-on yet, since nothing has verified it compiles/works unstubbed.
+bundled `nanosvg` header, so it may also be restorable now — an open
+question, not acted on yet, since nothing has verified it compiles/works
+unstubbed.
 
 `Feature/FuzzySkin/FuzzySkin.cpp` is **not** a stub either, despite libnoise +
 `thread_local` being the original blocker — libnoise is now WASM-compiled
@@ -118,9 +118,10 @@ suitable upstream PRs):
 Removed patches are documented inline in `apply.py` where they were deleted
 (search for `NOTE:`) rather than here, to avoid this table drifting further
 out of sync — e.g. a former `Model.cpp` guard around `read_from_step()` was
-removed once OCCT started compiling in cleanly. See
-[the patch audit](../orca-patch-audit.md) for a full audit of which current
-patches are still load-bearing.
+removed once OCCT started compiling in cleanly. Git history and the commits
+linked from PRs [#92](https://github.com/Hiosdra/OrcaWeb/pull/92) and
+[#95](https://github.com/Hiosdra/OrcaWeb/pull/95) carry the record of a full
+audit of which patches were still load-bearing.
 
 ## Adding a New Patch
 

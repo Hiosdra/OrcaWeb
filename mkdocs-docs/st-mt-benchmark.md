@@ -4,7 +4,8 @@ OrcaWeb ships two builds of the same OrcaSlicer engine: the **single-threaded
 (ST)** engine served everywhere, and a **multithreaded (MT)** engine — real
 oneTBB linked against Emscripten pthreads — served only where the page is
 cross-origin isolated (the Cloudflare mirror; see
-[ADR-011](adr/adr-011-multithreaded-engine.md) and `orca-wasm/MT-PLAN.md`).
+[ADR-011](adr/adr-011-multithreaded-engine.md), which also records the
+underlying design constraints).
 
 This page records how the two compare on slice wall-clock time. The short
 version: **MT is not a universal speedup. It loses on trivial geometry and

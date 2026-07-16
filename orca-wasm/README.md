@@ -10,7 +10,9 @@ Clean-room Emscripten build of [OrcaSlicer](https://github.com/SoftFever/OrcaSli
 orca-wasm/
 ├── orca/                  ← git submodule: SoftFever/OrcaSlicer@v2.4.2
 ├── bridge/
-│   ├── slicer.cpp         ← C++ bridge (orc_init / orc_slice / orc_obj_to_stl)
+│   ├── slicer.cpp         ← C++ bridge (orc_session_create/destroy, orc_init,
+│   │                          orc_slice, orc_slice_multi, orc_obj_to_stl,
+│   │                          orc_cad_to_stl, orc_write_3mf, orc_read_3mf)
 │   └── CMakeLists.txt
 ├── wasm/
 │   ├── CMakeLists.txt     ← final Emscripten link target
@@ -48,8 +50,10 @@ orca-wasm/
 
 | File | Size | Description |
 |------|------|-------------|
-| `slicer.wasm` | ~33 MB | Compiled OrcaSlicer v2.4.2 core + OCCT (STEP engine) |
-| `slicer.js` | ~220 KB | Emscripten glue code (CommonJS IIFE) |
+| `slicer.wasm` | ~29 MB | Compiled OrcaSlicer v2.4.2 core + OCCT (STEP engine), single-threaded (ST) |
+| `slicer.js` | ~210 KB | Emscripten glue code (CommonJS IIFE), ST |
+| `slicer-mt.wasm` | ~36 MB | Same engine, linked against real oneTBB for multithreading (MT) — see [ADR-011](../mkdocs-docs/adr/adr-011-multithreaded-engine.md) |
+| `slicer-mt.js` | ~210 KB | Emscripten glue code, MT |
 
 No `slicer.data` — the headless flat-config slicer never reads `orca/resources` at runtime, so the 200 MB preload file was eliminated entirely.
 
@@ -80,21 +84,49 @@ instead of hand-editing the script.
 Exported by `slicer.wasm` via Emscripten. Called as `_orc_*` from JavaScript.
 
 ```c
-// Initialise with a JSON config (all values string-encoded as in OrcaSlicer).
-int _orc_init(const char* json, int len);   // → 0 success
+// Create/destroy an opaque session handle scoping config, bed geometry, and
+// last error (see ADR-008). Create once, reuse for every slice.
+void* _orc_session_create(void);
+void  _orc_session_destroy(void* session);
 
-// Slice an STL file (raw binary bytes).
+// Initialise the given session with a JSON config (values string-encoded as in OrcaSlicer).
+int _orc_init(void* session, const char* json, int len);   // → 0 success
+
+// Slice an STL file (raw binary bytes) on the given session.
 // *out_gcode is heap-allocated — free with _orc_free().
-int _orc_slice(const void* stl, int stl_len,
+int _orc_slice(void* session, const void* stl, int stl_len,
                char** out_gcode, int* out_len); // → 0 success
 
-// Convert an OBJ file to binary STL (no _orc_init required).
+// Slice multiple STLs on one auto-arranged plate → single G-code.
+// extruder_ids may be null (single-extruder callers).
+int _orc_slice_multi(void* session, const void* all_stl, int all_stl_len,
+                      const int* offsets, int n_files, const int* extruder_ids,
+                      char** out_gcode, int* out_len); // → 0 success
+
+// Convert an OBJ file to binary STL (no session required).
 int _orc_obj_to_stl(const char* obj, int obj_len,
                     char** out_stl, int* out_len); // → 0 success
 
+// Convert a STEP/STP file to binary STL via embedded OCCT (no session required).
+int _orc_cad_to_stl(const char* step, int step_len,
+                    char** out_stl, int* out_len); // → 0 success
+
+// Write the session's current mesh + config as a .3mf archive (mesh + embedded
+// settings only — no plate/G-code/thumbnail data).
+int _orc_write_3mf(void* session, const void* stl, int stl_len,
+                   char** out_data, int* out_len); // → 0 success
+
+// Read a .3mf archive via OrcaSlicer's own reader → merged STL + config JSON.
+// No session required (pure format conversion, like orc_obj_to_stl/orc_cad_to_stl).
+int _orc_read_3mf(const void* data, int data_len,
+                  char** out_stl, int* out_stl_len,
+                  char** out_config_json, int* out_config_len); // → 0 success
+
 void        _orc_free(void* ptr);
-const char* _orc_decode_exception(void*);  // → last error C string
+const char* _orc_decode_exception(void* session);  // → last error C string; pass 0/null for the session-less functions
 ```
+
+See [Integration Guide](https://hiosdra.github.io/OrcaWeb/docs/integration/) for full usage examples and the exact JS-side signatures (`sliceStl`, `sliceMultiStl`, `objToStl`, `cadToStl`).
 
 ## Architecture
 
@@ -102,8 +134,9 @@ const char* _orc_decode_exception(void*);  // → last error C string
 orca-wasm/
 └── slicer.cpp (bridge)
     └── libslic3r (OrcaSlicer core, patched for WASM)
-        ├── TBB shims     → sequential stubs, no threading
-        ├── No OCCT       → STEP/SVG/TextShape disabled (overrides)
+        ├── TBB shims     → ST: sequential stubs; MT: real oneTBB (ADR-011)
+        ├── OCCT          → compiled in for STEP import; SVG/TextShape export
+        │                   still disabled (overrides — unrelated to STEP)
         ├── No OpenVDB    → hollowing disabled (overrides)
         ├── No OpenCV     → OBJ colour calibration disabled (overrides)
         ├── No Draco      → Draco mesh import disabled (overrides)

@@ -13,7 +13,11 @@ This guide is for developers who want to embed the OrcaSlicer WASM engine in the
 | Convert OBJ → binary STL | `orc_obj_to_stl` (no session needed) |
 | Convert STEP → binary STL | `orc_cad_to_stl` (no session needed) |
 
-`orc_init`/`orc_slice`/`orc_slice_multi` take an opaque **session** handle (from `orc_session_create()`) as their first argument — see [API Reference → orc_session_create](api-reference.md#orc_session_create-orc_session_destroy) and [ADR-008](adr/adr-008-session-handle.md). Create one session and reuse it for every slice; free it with `orc_session_destroy()` when done. The config set by `orc_init` persists on that session between slicing calls. The engine is **single-threaded** — use a Web Worker (browser) or a Worker Thread (Node.js) to avoid blocking the event loop.
+`orc_init`/`orc_slice`/`orc_slice_multi` take an opaque **session** handle (from `orc_session_create()`) as their first argument — see [API Reference → orc_session_create](api-reference.md#orc_session_create-orc_session_destroy) and [ADR-008](adr/adr-008-session-handle.md). Create one session and reuse it for every slice; free it with `orc_session_destroy()` when done. The config set by `orc_init` persists on that session between slicing calls. Regardless of variant (see below), always run the engine off the main thread — a Web Worker (browser) or a Worker Thread (Node.js) — since a slice call blocks synchronously until it returns.
+
+### Engine variants: single-threaded (ST) vs multithreaded (MT)
+
+The build publishes two artifact sets: **ST** (`slicer.js`/`slicer.wasm`) and **MT** (`slicer-mt.js`/`slicer-mt.wasm`, real oneTBB linked against Emscripten pthreads). Most embedders should use **ST** — it works anywhere. MT requires the page to be `crossOriginIsolated` (both `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` response headers, which enables `SharedArrayBuffer`); without cross-origin isolation the MT module will fail to load. See [ADR-011](adr/adr-011-multithreaded-engine.md) for the deployment requirements and [the ST vs MT benchmark](st-mt-benchmark.md) for when MT is actually faster — it is not a universal speedup.
 
 ---
 
@@ -28,8 +32,10 @@ has the highest patch number automatically.
 
 | File | Size | Purpose |
 |---|---|---|
-| `slicer.wasm` | ~29 MB | Compiled engine (OrcaSlicer v2.4.2 + OCCT 7.8.1) |
+| `slicer.wasm` | ~29 MB | Compiled ST engine (OrcaSlicer v2.4.2 + OCCT 7.8.1) |
 | `slicer.js` | ~210 KB | Emscripten JS glue (CommonJS IIFE) |
+
+The MT variant (`slicer-mt.wasm` ~36 MB / `slicer-mt.js`) is published alongside as a separate release family — see [Engine variants](#engine-variants-single-threaded-st-vs-multithreaded-mt) above.
 
 **Download via the provided script:**
 

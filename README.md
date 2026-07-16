@@ -27,21 +27,14 @@ Those files are gitignored (too large for git).
 
 ## Architecture
 
-```
-Browser
-├── React UI (main thread)
-│   ├── ModelViewer   — Three.js, model on print bed (real mm scale)
-│   ├── GcodeViewer   — toolpaths layer by layer with slider
-│   └── SettingsPanel — presets + OrcaSlicer profile import
-│
-└── Web Worker (slicer.worker.ts)
-    └── OrcaSlicer WASM module
-        ├── slicer.js    (~210 KB)
-        └── slicer.wasm  (~29 MB, includes OCCT for STEP import)
-```
+A React UI (main thread) hands STL/3MF/OBJ/STEP files to a Web Worker running
+the OrcaSlicer engine compiled to WebAssembly (`slicer.js` + `slicer.wasm`,
+~29 MB, includes OCCT for STEP import) and gets G-code back. There is no
+`slicer.data` — the headless flat-config slicer never reads `orca/resources`
+at runtime, so the 200 MB preload file used by older builds was eliminated
+entirely.
 
-No `slicer.data` — the headless flat-config slicer never reads `orca/resources`
-at runtime, so the 200 MB preload file was eliminated entirely (~29 MB total cold load).
+→ Full diagram and component breakdown: [`mkdocs-docs/architecture.md`](mkdocs-docs/architecture.md)
 
 ### WASM loading
 
@@ -50,24 +43,29 @@ In CI the WASM artifacts are downloaded from the latest immutable
 the GitHub Pages deployment, so they are served from the **same origin** as the app —
 no CORS issues.
 
-The Cloudflare Workers mirror deploy cannot host the engine itself
-(`slicer.wasm` ~36 MB > Cloudflare's 25 MiB per-asset limit), so its build
+The Cloudflare Workers mirror deploy cannot host the engine itself — both
+`slicer.wasm` (~29 MB) and the multithreaded `slicer-mt.wasm` (~36 MB, see
+below) exceed Cloudflare's 25 MiB per-asset limit — so its build
 (`npm run build:cf`, see `scripts/cf-build.mjs`) points `VITE_WASM_BASE_URL`
 at the GitHub Pages copy, which is served with `Access-Control-Allow-Origin: *`.
+
+### Single-threaded vs multithreaded engine
+
+The engine ships as two builds: a **single-threaded (ST)** variant
+(`slicer.js`/`slicer.wasm`) served everywhere, and a **multithreaded (MT)**
+variant (`slicer-mt.js`/`slicer-mt.wasm`, real oneTBB linked against
+Emscripten pthreads) served only where the page is cross-origin isolated —
+today, only the Cloudflare mirror. GitHub Pages cannot send the required
+`Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy` headers, so it
+always serves ST. The worker probes for the MT engine at runtime and falls
+back to ST on any failure. See [ADR-011](mkdocs-docs/adr/adr-011-multithreaded-engine.md)
+and [the ST vs MT benchmark](mkdocs-docs/st-mt-benchmark.md).
 
 ### Self-contained WASM build (v2.4.2)
 
 `orca-wasm/` contains a clean-room Emscripten build pipeline targeting
-OrcaSlicer **v2.4.2** (the latest stable release as of this writing):
-
-```
-orca-wasm/
-├── orca/           ← git submodule: SoftFever/OrcaSlicer@v2.4.2
-├── bridge/         ← C++ bridge: orc_init / orc_slice / orc_free
-├── wasm/shims/     ← sequential TBB stubs (WASM is single-threaded)
-├── patches/        ← Python patcher for WASM compatibility
-└── scripts/        ← build-local-wsl.sh end-to-end build script
-```
+OrcaSlicer **v2.4.2** (the latest stable release as of this writing), producing
+both the ST and MT engine variants described above.
 
 Build the WASM module locally (Linux / macOS / WSL2 — see
 [`mkdocs-docs/wasm-build.md`](mkdocs-docs/wasm-build.md) for full setup):
@@ -81,7 +79,8 @@ Or trigger the `Build WASM` GitHub Actions workflow manually to publish a new
 releases are immutable, so a rebuild never overwrites a previous one (see
 [`mkdocs-docs/wasm-build.md`](mkdocs-docs/wasm-build.md)).
 
-See [`orca-wasm/README.md`](orca-wasm/README.md) for the full build guide.
+See [`orca-wasm/README.md`](orca-wasm/README.md) for the directory layout, full
+C API, and build guide.
 
 ## Stack
 

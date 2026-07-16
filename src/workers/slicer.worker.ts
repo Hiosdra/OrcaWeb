@@ -144,7 +144,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       // genuinely new so CacheFirst treats it as a fresh entry.
       const v = `?v=${encodeURIComponent(version)}`
 
-      // Dual-mode engine selection (see orca-wasm/MT-PLAN.md): the real
+      // Dual-mode engine selection (see ADR-011): the real
       // multithreaded engine (slicer-mt.*, built with -pthread against real
       // oneTBB) needs SharedArrayBuffer, which needs COOP/COEP response
       // headers — unavailable on GitHub Pages (the primary deployment) but
