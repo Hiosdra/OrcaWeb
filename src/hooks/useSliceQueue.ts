@@ -81,7 +81,7 @@ function patchItem(items: QueueItem[], id: string, patch: Partial<QueueItem>): Q
   return items.map((i) => (i.id === id ? { ...i, ...patch } : i))
 }
 
-function reducer(state: QueueState, action: QueueAction): QueueState {
+export function sliceQueueReducer(state: QueueState, action: QueueAction): QueueState {
   switch (action.type) {
     case 'ADD_ITEMS':
       return { ...state, items: [...state.items, ...action.items] }
@@ -105,6 +105,7 @@ function reducer(state: QueueState, action: QueueAction): QueueState {
       }
 
     case 'RUN_QUEUE':
+      if (state.plate.slicing) return state
       // Re-queue stale results alongside never-sliced items.
       return {
         ...state,
@@ -165,6 +166,7 @@ function reducer(state: QueueState, action: QueueAction): QueueState {
       }
 
     case 'PLATE_STARTED':
+      if (state.currentId !== null || state.running || state.plate.slicing) return state
       return {
         ...state,
         plate: { slicing: true, gcode: null, error: null, stale: false, progress: undefined },
@@ -254,13 +256,17 @@ export function useSliceQueue(
   /** Called when an imported file (3MF) carries embedded print settings. */
   onSettingsImported: (patch: Partial<OrcaConfig>, filename: string) => void,
 ): SliceQueue {
-  const [state, dispatch] = useReducer(reducer, INITIAL_STATE)
+  const [state, dispatch] = useReducer(sliceQueueReducer, INITIAL_STATE)
   const [wasmStatus, setWasmStatus] = useState<WasmStatus>(getWasmStatus)
   // Starts as the build-time baked label; replaced by the runtime-resolved
   // one the worker sends with WASM_LOADED (from engine-version.json).
   const [engineLabel, setEngineLabel] = useState<string>(__ORCA_ENGINE_VERSION__)
 
   const configSnapshotRef = useRef({ config, epoch: 0 })
+
+  // A file read can outlive cancellation or a worker restart. Incrementing
+  // this generation invalidates the eventual postMessage from that read.
+  const sliceRequestGeneration = useRef(0)
 
   const onSettingsImportedRef = useRef(onSettingsImported)
   useEffect(() => { onSettingsImportedRef.current = onSettingsImported }, [onSettingsImported])
@@ -412,12 +418,15 @@ export function useSliceQueue(
 
     const configSnapshot = configSnapshotRef.current
     dispatch({ type: 'SLICE_STARTED', id: next.id, configEpoch: configSnapshot.epoch })
+    const requestGeneration = sliceRequestGeneration.current
     void (async () => {
       try {
         const stl = await next.stlFile!.arrayBuffer()
+        if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
         getWorker().postMessage({ type: 'SLICE', stl, config: configSnapshot.config }, [stl])
       } catch {
+        if (requestGeneration !== sliceRequestGeneration.current) return
         dispatch({ type: 'SLICE_FAILED', message: 'Failed to read file' })
       }
     })()
@@ -539,6 +548,7 @@ export function useSliceQueue(
 
   const cancel = useCallback(() => {
     if (!state.currentId && !state.plate.slicing) return
+    sliceRequestGeneration.current += 1
     terminateWorker()
     setWasmStatus('idle')
     dispatch({ type: 'CANCELLED' })
@@ -551,6 +561,7 @@ export function useSliceQueue(
       // Removing the item being sliced: only a worker restart can abort the
       // synchronous WASM call. The queue keeps running — the next ready item
       // is posted to the fresh worker automatically.
+      sliceRequestGeneration.current += 1
       terminateWorker()
       setWasmStatus('idle')
       repostConversions()
@@ -565,8 +576,9 @@ export function useSliceQueue(
   }, [state.currentId, repostConversions, rejectAllPendingMf, rejectPendingForItem])
 
   const sliceAll = useCallback(() => {
+    if (state.plate.slicing) return
     dispatch({ type: 'RUN_QUEUE' })
-  }, [])
+  }, [state.plate.slicing])
 
   // Exports one queue item's current STL + config snapshot as a .3mf.
   // Independent of slicing — works on any item with STL data, sliced or not.
@@ -590,22 +602,25 @@ export function useSliceQueue(
   }, [])
 
   const slicePlate = useCallback(() => {
-    if (state.plate.slicing) return
+    if (state.plate.slicing || state.currentId !== null || state.running) return
     const readyItems = state.items.filter((i) => i.status === 'ready' && i.stlFile != null)
     if (readyItems.length === 0) return
 
     const configSnapshot = configSnapshotRef.current
     dispatch({ type: 'PLATE_STARTED', configEpoch: configSnapshot.epoch })
+    const requestGeneration = sliceRequestGeneration.current
     void (async () => {
       try {
         const stls = await Promise.all(readyItems.map((i) => i.stlFile!.arrayBuffer()))
+        if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
         getWorker().postMessage({ type: 'SLICE_MULTI', stls, config: configSnapshot.config }, stls)
       } catch (err) {
+        if (requestGeneration !== sliceRequestGeneration.current) return
         dispatch({ type: 'PLATE_FAILED', message: err instanceof Error ? err.message : String(err) })
       }
     })()
-  }, [state.plate.slicing, state.items])
+  }, [state.plate.slicing, state.currentId, state.running, state.items])
 
   return {
     items,
