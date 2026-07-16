@@ -19,7 +19,7 @@
  * --engine selects the output-name stem (see orca-wasm/wasm/CMakeLists.txt's
  * ORCA_WEB_WASM_OUTPUT_NAME) — "slicer" (default, single-threaded) or
  * "slicer-mt" (build-wasm.yml's mt matrix leg, real oneTBB — see
- * orca-wasm/MT-PLAN.md). The mt build never produces a plain
+ * ADR-011). The mt build never produces a plain
  * slicer.js/.wasm alias, so this must be passed explicitly for that variant.
  *
  * Without --fixture, every scenario runs against TWO meshes:
