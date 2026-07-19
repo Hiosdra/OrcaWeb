@@ -19,7 +19,10 @@ describe('parseGcode extrusion classification', () => {
   })
 
   it('retains the accumulated E position when switching back to absolute mode', () => {
-    expect(parsedSegments('M83\nG1 X10 Y0 E0.5\nG1 X20 Y0 E0.5\nM82\nG1 X30 Y0 E1')).toEqual({ extrusion: 2, travel: 1 })
+    expect(parsedSegments('M83\nG1 X10 Y0 E0.5\nG1 X20 Y0 E0.5\nM82\nG1 X30 Y0 E1')).toEqual({
+      extrusion: 2,
+      travel: 1,
+    })
   })
 
   it('applies G92 E resets before calculating the next extrusion delta', () => {
@@ -28,10 +31,7 @@ describe('parseGcode extrusion classification', () => {
 
   it('applies G92 XYZ resets before the next absolute move', () => {
     const layer = parseGcode('M82\nG1 X10 Y5 E1\nG92 X0 Y0 E0\nG1 X5 Y0 E1').layers[0]
-    expect(Array.from(layer.features[0].segments)).toEqual([
-      -5, -2.5, 0, 5, 2.5, 0,
-      -5, -2.5, 0, 0, -2.5, 0,
-    ])
+    expect(Array.from(layer.features[0].segments)).toEqual([-5, -2.5, 0, 5, 2.5, 0, -5, -2.5, 0, 0, -2.5, 0])
   })
 
   it('does not treat an E word on a G0 move as deposited material', () => {

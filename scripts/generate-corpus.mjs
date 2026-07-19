@@ -14,9 +14,9 @@
  *   node scripts/generate-corpus.mjs [--wasm-dir public/wasm] [--out-dir <dir>]
  */
 
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { resolve } from 'node:path'
 
 globalThis.require ??= createRequire(import.meta.url)
 globalThis.__dirname ??= '.'
@@ -40,19 +40,32 @@ function trianglesToStl(tris) {
   dv.setUint32(off, tris.length, true)
   off += 4
   for (const [p1, p2, p3] of tris) {
-    const ax = p2[0] - p1[0], ay = p2[1] - p1[1], az = p2[2] - p1[2]
-    const bx = p3[0] - p1[0], by = p3[1] - p1[1], bz = p3[2] - p1[2]
-    const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx
+    const ax = p2[0] - p1[0],
+      ay = p2[1] - p1[1],
+      az = p2[2] - p1[2]
+    const bx = p3[0] - p1[0],
+      by = p3[1] - p1[1],
+      bz = p3[2] - p1[2]
+    const nx = ay * bz - az * by,
+      ny = az * bx - ax * bz,
+      nz = ax * by - ay * bx
     const nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1
-    dv.setFloat32(off, nx / nl, true); off += 4
-    dv.setFloat32(off, ny / nl, true); off += 4
-    dv.setFloat32(off, nz / nl, true); off += 4
+    dv.setFloat32(off, nx / nl, true)
+    off += 4
+    dv.setFloat32(off, ny / nl, true)
+    off += 4
+    dv.setFloat32(off, nz / nl, true)
+    off += 4
     for (const p of [p1, p2, p3]) {
-      dv.setFloat32(off, p[0], true); off += 4
-      dv.setFloat32(off, p[1], true); off += 4
-      dv.setFloat32(off, p[2], true); off += 4
+      dv.setFloat32(off, p[0], true)
+      off += 4
+      dv.setFloat32(off, p[1], true)
+      off += 4
+      dv.setFloat32(off, p[2], true)
+      off += 4
     }
-    dv.setUint16(off, 0, true); off += 2
+    dv.setUint16(off, 0, true)
+    off += 2
   }
   return new Uint8Array(buf)
 }
@@ -63,21 +76,47 @@ function trianglesToStl(tris) {
 function icosphereTris(subdivisions, radius, zLift) {
   const t = (1 + Math.sqrt(5)) / 2
   let verts = [
-    [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
-    [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
-    [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1],
+    [-1, t, 0],
+    [1, t, 0],
+    [-1, -t, 0],
+    [1, -t, 0],
+    [0, -1, t],
+    [0, 1, t],
+    [0, -1, -t],
+    [0, 1, -t],
+    [t, 0, -1],
+    [t, 0, 1],
+    [-t, 0, -1],
+    [-t, 0, 1],
   ]
   let faces = [
-    [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
-    [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
-    [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
-    [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+    [0, 11, 5],
+    [0, 5, 1],
+    [0, 1, 7],
+    [0, 7, 10],
+    [0, 10, 11],
+    [1, 5, 9],
+    [5, 11, 4],
+    [11, 10, 2],
+    [10, 7, 6],
+    [7, 1, 8],
+    [3, 9, 4],
+    [3, 4, 2],
+    [3, 2, 6],
+    [3, 6, 8],
+    [3, 8, 9],
+    [4, 9, 5],
+    [2, 4, 11],
+    [6, 2, 10],
+    [8, 6, 7],
+    [9, 8, 1],
   ]
   const midpointCache = new Map()
   const midpoint = (a, b) => {
     const key = a < b ? `${a}_${b}` : `${b}_${a}`
     if (midpointCache.has(key)) return midpointCache.get(key)
-    const [ax, ay, az] = verts[a], [bx, by, bz] = verts[b]
+    const [ax, ay, az] = verts[a],
+      [bx, by, bz] = verts[b]
     verts.push([(ax + bx) / 2, (ay + by) / 2, (az + bz) / 2])
     const idx = verts.length - 1
     midpointCache.set(key, idx)
@@ -86,7 +125,9 @@ function icosphereTris(subdivisions, radius, zLift) {
   for (let s = 0; s < subdivisions; s++) {
     const nextFaces = []
     for (const [a, b, c] of faces) {
-      const ab = midpoint(a, b), bc = midpoint(b, c), ca = midpoint(c, a)
+      const ab = midpoint(a, b),
+        bc = midpoint(b, c),
+        ca = midpoint(c, a)
       nextFaces.push([a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca])
     }
     faces = nextFaces
@@ -102,8 +143,14 @@ function icosphereTris(subdivisions, radius, zLift) {
 function cubeTris(size) {
   const s = size
   const p = [
-    [0, 0, 0], [s, 0, 0], [s, s, 0], [0, s, 0],
-    [0, 0, s], [s, 0, s], [s, s, s], [0, s, s],
+    [0, 0, 0],
+    [s, 0, 0],
+    [s, s, 0],
+    [0, s, 0],
+    [0, 0, s],
+    [s, 0, s],
+    [s, s, s],
+    [0, s, s],
   ]
   const quads = [
     [0, 1, 2, 3], // bottom
@@ -156,13 +203,14 @@ async function loadModule(wasmDir) {
   }
   const jsText = readFileSync(jsPath, 'utf8')
   const wasmBinary = readFileSync(wasmPath)
-  const dataUrl = 'data:text/javascript;charset=utf-8,' +
-    encodeURIComponent(`${jsText}\nexport default OrcaModule;`)
+  const dataUrl = 'data:text/javascript;charset=utf-8,' + encodeURIComponent(`${jsText}\nexport default OrcaModule;`)
   const { default: factory } = await import(dataUrl)
   return factory({
     wasmBinary,
     printErr: (m) => console.warn('[OrcaWASM]', m),
-    onAbort: (m) => { throw new Error(`WASM module aborted: ${m}`) },
+    onAbort: (m) => {
+      throw new Error(`WASM module aborted: ${m}`)
+    },
   })
 }
 
@@ -208,11 +256,22 @@ function sliceOnce(module, session, stlBytes) {
       try {
         const rc = module._orc_slice(session, stlPtr, stlBytes.length, outPtrPtr, outLenPtr)
         if (rc !== 0) throw new Error(`orc_slice failed (${rc}): ${decodeError(module, session)}`)
-        const gcodePtr = module.getValue(outPtrPtr, 'i32'), gcodeLen = module.getValue(outLenPtr, 'i32')
-        try { return module.UTF8ToString(gcodePtr, gcodeLen) } finally { module._orc_free(gcodePtr) }
-      } finally { module._free(outLenPtr) }
-    } finally { module._free(outPtrPtr) }
-  } finally { free(module, stlPtr) }
+        const gcodePtr = module.getValue(outPtrPtr, 'i32'),
+          gcodeLen = module.getValue(outLenPtr, 'i32')
+        try {
+          return module.UTF8ToString(gcodePtr, gcodeLen)
+        } finally {
+          module._orc_free(gcodePtr)
+        }
+      } finally {
+        module._free(outLenPtr)
+      }
+    } finally {
+      module._free(outPtrPtr)
+    }
+  } finally {
+    free(module, stlPtr)
+  }
 }
 
 // ── base profile (matches orca-wasm/scripts/smoke-test.mjs's representative config) ──
@@ -263,13 +322,28 @@ const CORPUS = [
     id: 'vase_mode',
     label: 'Vase-mode cone (open top, single wall, spiral_mode)',
     mesh: () => vaseConeTris(35, 15, 120, 64),
-    profile: { ...BASE_PROFILE, wall_loops: 1, top_shell_layers: 0, bottom_shell_layers: 1, sparse_infill_density: 0, spiral_mode: true },
+    profile: {
+      ...BASE_PROFILE,
+      wall_loops: 1,
+      top_shell_layers: 0,
+      bottom_shell_layers: 1,
+      sparse_infill_density: 0,
+      spiral_mode: true,
+    },
   },
   {
     id: 'large_functional',
     label: 'Large functional part (icosphere, subdiv 4, r=45mm, dense settings)',
     mesh: () => icosphereTris(4, 45, 45),
-    profile: { ...BASE_PROFILE, layer_height: 0.12, initial_layer_height: 0.12, wall_loops: 3, top_shell_layers: 5, bottom_shell_layers: 5, sparse_infill_density: 30 },
+    profile: {
+      ...BASE_PROFILE,
+      layer_height: 0.12,
+      initial_layer_height: 0.12,
+      wall_loops: 3,
+      top_shell_layers: 5,
+      bottom_shell_layers: 5,
+      sparse_infill_density: 30,
+    },
   },
 ]
 
@@ -312,8 +386,12 @@ async function main() {
     const dt = ((Date.now() - t0) / 1000).toFixed(1)
     console.log(`${gcode.length.toLocaleString()} bytes, ${gcode.split('\n').length.toLocaleString()} lines (${dt}s)`)
     manifest.models.push({
-      id: entry.id, label: entry.label, triangles: tris.length,
-      profile: entry.profile, gcodeBytes: gcode.length, gcodeLines: gcode.split('\n').length,
+      id: entry.id,
+      label: entry.label,
+      triangles: tris.length,
+      profile: entry.profile,
+      gcodeBytes: gcode.length,
+      gcodeLines: gcode.split('\n').length,
     })
   }
 

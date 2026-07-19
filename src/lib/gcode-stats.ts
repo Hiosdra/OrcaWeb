@@ -11,9 +11,8 @@ const HEAD_WINDOW = 64 * 1024
 const TAIL_WINDOW = 1024 * 1024
 
 export function extractGcodeStats(gcode: string): GcodeStats {
-  const scan = gcode.length > HEAD_WINDOW + TAIL_WINDOW
-    ? `${gcode.slice(0, HEAD_WINDOW)}\n${gcode.slice(-TAIL_WINDOW)}`
-    : gcode
+  const scan =
+    gcode.length > HEAD_WINDOW + TAIL_WINDOW ? `${gcode.slice(0, HEAD_WINDOW)}\n${gcode.slice(-TAIL_WINDOW)}` : gcode
 
   const stats: GcodeStats = {}
 
@@ -23,9 +22,9 @@ export function extractGcodeStats(gcode: string): GcodeStats {
   // ("; estimated first layer printing time ..." must NOT match — it's the
   // first layer only, not the whole print.)
   const time =
-    scan.match(/;\s*total estimated time:\s*([^;\n]+)/i)?.[1]?.trim()
-    ?? scan.match(/;\s*model printing time:\s*([^;\n]+)/i)?.[1]?.trim()
-    ?? scan.match(/^;\s*estimated printing time[^=\n]*=\s*(.+)$/im)?.[1]?.trim()
+    scan.match(/;\s*total estimated time:\s*([^;\n]+)/i)?.[1]?.trim() ??
+    scan.match(/;\s*model printing time:\s*([^;\n]+)/i)?.[1]?.trim() ??
+    scan.match(/^;\s*estimated printing time[^=\n]*=\s*(.+)$/im)?.[1]?.trim()
   if (time) stats.printTime = time
 
   const layers = scan.match(/;\s*total layer number:\s*(\d+)/i)?.[1]

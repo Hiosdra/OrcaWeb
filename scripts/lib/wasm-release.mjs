@@ -62,10 +62,14 @@ export async function resolveLatestWasmTag() {
   // engine; for e2e-smoke.yml it's still a real published binary to drive
   // the UI against, which is all that check needs (see ADR-010 — it
   // validates the UI/worker glue, not the pinned engine version itself).
-  const fallback = releases.find(r => r.tag_name.startsWith('wasm-v'))
+  const fallback = releases.find((r) => r.tag_name.startsWith('wasm-v'))
   if (!fallback) {
-    throw new Error(`No release found matching ${baseTag}(-patchN), and no other wasm-v* release exists to fall back to`)
+    throw new Error(
+      `No release found matching ${baseTag}(-patchN), and no other wasm-v* release exists to fall back to`,
+    )
   }
-  console.warn(`  ⚠ No release found matching ${baseTag}(-patchN) — falling back to latest published release: ${fallback.tag_name}\n`)
+  console.warn(
+    `  ⚠ No release found matching ${baseTag}(-patchN) — falling back to latest published release: ${fallback.tag_name}\n`,
+  )
   return fallback.tag_name
 }

@@ -3,8 +3,8 @@
 // .github/workflows/build-wasm.yml and assembles them into a single bash
 // script for local WSL builds. Not wired into any app code — a dev-only tool.
 import { readFileSync, writeFileSync } from 'fs'
-import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
+import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const yml = join(__dirname, '../.github/workflows/build-wasm.yml')
@@ -23,13 +23,19 @@ while (i < lines.length) {
     while (j < lines.length) {
       const m2 = lines[j].match(/^(\s*)- name:/)
       if (m2 && m2[1].length <= stepIndent) break
-      if (/^\s*run:\s*\|/.test(lines[j])) { runLine = j; break }
+      if (/^\s*run:\s*\|/.test(lines[j])) {
+        runLine = j
+        break
+      }
       // Single-line `run: <command>` (no `|` block) — the whole step is one
       // line, e.g. "run: python3 orca-wasm/patches/apply.py". Without this
       // branch the step is silently dropped: runLine stays -1, the `if`
       // below never fires, and nothing gets pushed to `steps`.
       const inline = lines[j].match(/^\s*run:\s*(?!\|)(\S.*)$/)
-      if (inline) { inlineRun = inline[1]; break }
+      if (inline) {
+        inlineRun = inline[1]
+        break
+      }
       j++
     }
     if (inlineRun !== null) {
@@ -43,7 +49,11 @@ while (i < lines.length) {
       const body = []
       while (k < lines.length) {
         const line = lines[k]
-        if (line.trim() === '') { body.push(''); k++; continue }
+        if (line.trim() === '') {
+          body.push('')
+          k++
+          continue
+        }
         const lineIndent = line.match(/^(\s*)/)[1].length
         if (lineIndent <= runIndent) break
         body.push(line)

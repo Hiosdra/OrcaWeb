@@ -10,7 +10,9 @@ const listeners = new Set<Listener>()
 export type WasmStatus = 'idle' | 'loading' | 'ready' | 'error'
 let wasmStatus: WasmStatus = 'idle'
 
-export function getWasmStatus(): WasmStatus { return wasmStatus }
+export function getWasmStatus(): WasmStatus {
+  return wasmStatus
+}
 
 export function addWorkerListener(fn: Listener): () => void {
   listeners.add(fn)
@@ -33,10 +35,7 @@ export function terminateWorker(): void {
 export function getWorker(): Worker {
   if (worker) return worker
 
-  worker = new Worker(
-    new URL('../workers/slicer.worker.ts', import.meta.url),
-    { type: 'module' },
-  )
+  worker = new Worker(new URL('../workers/slicer.worker.ts', import.meta.url), { type: 'module' })
 
   worker.onmessage = (e: MessageEvent<WorkerOutMessage>) => {
     const msg = e.data
@@ -53,7 +52,9 @@ export function getWorker(): Worker {
       worker?.terminate()
       worker = null
     }
-    listeners.forEach((fn) => fn(msg))
+    listeners.forEach((fn) => {
+      fn(msg)
+    })
   }
 
   worker.onerror = (e) => {
@@ -61,13 +62,14 @@ export function getWorker(): Worker {
     worker?.terminate()
     worker = null
     const msg: WorkerOutMessage = { type: 'WASM_ERROR', message: e.message ?? 'Worker crashed' }
-    listeners.forEach((fn) => fn(msg))
+    listeners.forEach((fn) => {
+      fn(msg)
+    })
   }
 
   // In production Vite sets BASE_URL to the app base (e.g. /OrcaWeb/app/).
   // WASM files live in public/wasm/ which gets deployed at <BASE_URL>wasm/.
-  const wasmBase = import.meta.env.VITE_WASM_BASE_URL
-    ?? `${import.meta.env.BASE_URL}wasm`
+  const wasmBase = import.meta.env.VITE_WASM_BASE_URL ?? `${import.meta.env.BASE_URL}wasm`
   wasmStatus = 'loading'
   // These are the build-time baked values; the worker resolves the live
   // engine version + label at load from engine-version.json and only falls

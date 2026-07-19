@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 
 interface Props {
   file: File
@@ -13,12 +13,7 @@ interface Props {
   bedShape?: 'rectangle' | 'circle'
 }
 
-function buildBed(
-  scene: THREE.Scene,
-  bedX: number,
-  bedY: number,
-  bedShape: 'rectangle' | 'circle',
-): THREE.Object3D[] {
+function buildBed(scene: THREE.Scene, bedX: number, bedY: number, bedShape: 'rectangle' | 'circle'): THREE.Object3D[] {
   const disposables: THREE.Object3D[] = []
 
   if (bedShape === 'circle') {
@@ -34,7 +29,7 @@ function buildBed(
 
     const gridDiv = Math.max(4, Math.round((radius * 2) / 10))
     const grid = new THREE.GridHelper(radius * 2, gridDiv, 0xcccccc, 0xdde3ed)
-    grid.rotateX(Math.PI / 2)  // rotate from XZ plane to XY plane (Z-up floor)
+    grid.rotateX(Math.PI / 2) // rotate from XZ plane to XY plane (Z-up floor)
     grid.position.z = 0.1
     scene.add(grid)
     disposables.push(grid)
@@ -63,7 +58,7 @@ function buildBed(
     const gridDiv = Math.round(Math.max(bedX, bedY) / 10)
     const grid = new THREE.GridHelper(Math.max(bedX, bedY), gridDiv, 0xcccccc, 0xdde3ed)
     grid.scale.set(bedX / Math.max(bedX, bedY), 1, bedY / Math.max(bedX, bedY))
-    grid.rotateX(Math.PI / 2)  // rotate from XZ plane to XY plane (Z-up floor)
+    grid.rotateX(Math.PI / 2) // rotate from XZ plane to XY plane (Z-up floor)
     grid.position.z = 0.1
     scene.add(grid)
     disposables.push(grid)
@@ -95,7 +90,7 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
     scene.background = new THREE.Color(0xf8fafc)
 
     const camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 10000)
-    camera.up.set(0, 0, 1)  // Z-up to match engine coordinate system
+    camera.up.set(0, 0, 1) // Z-up to match engine coordinate system
 
     const renderer = new THREE.WebGLRenderer({ antialias: true })
     renderer.setPixelRatio(window.devicePixelRatio)
@@ -105,7 +100,7 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.6))
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8)
-    dirLight.position.set(100, 100, 200)  // Z-up: light comes from above (high Z)
+    dirLight.position.set(100, 100, 200) // Z-up: light comes from above (high Z)
     dirLight.castShadow = true
     scene.add(dirLight)
     const fillLight = new THREE.DirectionalLight(0x8ab4f8, 0.3)
@@ -125,43 +120,46 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
     let mesh: THREE.Mesh | null = null
     let cancelled = false
 
-    file.arrayBuffer().then((buffer) => {
-      if (cancelled) return
+    file
+      .arrayBuffer()
+      .then((buffer) => {
+        if (cancelled) return
 
-      let geometry: THREE.BufferGeometry
-      try {
-        geometry = loader.parse(buffer)
-      } catch {
-        setLoadError('Could not read this model file')
-        return
-      }
-      geometry.computeBoundingBox()
-      const box = geometry.boundingBox!
-      const size = box.getSize(new THREE.Vector3())
-      const center = box.getCenter(new THREE.Vector3())
+        let geometry: THREE.BufferGeometry
+        try {
+          geometry = loader.parse(buffer)
+        } catch {
+          setLoadError('Could not read this model file')
+          return
+        }
+        geometry.computeBoundingBox()
+        const box = geometry.boundingBox!
+        const size = box.getSize(new THREE.Vector3())
+        const center = box.getCenter(new THREE.Vector3())
 
-      // Centre X/Y on bed origin; place bottom at Z=0 (engine: X/Y flat, Z = height)
-      geometry.translate(-center.x, -center.y, -box.min.z)
+        // Centre X/Y on bed origin; place bottom at Z=0 (engine: X/Y flat, Z = height)
+        geometry.translate(-center.x, -center.y, -box.min.z)
 
-      const material = new THREE.MeshPhongMaterial({
-        color: 0x0a84ff,
-        specular: 0x222222,
-        shininess: 30,
-        side: THREE.DoubleSide,
+        const material = new THREE.MeshPhongMaterial({
+          color: 0x0a84ff,
+          specular: 0x222222,
+          shininess: 30,
+          side: THREE.DoubleSide,
+        })
+        mesh = new THREE.Mesh(geometry, material)
+        mesh.castShadow = true
+        scene.add(mesh)
+
+        // Fit camera to model — Z-up: position camera above and to the side
+        const maxDim = Math.max(size.x, size.y, size.z, 50)
+        const dist = maxDim * 2.5
+        camera.position.set(dist * 0.6, -dist, dist * 0.7)
+        controls.target.set(0, 0, size.z / 2)
+        controls.update()
       })
-      mesh = new THREE.Mesh(geometry, material)
-      mesh.castShadow = true
-      scene.add(mesh)
-
-      // Fit camera to model — Z-up: position camera above and to the side
-      const maxDim = Math.max(size.x, size.y, size.z, 50)
-      const dist = maxDim * 2.5
-      camera.position.set(dist * 0.6, -dist, dist * 0.7)
-      controls.target.set(0, 0, size.z / 2)
-      controls.update()
-    }).catch(() => {
-      if (!cancelled) setLoadError('Could not read this model file')
-    })
+      .catch(() => {
+        if (!cancelled) setLoadError('Could not read this model file')
+      })
 
     let animId: number
     const animate = () => {
@@ -192,7 +190,9 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
         if (obj instanceof THREE.Mesh || obj instanceof THREE.Line || obj instanceof THREE.LineSegments) {
           obj.geometry.dispose()
           if (Array.isArray(obj.material)) {
-            obj.material.forEach((m) => m.dispose())
+            obj.material.forEach((m) => {
+              m.dispose()
+            })
           } else {
             ;(obj.material as THREE.Material).dispose()
           }
@@ -204,11 +204,7 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
 
   return (
     <div className="relative w-full h-full min-h-48">
-      <div
-        ref={mountRef}
-        className="w-full h-full rounded-xl overflow-hidden"
-        style={{ touchAction: 'none' }}
-      />
+      <div ref={mountRef} className="w-full h-full rounded-xl overflow-hidden" style={{ touchAction: 'none' }} />
       {loadError && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-50/80 text-sm text-slate-500">
           {loadError}

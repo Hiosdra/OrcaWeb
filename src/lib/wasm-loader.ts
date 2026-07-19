@@ -56,7 +56,9 @@ export function sliceStl(module: OrcaModule, session: number, stlData: Uint8Arra
 }
 
 function convertToStl(
-  module: OrcaModule, data: Uint8Array, label: string,
+  module: OrcaModule,
+  data: Uint8Array,
+  label: string,
   convert: (dataPtr: number, outPtrPtr: number, outLenPtr: number) => number,
 ): Uint8Array {
   return withAllocations(module, (allocate) => {
@@ -78,12 +80,18 @@ function convertToStl(
 
 export function objToStl(module: OrcaModule, objData: Uint8Array): Uint8Array {
   return convertToStl(module, objData, 'OBJ data', (objPtr, outPtrPtr, outLenPtr) =>
-    module._orc_obj_to_stl(objPtr, objData.length, outPtrPtr, outLenPtr))
+    module._orc_obj_to_stl(objPtr, objData.length, outPtrPtr, outLenPtr),
+  )
 }
 
 export function sliceMultiStl(
-  module: OrcaModule, session: number, data: Uint8Array, offsets: Int32Array, nFiles: number,
-  configJson: string, extruderIds?: Int32Array,
+  module: OrcaModule,
+  session: number,
+  data: Uint8Array,
+  offsets: Int32Array,
+  nFiles: number,
+  configJson: string,
+  extruderIds?: Int32Array,
 ): string {
   initSession(module, session, configJson)
   return withAllocations(module, (allocate) => {
@@ -92,9 +100,7 @@ export function sliceMultiStl(
     const offsetsPtr = allocate(offsets.length * 4, 'STL offset table')
     for (let i = 0; i < offsets.length; i++) module.setValue(offsetsPtr + i * 4, offsets[i], 'i32')
 
-    const extruderIdsPtr = extruderIds?.length
-      ? allocate(extruderIds.length * 4, 'extruder ID table')
-      : 0
+    const extruderIdsPtr = extruderIds?.length ? allocate(extruderIds.length * 4, 'extruder ID table') : 0
     if (extruderIds) {
       for (let i = 0; i < extruderIds.length; i++) module.setValue(extruderIdsPtr + i * 4, extruderIds[i], 'i32')
     }
@@ -102,7 +108,14 @@ export function sliceMultiStl(
     const outPtrPtr = allocate(4, 'G-code output pointer')
     const outLenPtr = allocate(4, 'G-code output length')
     const result = module._orc_slice_multi(
-      session, dataPtr, data.length, offsetsPtr, nFiles, extruderIdsPtr, outPtrPtr, outLenPtr,
+      session,
+      dataPtr,
+      data.length,
+      offsetsPtr,
+      nFiles,
+      extruderIdsPtr,
+      outPtrPtr,
+      outLenPtr,
     )
     if (result !== 0) throw new OrcaSliceError(result, wasmError(module, session, result))
     const gcodePtr = module.getValue(outPtrPtr, 'i32')
@@ -134,7 +147,10 @@ export function write3mf(module: OrcaModule, session: number, stlData: Uint8Arra
   })
 }
 
-export interface Read3mfResult { stl: Uint8Array; configJson: string }
+export interface Read3mfResult {
+  stl: Uint8Array
+  configJson: string
+}
 
 export function read3mf(module: OrcaModule, mfData: Uint8Array): Read3mfResult {
   return withAllocations(module, (allocate) => {
@@ -144,14 +160,24 @@ export function read3mf(module: OrcaModule, mfData: Uint8Array): Read3mfResult {
     const outStlLenPtr = allocate(4, 'STL output length')
     const outConfigPtrPtr = allocate(4, 'config output pointer')
     const outConfigLenPtr = allocate(4, 'config output length')
-    const result = module._orc_read_3mf(mfPtr, mfData.length, outStlPtrPtr, outStlLenPtr, outConfigPtrPtr, outConfigLenPtr)
+    const result = module._orc_read_3mf(
+      mfPtr,
+      mfData.length,
+      outStlPtrPtr,
+      outStlLenPtr,
+      outConfigPtrPtr,
+      outConfigLenPtr,
+    )
     if (result !== 0) throw new OrcaSliceError(result, wasmError(module, 0, result))
     const stlPtr = module.getValue(outStlPtrPtr, 'i32')
     const stlLen = module.getValue(outStlLenPtr, 'i32')
     const configPtr = module.getValue(outConfigPtrPtr, 'i32')
     const configLen = module.getValue(outConfigLenPtr, 'i32')
     try {
-      return { stl: module.HEAPU8.slice(stlPtr, stlPtr + stlLen), configJson: module.UTF8ToString(configPtr, configLen) }
+      return {
+        stl: module.HEAPU8.slice(stlPtr, stlPtr + stlLen),
+        configJson: module.UTF8ToString(configPtr, configLen),
+      }
     } finally {
       module._orc_free(stlPtr)
       module._orc_free(configPtr)
@@ -162,11 +188,15 @@ export function read3mf(module: OrcaModule, mfData: Uint8Array): Read3mfResult {
 export function cadToStl(module: OrcaModule, cadData: Uint8Array): Uint8Array {
   if (cadData.length === 0) throw new Error('CAD data is empty')
   return convertToStl(module, cadData, 'CAD data', (cadPtr, outPtrPtr, outLenPtr) =>
-    module._orc_cad_to_stl(cadPtr, cadData.length, outPtrPtr, outLenPtr))
+    module._orc_cad_to_stl(cadPtr, cadData.length, outPtrPtr, outLenPtr),
+  )
 }
 
 export class OrcaSliceError extends Error {
-  constructor(public readonly code: number, message: string) {
+  constructor(
+    public readonly code: number,
+    message: string,
+  ) {
     super(message)
     this.name = 'OrcaSliceError'
   }
@@ -183,15 +213,25 @@ function wasmError(module: OrcaModule, session: number, code: number): string {
     logWarn('[OrcaWASM] _orc_decode_exception threw — falling back to code-based message', err)
   }
   switch (code) {
-    case -1: return 'Invalid or uninitialized state'
-    case -2: return 'Config JSON parse failure'
-    case -3: return 'Failed to write STL to MEMFS'
-    case -4: return 'STL load failed (invalid or corrupt geometry)'
-    case -5: return 'Model contains no objects'
-    case -6: return 'Print validation failed'
-    case -7: return 'Slicing error'
-    case -8: return 'G-code export failed'
-    case -9: return 'Unexpected C++ exception'
-    default: return `Unknown error (code ${code})`
+    case -1:
+      return 'Invalid or uninitialized state'
+    case -2:
+      return 'Config JSON parse failure'
+    case -3:
+      return 'Failed to write STL to MEMFS'
+    case -4:
+      return 'STL load failed (invalid or corrupt geometry)'
+    case -5:
+      return 'Model contains no objects'
+    case -6:
+      return 'Print validation failed'
+    case -7:
+      return 'Slicing error'
+    case -8:
+      return 'G-code export failed'
+    case -9:
+      return 'Unexpected C++ exception'
+    default:
+      return `Unknown error (code ${code})`
   }
 }
