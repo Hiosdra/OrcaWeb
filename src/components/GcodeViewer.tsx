@@ -645,6 +645,7 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
           {visibleLayers}/{layers.length} · z{layers[visibleLayers - 1]?.z.toFixed(2) ?? '?'}mm
         </span>
         <button
+          type="button"
           onClick={() => setShowTravels((v) => !v)}
           className={`text-xs px-2 py-0.5 rounded shrink-0 transition-colors border ${
             showTravels

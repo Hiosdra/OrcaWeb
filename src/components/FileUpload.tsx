@@ -49,7 +49,18 @@ export function FileUpload({ onFiles, loadedCount }: Props) {
 
   return (
     <div>
-      <div
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".stl,.3mf,.obj,.step,.stp"
+        multiple
+        className="hidden"
+        onChange={handleChange}
+        data-testid="model-file-input"
+      />
+
+      <button
+        type="button"
         onDragEnter={(e) => {
           e.preventDefault()
           dragDepth.current++
@@ -66,7 +77,7 @@ export function FileUpload({ onFiles, loadedCount }: Props) {
         onDrop={handleDrop}
         onClick={() => inputRef.current?.click()}
         className={clsx(
-          'relative flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed cursor-pointer transition-all select-none',
+          'relative flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed cursor-pointer transition-all select-none w-full',
           'h-40 sm:h-52',
           dragging
             ? 'border-orca-500 bg-orca-50 scale-[1.01]'
@@ -75,37 +86,28 @@ export function FileUpload({ onFiles, loadedCount }: Props) {
               : 'border-slate-300 bg-slate-50 hover:border-orca-400 hover:bg-orca-50',
         )}
       >
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".stl,.3mf,.obj,.step,.stp"
-          multiple
-          className="hidden"
-          onChange={handleChange}
-          data-testid="model-file-input"
-        />
-
         {loadedCount > 0 ? (
           <>
             <UploadIcon className="w-10 h-10 text-orca-500" />
-            <div className="text-center">
-              <p className="font-semibold text-slate-800">
+            {/* span, not div/p: a <button>'s content model is phrasing content only */}
+            <span className="block text-center">
+              <span className="block font-semibold text-slate-800">
                 {loadedCount} {loadedCount === 1 ? 'file' : 'files'} loaded
-              </p>
-              <p className="text-sm text-slate-500 mt-1">Click or drop to add more</p>
-            </div>
+              </span>
+              <span className="block text-sm text-slate-500 mt-1">Click or drop to add more</span>
+            </span>
           </>
         ) : (
           <>
             <UploadIcon className="w-12 h-12 text-slate-400" />
-            <div className="text-center">
-              <p className="font-semibold text-slate-700">Drop your models here</p>
-              <p className="text-sm text-slate-500 mt-1">or click to browse · multiple files supported</p>
-            </div>
-            <p className="text-xs text-slate-400">.stl · .3mf · .obj · .step</p>
+            <span className="block text-center">
+              <span className="block font-semibold text-slate-700">Drop your models here</span>
+              <span className="block text-sm text-slate-500 mt-1">or click to browse · multiple files supported</span>
+            </span>
+            <span className="block text-xs text-slate-400">.stl · .3mf · .obj · .step</span>
           </>
         )}
-      </div>
+      </button>
 
       {rejected.length > 0 && (
         <p className="mt-2 text-xs text-red-500 px-2">
