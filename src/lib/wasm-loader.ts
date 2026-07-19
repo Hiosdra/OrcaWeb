@@ -2,6 +2,7 @@
 // (the only caller) — this file holds the pure call helpers around the
 // orc_* bridge exports plus their error decoding.
 import type { OrcaModule } from '../types'
+import { logWarn } from './log'
 
 type Allocate = (size: number, label: string) => number
 
@@ -178,7 +179,9 @@ function wasmError(module: OrcaModule, session: number, code: number): string {
       const msg = module.UTF8ToString(ptr)
       if (msg) return msg
     }
-  } catch { /* fall through to code-based fallback */ }
+  } catch (err) {
+    logWarn('[OrcaWASM] _orc_decode_exception threw — falling back to code-based message', err)
+  }
   switch (code) {
     case -1: return 'Invalid or uninitialized state'
     case -2: return 'Config JSON parse failure'
