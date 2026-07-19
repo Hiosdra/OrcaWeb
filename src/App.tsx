@@ -12,6 +12,7 @@ import { buildConfig, PRESETS, PRINTER_PRESETS, FILAMENT_PRESETS, DISPLAY_DEFAUL
 import { formatBytes } from './lib/format'
 import { useSliceQueue } from './hooks/useSliceQueue'
 import type { WasmStatus } from './lib/worker-singleton'
+import { logWarn } from './lib/log'
 
 // ── Persisted settings ────────────────────────────────────────────────────────
 
@@ -77,7 +78,8 @@ function loadSavedSettings(): SavedSettings | null {
         ? s.importedProfile as ImportedProfile
         : undefined,
     }
-  } catch {
+  } catch (err) {
+    logWarn('Failed to load saved settings — falling back to defaults', err)
     return null
   }
 }
@@ -136,7 +138,9 @@ export default function App() {
         manualOverrides,
         ...(importedProfile ? { importedProfile } : {}),
       } satisfies SavedSettings))
-    } catch { /* storage full or unavailable — settings just won't persist */ }
+    } catch (err) {
+      logWarn('Failed to persist settings — storage full or unavailable', err)
+    }
   }, [selectedPrinter, selectedFilament, selectedPreset, manualOverrides, importedProfile])
 
   // Settings embedded in an imported file (3MF) form their own layer so later

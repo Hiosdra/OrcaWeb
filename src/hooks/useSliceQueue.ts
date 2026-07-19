@@ -8,6 +8,7 @@ import {
   terminateWorker,
   type WasmStatus,
 } from '../lib/worker-singleton'
+import { logError, logWarn } from '../lib/log'
 
 export interface PlateState {
   slicing: boolean
@@ -333,6 +334,7 @@ export function useSliceQueue(
           if (msg.engineLabel) setEngineLabel(msg.engineLabel)
           return
         case 'WASM_ERROR':
+          logError('[queue] engine reported WASM_ERROR — failing every in-flight item:', msg.message)
           setWasmStatus('error')
           dispatch({ type: 'ENGINE_FAILED', message: `Slicer engine failed: ${msg.message}` })
           rejectAllPendingMf(`Slicer engine failed: ${msg.message}`)
@@ -344,12 +346,14 @@ export function useSliceQueue(
           dispatch({ type: 'SLICE_DONE', gcode: msg.gcode })
           return
         case 'SLICE_ERROR':
+          logError('[queue] SLICE_ERROR:', msg.message)
           dispatch({ type: 'SLICE_FAILED', message: msg.message })
           return
         case 'SLICE_MULTI_COMPLETE':
           dispatch({ type: 'PLATE_DONE', gcode: msg.gcode })
           return
         case 'SLICE_MULTI_ERROR':
+          logError('[queue] SLICE_MULTI_ERROR (plate):', msg.message)
           dispatch({ type: 'PLATE_FAILED', message: msg.message })
           return
         case 'OBJ_STL_COMPLETE':
@@ -357,9 +361,11 @@ export function useSliceQueue(
           dispatch({ type: 'CONVERSION_DONE', id: msg.requestId, stl: msg.stl })
           return
         case 'OBJ_STL_ERROR':
+          logError(`[queue] OBJ_STL_ERROR for item ${msg.requestId}:`, msg.message)
           dispatch({ type: 'PATCH_ITEM', id: msg.requestId, patch: { status: 'error', error: `OBJ conversion failed: ${msg.message}` } })
           return
         case 'CAD_STL_ERROR':
+          logError(`[queue] CAD_STL_ERROR for item ${msg.requestId}:`, msg.message)
           dispatch({ type: 'PATCH_ITEM', id: msg.requestId, patch: { status: 'error', error: `CAD conversion failed: ${msg.message}` } })
           return
         case 'WRITE_3MF_COMPLETE': {
@@ -371,6 +377,7 @@ export function useSliceQueue(
           return
         }
         case 'WRITE_3MF_ERROR': {
+          logError(`[queue] WRITE_3MF_ERROR for request ${msg.requestId}:`, msg.message)
           const resolver = export3mfResolvers.current.get(msg.requestId)
           if (resolver) {
             export3mfResolvers.current.delete(msg.requestId)
@@ -387,6 +394,7 @@ export function useSliceQueue(
           return
         }
         case 'READ_3MF_ERROR': {
+          logError(`[queue] READ_3MF_ERROR for request ${msg.requestId}:`, msg.message)
           const resolver = read3mfResolvers.current.get(msg.requestId)
           if (resolver) {
             read3mfResolvers.current.delete(msg.requestId)
@@ -425,8 +433,9 @@ export function useSliceQueue(
         if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
         getWorker().postMessage({ type: 'SLICE', stl, config: configSnapshot.config }, [stl])
-      } catch {
+      } catch (err) {
         if (requestGeneration !== sliceRequestGeneration.current) return
+        logError(`[queue] failed to read "${next.name}" for slicing:`, err)
         dispatch({ type: 'SLICE_FAILED', message: 'Failed to read file' })
       }
     })()
@@ -443,6 +452,7 @@ export function useSliceQueue(
       if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
       getWorker().postMessage(msg, [buf])
     } catch (err) {
+      logError(`[queue] failed to start conversion for "${item.name}":`, err)
       dispatch({
         type: 'PATCH_ITEM',
         id: item.id,
@@ -466,6 +476,7 @@ export function useSliceQueue(
           if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
           getWorker().postMessage({ type: 'READ_3MF', mf, requestId }, [mf])
         } catch (err) {
+          logError(`[queue] failed to post READ_3MF for item ${itemId}:`, err)
           read3mfResolvers.current.delete(requestId)
           reject(err instanceof Error ? err : new Error(String(err)))
         }
@@ -491,6 +502,7 @@ export function useSliceQueue(
     } catch (err) {
       // Removal is cancellation, not an engine-read failure.
       if (err instanceof ItemRemovedError) return
+      logError(`[queue] 3MF import failed for "${f.name}":`, err)
       dispatch({
         type: 'PATCH_ITEM',
         id: item.id,
@@ -526,6 +538,7 @@ export function useSliceQueue(
             dispatch({ type: 'PATCH_ITEM', id: item.id, patch: { stlFile: f, status: 'ready' } })
           }
         } catch (err) {
+          logError(`[queue] failed to process "${f.name}":`, err)
           dispatch({
             type: 'PATCH_ITEM',
             id: item.id,
@@ -548,6 +561,7 @@ export function useSliceQueue(
 
   const cancel = useCallback(() => {
     if (!state.currentId && !state.plate.slicing) return
+    logWarn(`[queue] cancel requested (currentId=${state.currentId ?? 'none'}, plate.slicing=${state.plate.slicing}) — restarting engine`)
     sliceRequestGeneration.current += 1
     terminateWorker()
     setWasmStatus('idle')
@@ -561,6 +575,7 @@ export function useSliceQueue(
       // Removing the item being sliced: only a worker restart can abort the
       // synchronous WASM call. The queue keeps running — the next ready item
       // is posted to the fresh worker automatically.
+      logWarn(`[queue] removing in-flight item ${id} — restarting engine to abort its slice`)
       sliceRequestGeneration.current += 1
       terminateWorker()
       setWasmStatus('idle')
@@ -594,6 +609,7 @@ export function useSliceQueue(
           if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
           getWorker().postMessage({ type: 'WRITE_3MF', stl, config: configSnapshot.config, requestId }, [stl])
         } catch (err) {
+          logError(`[queue] failed to post WRITE_3MF for "${item.name}":`, err)
           export3mfResolvers.current.delete(requestId)
           reject(err instanceof Error ? err : new Error(String(err)))
         }
@@ -617,6 +633,7 @@ export function useSliceQueue(
         getWorker().postMessage({ type: 'SLICE_MULTI', stls, config: configSnapshot.config }, stls)
       } catch (err) {
         if (requestGeneration !== sliceRequestGeneration.current) return
+        logError('[queue] failed to prepare plate slice:', err)
         dispatch({ type: 'PLATE_FAILED', message: err instanceof Error ? err.message : String(err) })
       }
     })()
