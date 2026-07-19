@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { FILAMENT_PRESETS, PRESETS, PRINTER_PRESETS, parseOrcaProfileJson } from '../lib/profiles'
 import type { FuzzySkin, InfillPattern, OrcaConfig, SeamPosition, SupportType, WallGenerator } from '../types'
 import { ChevronIcon, UploadIcon } from './icons'
@@ -40,6 +40,7 @@ export function SettingsPanel({
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [importMsg, setImportMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const densityId = useId()
 
   function handleProfileFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -87,6 +88,7 @@ export function SettingsPanel({
           onChange={handleProfileFile}
         />
         <button
+          type="button"
           onClick={() => fileInputRef.current?.click()}
           className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border-2 border-dashed border-slate-200 text-sm text-slate-500 hover:border-orca-400 hover:text-orca-600 hover:bg-orca-50 transition-all"
         >
@@ -107,6 +109,7 @@ export function SettingsPanel({
             Profile: {activeImport.name} · {activeImport.type} · {activeImport.settingCount} settings
           </span>
           <button
+            type="button"
             onClick={onRemoveImport}
             title="Remove imported profile"
             className="shrink-0 rounded px-1 text-orca-600 hover:bg-orca-100 hover:text-orca-800"
@@ -165,6 +168,7 @@ export function SettingsPanel({
         <div className="grid grid-cols-3 gap-2">
           {PRESETS.map((p) => (
             <button
+              type="button"
               key={p.name}
               onClick={() => onPresetChange(p.name)}
               className={clsx(
@@ -217,10 +221,11 @@ export function SettingsPanel({
       <Section title="Infill">
         <div className="flex items-center gap-4">
           <div className="flex-1">
-            <label className="block text-xs font-medium text-slate-600 mb-1">
+            <label htmlFor={densityId} className="block text-xs font-medium text-slate-600 mb-1">
               Density: {config.sparse_infill_density ?? 15}%
             </label>
             <input
+              id={densityId}
               type="range"
               min={0}
               max={100}
@@ -282,6 +287,7 @@ export function SettingsPanel({
 
       {/* Advanced toggle */}
       <button
+        type="button"
         onClick={() => setShowAdvanced((v) => !v)}
         className="w-full flex items-center justify-center gap-2 text-sm font-medium text-slate-500 hover:text-orca-600 transition-colors py-1"
       >
@@ -405,10 +411,14 @@ function SelectField({
   onChange: (v: string) => void
   className?: string
 }) {
+  const id = useId()
   return (
     <div className={className}>
-      <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
+      <label htmlFor={id} className="block text-xs font-medium text-slate-600 mb-1">
+        {label}
+      </label>
       <select
+        id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-orca-400"
@@ -445,6 +455,7 @@ function NumberField({
   // it couldn't be cleared, and entering "15" in a min-10 field went
   // 1 → clamped to 10 → "105".
   const [draft, setDraft] = useState<string | null>(null)
+  const id = useId()
 
   const commit = (raw: string) => {
     setDraft(null)
@@ -454,9 +465,12 @@ function NumberField({
 
   return (
     <div>
-      <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
+      <label htmlFor={id} className="block text-xs font-medium text-slate-600 mb-1">
+        {label}
+      </label>
       <div className="flex items-center gap-1">
         <input
+          id={id}
           type="number"
           value={draft ?? String(value)}
           min={min}
@@ -487,7 +501,11 @@ function ToggleField({
   className?: string
 }) {
   return (
-    <button onClick={() => onChange(!value)} className={clsx('flex items-center justify-between w-full', className)}>
+    <button
+      type="button"
+      onClick={() => onChange(!value)}
+      className={clsx('flex items-center justify-between w-full', className)}
+    >
       <span className="text-sm text-slate-700">{label}</span>
       <div className={clsx('relative w-10 h-5 rounded-full transition-colors', value ? 'bg-orca-500' : 'bg-slate-200')}>
         <div

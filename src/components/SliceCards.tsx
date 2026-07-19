@@ -104,6 +104,7 @@ export function SliceHeader({
   return (
     <div className="flex flex-wrap gap-3 items-center">
       <button
+        type="button"
         onClick={onSliceAll}
         disabled={!canSlice}
         data-testid="slice-all-button"
@@ -122,6 +123,7 @@ export function SliceHeader({
 
       {(isSlicing || plate.slicing) && (
         <button
+          type="button"
           onClick={onCancel}
           data-testid="cancel-slice-button"
           className="flex items-center gap-1.5 px-4 py-3 rounded-xl font-semibold text-sm border border-slate-300 text-slate-600 hover:border-red-300 hover:text-red-500 transition-colors"
@@ -133,6 +135,7 @@ export function SliceHeader({
 
       {readyForPlate >= 2 && (
         <button
+          type="button"
           onClick={onSlicePlate}
           disabled={!canPlate}
           title="Arrange all files on one plate and slice together"
@@ -152,6 +155,7 @@ export function SliceHeader({
 
       {doneCount > 1 && (
         <button
+          type="button"
           onClick={() => downloadAllAsZip(queue)}
           className="flex items-center gap-2 px-4 py-3 rounded-xl font-semibold text-sm bg-green-600 hover:bg-green-700 text-white transition-colors"
         >
@@ -253,6 +257,7 @@ export function QueueItemCard({
         {item.status === 'done' && item.gcode && item.gcodeFilename && (
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={() => setExpanded((e) => !e)}
               title="Preview G-code"
               className="text-slate-300 hover:text-slate-600 transition-colors p-1"
@@ -260,6 +265,7 @@ export function QueueItemCard({
               <EyeIcon className="w-4 h-4" />
             </button>
             <button
+              type="button"
               onClick={() => downloadGcode(item.gcode!, item.gcodeFilename!)}
               data-testid="download-gcode-button"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors"
@@ -268,6 +274,7 @@ export function QueueItemCard({
               Download
             </button>
             <button
+              type="button"
               onClick={handleExport3mf}
               disabled={exporting3mf}
               title={
@@ -391,6 +398,7 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
         {plate.gcode && (
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={() => setExpanded((e) => !e)}
               title="Preview G-code"
               className="text-slate-300 hover:text-slate-600 transition-colors p-1"
@@ -398,6 +406,7 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
               <EyeIcon className="w-4 h-4" />
             </button>
             <button
+              type="button"
               onClick={() => downloadGcode(plate.gcode!, 'plate.gcode')}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors"
             >

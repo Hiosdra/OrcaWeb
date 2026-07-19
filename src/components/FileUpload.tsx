@@ -49,7 +49,18 @@ export function FileUpload({ onFiles, loadedCount }: Props) {
 
   return (
     <div>
-      <div
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".stl,.3mf,.obj,.step,.stp"
+        multiple
+        className="hidden"
+        onChange={handleChange}
+        data-testid="model-file-input"
+      />
+
+      <button
+        type="button"
         onDragEnter={(e) => {
           e.preventDefault()
           dragDepth.current++
@@ -66,7 +77,7 @@ export function FileUpload({ onFiles, loadedCount }: Props) {
         onDrop={handleDrop}
         onClick={() => inputRef.current?.click()}
         className={clsx(
-          'relative flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed cursor-pointer transition-all select-none',
+          'relative flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed cursor-pointer transition-all select-none w-full',
           'h-40 sm:h-52',
           dragging
             ? 'border-orca-500 bg-orca-50 scale-[1.01]'
@@ -75,16 +86,6 @@ export function FileUpload({ onFiles, loadedCount }: Props) {
               : 'border-slate-300 bg-slate-50 hover:border-orca-400 hover:bg-orca-50',
         )}
       >
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".stl,.3mf,.obj,.step,.stp"
-          multiple
-          className="hidden"
-          onChange={handleChange}
-          data-testid="model-file-input"
-        />
-
         {loadedCount > 0 ? (
           <>
             <UploadIcon className="w-10 h-10 text-orca-500" />
@@ -105,7 +106,7 @@ export function FileUpload({ onFiles, loadedCount }: Props) {
             <p className="text-xs text-slate-400">.stl · .3mf · .obj · .step</p>
           </>
         )}
-      </div>
+      </button>
 
       {rejected.length > 0 && (
         <p className="mt-2 text-xs text-red-500 px-2">

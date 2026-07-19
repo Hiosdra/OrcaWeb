@@ -269,6 +269,7 @@ export default function App() {
         <nav className="flex gap-1 p-1 bg-slate-100 rounded-xl mb-6">
           {TABS.map((tab) => (
             <button
+              type="button"
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               disabled={tab.id !== 'upload' && !hasAnyReady}
@@ -321,6 +322,7 @@ export default function App() {
                       )}
                     </div>
                     <button
+                      type="button"
                       onClick={(e) => {
                         e.stopPropagation()
                         removeItem(item.id)
@@ -343,6 +345,7 @@ export default function App() {
 
             {hasAnyReady && (
               <button
+                type="button"
                 onClick={() => setActiveTab('settings')}
                 className="w-full py-3 rounded-xl bg-orca-500 hover:bg-orca-600 text-white font-semibold transition-colors"
               >
@@ -389,6 +392,7 @@ export default function App() {
                 onFilamentChange={handleFilamentChange}
               />
               <button
+                type="button"
                 onClick={() => setActiveTab('slice')}
                 className="mt-6 w-full py-3 rounded-xl bg-orca-500 hover:bg-orca-600 text-white font-semibold transition-colors"
               >
