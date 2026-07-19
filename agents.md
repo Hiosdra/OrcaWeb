@@ -68,6 +68,7 @@ Key pieces:
 - No `any` without justification
 - Prefer editing existing files over creating new ones
 - No comments unless the **why** is non-obvious
+- `npm run lint` (Biome) enforces formatting + basic correctness rules; CI runs it on every PR. `npm run lint:fix` applies safe fixes. Biome was chosen over ESLint because `typescript-eslint` doesn't yet support the TS 7 compiler API this project is on (tracked upstream: [typescript-eslint#10940](https://github.com/typescript-eslint/typescript-eslint/issues/10940)).
 
 ## Commit style
 
@@ -89,6 +90,7 @@ Use the `/release` skill to cut a new app version. It handles:
 
 - [ ] `mkdocs-docs/` updated if architecture or a major feature changed (see "When to touch which doc" above)
 - [ ] Types pass (`npm run typecheck` or `tsc --noEmit`)
+- [ ] `npm run lint` passes
 - [ ] No console errors in the browser on the happy path
 - [ ] If you touched `FileUpload`/`App.tsx`/worker/WASM-loading code, run `npm run test:e2e` locally (needs `npm run setup` + `npx playwright install chromium` first) — this also runs on every PR via `.github/workflows/e2e-smoke.yml`
 - [ ] If you touched `mkdocs-docs/**`, `mkdocs build --strict` passes (CI enforces this on every PR — see `ci.yml`'s `docs` job)
