@@ -89,21 +89,22 @@ export function FileUpload({ onFiles, loadedCount }: Props) {
         {loadedCount > 0 ? (
           <>
             <UploadIcon className="w-10 h-10 text-orca-500" />
-            <div className="text-center">
-              <p className="font-semibold text-slate-800">
+            {/* span, not div/p: a <button>'s content model is phrasing content only */}
+            <span className="block text-center">
+              <span className="block font-semibold text-slate-800">
                 {loadedCount} {loadedCount === 1 ? 'file' : 'files'} loaded
-              </p>
-              <p className="text-sm text-slate-500 mt-1">Click or drop to add more</p>
-            </div>
+              </span>
+              <span className="block text-sm text-slate-500 mt-1">Click or drop to add more</span>
+            </span>
           </>
         ) : (
           <>
             <UploadIcon className="w-12 h-12 text-slate-400" />
-            <div className="text-center">
-              <p className="font-semibold text-slate-700">Drop your models here</p>
-              <p className="text-sm text-slate-500 mt-1">or click to browse · multiple files supported</p>
-            </div>
-            <p className="text-xs text-slate-400">.stl · .3mf · .obj · .step</p>
+            <span className="block text-center">
+              <span className="block font-semibold text-slate-700">Drop your models here</span>
+              <span className="block text-sm text-slate-500 mt-1">or click to browse · multiple files supported</span>
+            </span>
+            <span className="block text-xs text-slate-400">.stl · .3mf · .obj · .step</span>
           </>
         )}
       </button>
