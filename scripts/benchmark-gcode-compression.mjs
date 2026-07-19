@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 /**
  * Phase-1 (offline size) benchmark for mkdocs-docs/gcode-compression-benchmark.md.
  *
@@ -24,10 +25,10 @@
  *   node scripts/benchmark-gcode-compression.mjs [--corpus-dir <dir>]
  */
 
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { resolve, basename } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { gzipSync, brotliCompressSync, constants as zlibConstants } from 'node:zlib'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { basename, resolve } from 'node:path'
+import { brotliCompressSync, gzipSync, constants as zlibConstants } from 'node:zlib'
 
 function parseArgs(argv) {
   const args = { corpusDir: 'corpus', out: null }
@@ -77,12 +78,19 @@ function sevenZipPpmdCli(buf, tmpPath) {
 }
 
 function heatshrinkPy(buf, window, lookahead) {
-  const res = spawnSync('python3', ['-c', `
+  const res = spawnSync(
+    'python3',
+    [
+      '-c',
+      `
 import sys, heatshrink2
 data = sys.stdin.buffer.read()
 out = heatshrink2.compress(data, window_sz2=${window}, lookahead_sz2=${lookahead})
 sys.stdout.buffer.write(out)
-`], { input: buf, maxBuffer: 1024 * 1024 * 1024 })
+`,
+    ],
+    { input: buf, maxBuffer: 1024 * 1024 * 1024 },
+  )
   if (res.status !== 0) throw new Error(`heatshrink2 failed: ${res.stderr?.toString().slice(0, 500)}`)
   return res.stdout.length
 }
@@ -122,7 +130,9 @@ function meatpackAdaptiveEncode(buf) {
   for (const b of buf) freq[b]++
   const table = [...freq.keys()].sort((a, b) => freq[b] - freq[a]).slice(0, 15)
   const codeOf = new Int16Array(256).fill(-1)
-  table.forEach((byte, code) => { codeOf[byte] = code })
+  table.forEach((byte, code) => {
+    codeOf[byte] = code
+  })
 
   const nibbles = []
   for (const b of buf) {
@@ -153,11 +163,13 @@ function meatpackAdaptiveDecode(packed) {
     nibbles.push((packed[i] >> 4) & 0xf, packed[i] & 0xf)
   }
   const out = new Uint8Array(origLen)
-  let outPos = 0, i = 0
+  let outPos = 0,
+    i = 0
   while (outPos < origLen) {
     const code = nibbles[i++]
     if (code === 15) {
-      const hi = nibbles[i++], lo = nibbles[i++]
+      const hi = nibbles[i++],
+        lo = nibbles[i++]
       out[outPos++] = (hi << 4) | lo
     } else {
       out[outPos++] = table[code]
@@ -205,11 +217,24 @@ function benchmarkFile(filePath) {
       'F3 x zstd -19 (stacking check)': zstdCli(Buffer.from(meatpack), 19, false),
       'F4proxy heatshrink(11,4) (bgcode default profile)': heatshrinkPy(raw, 11, 4),
       'F4proxy heatshrink(12,4) (bgcode alt profile)': heatshrinkPy(raw, 12, 4),
-      'F4proxy heatshrink(11,4) x zstd -19 (confirm-and-drop)': zstdCli(Buffer.from(run('python3', ['-c', `
+      'F4proxy heatshrink(11,4) x zstd -19 (confirm-and-drop)': zstdCli(
+        Buffer.from(
+          run(
+            'python3',
+            [
+              '-c',
+              `
 import sys, heatshrink2
 data = sys.stdin.buffer.read()
 sys.stdout.buffer.write(heatshrink2.compress(data, window_sz2=11, lookahead_sz2=4))
-`], raw)), 19, false),
+`,
+            ],
+            raw,
+          ),
+        ),
+        19,
+        false,
+      ),
     },
   }
   return results
@@ -221,8 +246,11 @@ function fmtRatio(rawBytes, size) {
 
 function main() {
   const { corpusDir, out } = parseArgs(process.argv.slice(2))
-  const files = readdirSync(corpusDir).filter((f) => f.endsWith('.gcode')).sort()
-  if (files.length === 0) throw new Error(`no .gcode files found in ${corpusDir} — run scripts/generate-corpus.mjs first`)
+  const files = readdirSync(corpusDir)
+    .filter((f) => f.endsWith('.gcode'))
+    .sort()
+  if (files.length === 0)
+    throw new Error(`no .gcode files found in ${corpusDir} — run scripts/generate-corpus.mjs first`)
 
   const allResults = []
   for (const f of files) {

@@ -189,19 +189,8 @@ export interface OrcaModule {
   _orc_session_create(): number
   _orc_session_destroy(session: number): void
   _orc_init(session: number, payloadPtr: number, payloadLen: number): number
-  _orc_slice(
-    session: number,
-    inputPtr: number,
-    inputLen: number,
-    outputPtrPtr: number,
-    outputLenPtr: number,
-  ): number
-  _orc_obj_to_stl(
-    objPtr: number,
-    objLen: number,
-    outputPtrPtr: number,
-    outputLenPtr: number,
-  ): number
+  _orc_slice(session: number, inputPtr: number, inputLen: number, outputPtrPtr: number, outputLenPtr: number): number
+  _orc_obj_to_stl(objPtr: number, objLen: number, outputPtrPtr: number, outputLenPtr: number): number
   _orc_slice_multi(
     session: number,
     dataPtr: number,
@@ -215,19 +204,8 @@ export interface OrcaModule {
     outputPtrPtr: number,
     outputLenPtr: number,
   ): number
-  _orc_cad_to_stl(
-    cadPtr: number,
-    cadLen: number,
-    outputPtrPtr: number,
-    outputLenPtr: number,
-  ): number
-  _orc_write_3mf(
-    session: number,
-    stlPtr: number,
-    stlLen: number,
-    outputPtrPtr: number,
-    outputLenPtr: number,
-  ): number
+  _orc_cad_to_stl(cadPtr: number, cadLen: number, outputPtrPtr: number, outputLenPtr: number): number
+  _orc_write_3mf(session: number, stlPtr: number, stlLen: number, outputPtrPtr: number, outputLenPtr: number): number
   _orc_read_3mf(
     mfPtr: number,
     mfLen: number,

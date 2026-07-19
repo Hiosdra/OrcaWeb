@@ -38,9 +38,7 @@ import { ORCA_VERSION, REPO, resolveLatestWasmTag } from './lib/wasm-release.mjs
 const [owner, repo] = REPO.split('/')
 const WASM_BASE_URL = `https://${owner.toLowerCase()}.github.io/${repo}/app/wasm`
 
-const { version: appVersion = '0.0.0' } = JSON.parse(
-  readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),
-)
+const { version: appVersion = '0.0.0' } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8'))
 
 let wasmVersion = appVersion
 let engineLabel = `${ORCA_VERSION} (via GitHub Pages, unresolved)`
@@ -62,9 +60,13 @@ try {
     const tag = await resolveLatestWasmTag()
     wasmVersion = tag
     engineLabel = tag.replace(/^wasm-/, '')
-    console.log(`cf-build: engine ${engineLabel} from ${WASM_BASE_URL} (cache key ${wasmVersion}, via GitHub API; manifest unavailable: ${manifestErr.message})`)
+    console.log(
+      `cf-build: engine ${engineLabel} from ${WASM_BASE_URL} (cache key ${wasmVersion}, via GitHub API; manifest unavailable: ${manifestErr.message})`,
+    )
   } catch (apiErr) {
-    console.warn(`cf-build: could not resolve engine version (manifest: ${manifestErr.message}; API: ${apiErr.message}) — falling back to app version ${appVersion} as cache key`)
+    console.warn(
+      `cf-build: could not resolve engine version (manifest: ${manifestErr.message}; API: ${apiErr.message}) — falling back to app version ${appVersion} as cache key`,
+    )
   }
 }
 
@@ -101,6 +103,15 @@ if (result.status !== 0) {
 // cross-origin from GitHub Pages. Without this, a local `wrangler deploy`
 // run against such a checkout would ship slicer.wasm (~36 MB) and blow past
 // Cloudflare's 25 MiB per-asset limit.
-for (const name of ['slicer.js', 'slicer.wasm', 'slicer.data', 'slicer.cjs', 'slicer-mt.js', 'slicer-mt.wasm', '.wasm-release-tag', 'engine-version.json']) {
+for (const name of [
+  'slicer.js',
+  'slicer.wasm',
+  'slicer.data',
+  'slicer.cjs',
+  'slicer-mt.js',
+  'slicer-mt.wasm',
+  '.wasm-release-tag',
+  'engine-version.json',
+]) {
   rmSync(new URL(`../dist/wasm/${name}`, import.meta.url), { force: true })
 }

@@ -1,8 +1,8 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
-import { VitePWA } from 'vite-plugin-pwa'
 import { readFileSync } from 'node:fs'
+import tailwindcss from '@tailwindcss/vite'
+import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vite'
+import { VitePWA } from 'vite-plugin-pwa'
 
 const { version = '0.0.0' } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'))
 const RELEASE_DATE = process.env.VITE_RELEASE_DATE ?? new Date().toISOString().slice(0, 10)

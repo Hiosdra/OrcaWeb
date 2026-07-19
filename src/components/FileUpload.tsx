@@ -1,5 +1,5 @@
-import { useRef, useState, useEffect, useCallback } from 'react'
 import clsx from 'clsx'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { UploadIcon } from './icons'
 
 interface Props {
@@ -23,11 +23,14 @@ export function FileUpload({ onFiles, loadedCount }: Props) {
     return () => clearTimeout(id)
   }, [rejected])
 
-  const takeFiles = useCallback((files: File[]) => {
-    const accepted = files.filter(isAccepted)
-    setRejected(files.filter((f) => !isAccepted(f)).map((f) => f.name))
-    if (accepted.length > 0) onFiles(accepted)
-  }, [onFiles])
+  const takeFiles = useCallback(
+    (files: File[]) => {
+      const accepted = files.filter(isAccepted)
+      setRejected(files.filter((f) => !isAccepted(f)).map((f) => f.name))
+      if (accepted.length > 0) onFiles(accepted)
+    },
+    [onFiles],
+  )
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -47,9 +50,19 @@ export function FileUpload({ onFiles, loadedCount }: Props) {
   return (
     <div>
       <div
-        onDragEnter={(e) => { e.preventDefault(); dragDepth.current++; setDragging(true) }}
+        onDragEnter={(e) => {
+          e.preventDefault()
+          dragDepth.current++
+          setDragging(true)
+        }}
         onDragOver={(e) => e.preventDefault()}
-        onDragLeave={() => { dragDepth.current--; if (dragDepth.current <= 0) { dragDepth.current = 0; setDragging(false) } }}
+        onDragLeave={() => {
+          dragDepth.current--
+          if (dragDepth.current <= 0) {
+            dragDepth.current = 0
+            setDragging(false)
+          }
+        }}
         onDrop={handleDrop}
         onClick={() => inputRef.current?.click()}
         className={clsx(
@@ -58,8 +71,8 @@ export function FileUpload({ onFiles, loadedCount }: Props) {
           dragging
             ? 'border-orca-500 bg-orca-50 scale-[1.01]'
             : loadedCount > 0
-            ? 'border-orca-400 bg-orca-50'
-            : 'border-slate-300 bg-slate-50 hover:border-orca-400 hover:bg-orca-50',
+              ? 'border-orca-400 bg-orca-50'
+              : 'border-slate-300 bg-slate-50 hover:border-orca-400 hover:bg-orca-50',
         )}
       >
         <input
@@ -96,7 +109,8 @@ export function FileUpload({ onFiles, loadedCount }: Props) {
 
       {rejected.length > 0 && (
         <p className="mt-2 text-xs text-red-500 px-2">
-          Unsupported file type{rejected.length !== 1 ? 's' : ''} skipped: {rejected.join(', ')} — supported: .stl, .3mf, .obj, .step
+          Unsupported file type{rejected.length !== 1 ? 's' : ''} skipped: {rejected.join(', ')} — supported: .stl,
+          .3mf, .obj, .step
         </p>
       )}
     </div>

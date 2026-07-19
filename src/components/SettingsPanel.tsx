@@ -1,8 +1,8 @@
-import { useState, useRef } from 'react'
 import clsx from 'clsx'
-import type { OrcaConfig, InfillPattern, SeamPosition, SupportType, FuzzySkin, WallGenerator } from '../types'
-import { PRESETS, PRINTER_PRESETS, FILAMENT_PRESETS, parseOrcaProfileJson } from '../lib/profiles'
-import { UploadIcon, ChevronIcon } from './icons'
+import { useRef, useState } from 'react'
+import { FILAMENT_PRESETS, PRESETS, PRINTER_PRESETS, parseOrcaProfileJson } from '../lib/profiles'
+import type { FuzzySkin, InfillPattern, OrcaConfig, SeamPosition, SupportType, WallGenerator } from '../types'
+import { ChevronIcon, UploadIcon } from './icons'
 
 interface Props {
   config: OrcaConfig
@@ -59,9 +59,8 @@ export function SettingsPanel({
           setImportMsg({ ok: false, text: 'No recognised settings found in this JSON.' })
         } else {
           const rawType = parsed?.type
-          const profileType = rawType === 'machine' || rawType === 'filament' || rawType === 'process'
-            ? rawType
-            : 'print'
+          const profileType =
+            rawType === 'machine' || rawType === 'filament' || rawType === 'process' ? rawType : 'print'
           const profileName = typeof parsed?.name === 'string' ? parsed.name : null
           const label = profileName ? `"${profileName}"` : `"${file.name}"`
           onProfileImport({ name: profileName ?? file.name, type: profileType, settings: patch })
@@ -96,7 +95,8 @@ export function SettingsPanel({
         </button>
         {importMsg && (
           <p className={clsx('mt-1.5 text-xs px-2', importMsg.ok ? 'text-green-600' : 'text-red-500')}>
-            {importMsg.ok ? '✓ ' : '✗ '}{importMsg.text}
+            {importMsg.ok ? '✓ ' : '✗ '}
+            {importMsg.text}
           </p>
         )}
       </div>
@@ -121,9 +121,11 @@ export function SettingsPanel({
         <SelectField
           label="Printer"
           value={importedPrinterLabel ?? selectedPrinter}
-          options={importedPrinterLabel
-            ? [...Object.keys(PRINTER_PRESETS), importedPrinterLabel]
-            : Object.keys(PRINTER_PRESETS)}
+          options={
+            importedPrinterLabel
+              ? [...Object.keys(PRINTER_PRESETS), importedPrinterLabel]
+              : Object.keys(PRINTER_PRESETS)
+          }
           onChange={onPrinterChange}
         />
       </Section>
@@ -206,8 +208,8 @@ export function SettingsPanel({
           className="mt-3"
         />
         <p className="mt-1.5 text-xs text-slate-400 px-2">
-          Arachne gives better wall quality but can take much longer (even minutes) on models with lots
-          of small, thin features. Switch to Classic if a slice seems stuck.
+          Arachne gives better wall quality but can take much longer (even minutes) on models with lots of small, thin
+          features. Switch to Classic if a slice seems stuck.
         </p>
       </Section>
 
@@ -232,7 +234,18 @@ export function SettingsPanel({
         <SelectField
           label="Pattern"
           value={config.sparse_infill_pattern ?? 'grid'}
-          options={['grid', 'gyroid', 'honeycomb', 'triangles', 'cubic', 'lightning', 'rectilinear', 'crosshatch'] as InfillPattern[]}
+          options={
+            [
+              'grid',
+              'gyroid',
+              'honeycomb',
+              'triangles',
+              'cubic',
+              'lightning',
+              'rectilinear',
+              'crosshatch',
+            ] as InfillPattern[]
+          }
           onChange={(v) => onChange({ sparse_infill_pattern: v as InfillPattern })}
           className="mt-3"
         />
@@ -436,14 +449,12 @@ function NumberField({
   const commit = (raw: string) => {
     setDraft(null)
     const n = parseFloat(raw)
-    if (!isNaN(n)) onChange(Math.min(max, Math.max(min, n)))
+    if (!Number.isNaN(n)) onChange(Math.min(max, Math.max(min, n)))
   }
 
   return (
     <div>
-      <label className="block text-xs font-medium text-slate-600 mb-1">
-        {label}
-      </label>
+      <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
       <div className="flex items-center gap-1">
         <input
           type="number"
@@ -453,7 +464,9 @@ function NumberField({
           step={step}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={(e) => commit(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+          }}
           className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-orca-400"
         />
         <span className="text-xs text-slate-400 whitespace-nowrap">{unit}</span>
@@ -474,17 +487,9 @@ function ToggleField({
   className?: string
 }) {
   return (
-    <button
-      onClick={() => onChange(!value)}
-      className={clsx('flex items-center justify-between w-full', className)}
-    >
+    <button onClick={() => onChange(!value)} className={clsx('flex items-center justify-between w-full', className)}>
       <span className="text-sm text-slate-700">{label}</span>
-      <div
-        className={clsx(
-          'relative w-10 h-5 rounded-full transition-colors',
-          value ? 'bg-orca-500' : 'bg-slate-200',
-        )}
-      >
+      <div className={clsx('relative w-10 h-5 rounded-full transition-colors', value ? 'bg-orca-500' : 'bg-slate-200')}>
         <div
           className={clsx(
             'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform',
@@ -495,4 +500,3 @@ function ToggleField({
     </button>
   )
 }
-

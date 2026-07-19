@@ -1,7 +1,7 @@
-import type { OrcaConfig, OrcaModuleFactory, OrcaModule, WorkerInMessage, WorkerOutMessage } from '../types'
-import { sliceStl, sliceMultiStl, objToStl, cadToStl, write3mf, read3mf, OrcaSliceError } from '../lib/wasm-loader'
+import { logError, logInfo, logWarn } from '../lib/log'
 import { toEngineConfig } from '../lib/profiles'
-import { logInfo, logWarn, logError } from '../lib/log'
+import { cadToStl, OrcaSliceError, objToStl, read3mf, sliceMultiStl, sliceStl, write3mf } from '../lib/wasm-loader'
+import type { OrcaConfig, OrcaModule, OrcaModuleFactory, WorkerInMessage, WorkerOutMessage } from '../types'
 
 // A genuinely stalled connection (TCP connected but the server/proxy never
 // answers — as opposed to a slow-but-progressing download) previously left
@@ -65,13 +65,27 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
   if (wasmCrashed) {
     const crashMsg = 'Slicer engine crashed and cannot continue — reload to restart it'
     switch (msg.type) {
-      case 'SLICE': send({ type: 'SLICE_ERROR', code: -9, message: crashMsg }); break
-      case 'SLICE_MULTI': send({ type: 'SLICE_MULTI_ERROR', code: -9, message: crashMsg }); break
-      case 'OBJ_TO_STL': send({ type: 'OBJ_STL_ERROR', message: crashMsg, requestId: msg.requestId }); break
-      case 'CAD_TO_STL': send({ type: 'CAD_STL_ERROR', message: crashMsg, requestId: msg.requestId }); break
-      case 'WRITE_3MF': send({ type: 'WRITE_3MF_ERROR', message: crashMsg, requestId: msg.requestId }); break
-      case 'READ_3MF': send({ type: 'READ_3MF_ERROR', message: crashMsg, requestId: msg.requestId }); break
-      case 'LOAD_WASM': send({ type: 'WASM_ERROR', message: crashMsg }); break
+      case 'SLICE':
+        send({ type: 'SLICE_ERROR', code: -9, message: crashMsg })
+        break
+      case 'SLICE_MULTI':
+        send({ type: 'SLICE_MULTI_ERROR', code: -9, message: crashMsg })
+        break
+      case 'OBJ_TO_STL':
+        send({ type: 'OBJ_STL_ERROR', message: crashMsg, requestId: msg.requestId })
+        break
+      case 'CAD_TO_STL':
+        send({ type: 'CAD_STL_ERROR', message: crashMsg, requestId: msg.requestId })
+        break
+      case 'WRITE_3MF':
+        send({ type: 'WRITE_3MF_ERROR', message: crashMsg, requestId: msg.requestId })
+        break
+      case 'READ_3MF':
+        send({ type: 'READ_3MF_ERROR', message: crashMsg, requestId: msg.requestId })
+        break
+      case 'LOAD_WASM':
+        send({ type: 'WASM_ERROR', message: crashMsg })
+        break
     }
     return
   }
@@ -119,11 +133,11 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       // short MANIFEST_FETCH_TIMEOUT_MS so a stalled manifest can't hold up the
       // load — a deliberate trade-off for always tracking the live engine.
       try {
-        const manifestRes = await fetchWithTimeout(
-          `${wasmBase}/engine-version.json`, MANIFEST_FETCH_TIMEOUT_MS, { cache: 'no-store' },
-        )
+        const manifestRes = await fetchWithTimeout(`${wasmBase}/engine-version.json`, MANIFEST_FETCH_TIMEOUT_MS, {
+          cache: 'no-store',
+        })
         if (manifestRes.ok) {
-          const manifest = await manifestRes.json() as unknown
+          const manifest = (await manifestRes.json()) as unknown
           if (manifest && typeof manifest === 'object') {
             const m = manifest as { version?: unknown; label?: unknown }
             if (typeof m.version === 'string' && m.version) version = m.version
@@ -175,8 +189,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
           // Prefer a HEAD (no body); some static hosts answer HEAD with 405,
           // so fall back to a 1-byte Range GET. A single catch covers both a
           // HEAD that throws and a HEAD that returns !ok.
-          let probe = await fetchWithTimeout(probeUrl, FETCH_RESPONSE_TIMEOUT_MS, { method: 'HEAD' })
-            .catch(() => null)
+          let probe = await fetchWithTimeout(probeUrl, FETCH_RESPONSE_TIMEOUT_MS, { method: 'HEAD' }).catch(() => null)
           if (!probe?.ok) {
             probe = await fetchWithTimeout(probeUrl, FETCH_RESPONSE_TIMEOUT_MS, { headers: { Range: 'bytes=0-0' } })
           }
@@ -197,8 +210,8 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         const res = await fetchWithTimeout(`${wasmBase}/${variant}.wasm${v}`, FETCH_RESPONSE_TIMEOUT_MS)
         if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${variant}.wasm`)
         if (
-          typeof WebAssembly.compileStreaming === 'function'
-          && res.headers.get('content-type')?.includes('application/wasm')
+          typeof WebAssembly.compileStreaming === 'function' &&
+          res.headers.get('content-type')?.includes('application/wasm')
         ) {
           return WebAssembly.compileStreaming(res)
         }
@@ -210,17 +223,14 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         return r.text()
       })
       logInfo(
-        `[OrcaWASM] fetched slicer.js (${(jsText.length / 1024).toFixed(0)} KB) `
-        + `in ${Math.round(performance.now() - loadStartedAt)}ms (wasm compiling in parallel)`,
+        `[OrcaWASM] fetched slicer.js (${(jsText.length / 1024).toFixed(0)} KB) ` +
+          `in ${Math.round(performance.now() - loadStartedAt)}ms (wasm compiling in parallel)`,
       )
 
       // Wrap Emscripten CommonJS output as an ES module default export.
       // slicer.js uses `var OrcaModule = ...` at module scope, so the appended
       // export default can see it in the same blob-URL ES module scope.
-      const blob = new Blob(
-        [`${jsText}\nexport default OrcaModule;`],
-        { type: 'application/javascript' },
-      )
+      const blob = new Blob([`${jsText}\nexport default OrcaModule;`], { type: 'application/javascript' })
       const blobUrl = URL.createObjectURL(blob)
 
       // Same-origin classic-worker script for Emscripten's pthread pool (MT
@@ -234,13 +244,11 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       // `export default`, which would be a syntax error in a classic worker,
       // unlike the import blob above). Module retains this Blob, so any later
       // on-demand pool growth can still spawn workers from it.
-      const pthreadScriptBlob = variant === 'slicer-mt'
-        ? new Blob([jsText], { type: 'application/javascript' })
-        : null
+      const pthreadScriptBlob = variant === 'slicer-mt' ? new Blob([jsText], { type: 'application/javascript' }) : null
 
       let factory: OrcaModuleFactory
       try {
-        const mod = await import(/* @vite-ignore */ blobUrl) as { default: OrcaModuleFactory }
+        const mod = (await import(/* @vite-ignore */ blobUrl)) as { default: OrcaModuleFactory }
         factory = mod.default
       } finally {
         URL.revokeObjectURL(blobUrl)
@@ -256,7 +264,9 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       // rejection so a failed fetch/compile surfaces as WASM_ERROR instead
       // of hanging the load forever.
       let failInstantiate: (err: unknown) => void
-      const instantiateFailed = new Promise<never>((_, reject) => { failInstantiate = reject })
+      const instantiateFailed = new Promise<never>((_, reject) => {
+        failInstantiate = reject
+      })
       orcaModule = await Promise.race([
         factory({
           instantiateWasm: (imports, successCallback) => {
@@ -426,8 +436,8 @@ function doSliceMulti(stls: ArrayBuffer[], config: OrcaConfig, extruderIds?: num
   const startedAt = performance.now()
   const totalMB = stls.reduce((sum, s) => sum + s.byteLength, 0) / 1e6
   logInfo(
-    `[OrcaWASM] slice-multi start — ${stls.length} STL(s), ${totalMB.toFixed(2)} MB total, `
-    + `${summarizeConfig(config)}${extruderIds ? `, extruders [${extruderIds.join(',')}]` : ''}`,
+    `[OrcaWASM] slice-multi start — ${stls.length} STL(s), ${totalMB.toFixed(2)} MB total, ` +
+      `${summarizeConfig(config)}${extruderIds ? `, extruders [${extruderIds.join(',')}]` : ''}`,
   )
   try {
     const { _passthrough, ...rest } = config
@@ -442,19 +452,17 @@ function doSliceMulti(stls: ArrayBuffer[], config: OrcaConfig, extruderIds?: num
     let pos = 0
     for (let i = 0; i < stls.length; i++) {
       combined.set(new Uint8Array(stls[i]), pos)
-      offsets[i * 2]     = pos
+      offsets[i * 2] = pos
       offsets[i * 2 + 1] = stls[i].byteLength
       pos += stls[i].byteLength
     }
 
-    const extruderIdsArr = extruderIds && extruderIds.length === stls.length
-      ? Int32Array.from(extruderIds)
-      : undefined
+    const extruderIdsArr = extruderIds && extruderIds.length === stls.length ? Int32Array.from(extruderIds) : undefined
 
     const gcode = sliceMultiStl(orcaModule, session, combined, offsets, stls.length, configJson, extruderIdsArr)
     logInfo(
-      `[OrcaWASM] slice-multi done in ${Math.round(performance.now() - startedAt)}ms `
-      + `— G-code ${(gcode.length / 1e6).toFixed(2)} MB`,
+      `[OrcaWASM] slice-multi done in ${Math.round(performance.now() - startedAt)}ms ` +
+        `— G-code ${(gcode.length / 1e6).toFixed(2)} MB`,
     )
     send({ type: 'SLICE_MULTI_COMPLETE', gcode })
   } catch (err) {
@@ -492,8 +500,8 @@ function doWrite3mf(stl: ArrayBuffer, config: OrcaConfig, requestId: string) {
     const data = write3mf(orcaModule, session, new Uint8Array(stl), configJson)
     const dataBuffer = data.buffer as ArrayBuffer
     logInfo(
-      `[OrcaWASM] 3mf export done in ${Math.round(performance.now() - startedAt)}ms `
-      + `— ${(data.byteLength / 1e6).toFixed(2)} MB`,
+      `[OrcaWASM] 3mf export done in ${Math.round(performance.now() - startedAt)}ms ` +
+        `— ${(data.byteLength / 1e6).toFixed(2)} MB`,
     )
     self.postMessage({ type: 'WRITE_3MF_COMPLETE', data: dataBuffer, requestId }, [dataBuffer])
   } catch (err) {
@@ -516,8 +524,8 @@ function doRead3mf(mf: ArrayBuffer, requestId: string) {
     const { stl, configJson } = read3mf(orcaModule, new Uint8Array(mf))
     const stlBuffer = stl.buffer as ArrayBuffer
     logInfo(
-      `[OrcaWASM] 3mf read done in ${Math.round(performance.now() - startedAt)}ms `
-      + `— STL ${(stl.byteLength / 1e6).toFixed(2)} MB`,
+      `[OrcaWASM] 3mf read done in ${Math.round(performance.now() - startedAt)}ms ` +
+        `— STL ${(stl.byteLength / 1e6).toFixed(2)} MB`,
     )
     self.postMessage({ type: 'READ_3MF_COMPLETE', stl: stlBuffer, configJson, requestId }, [stlBuffer])
   } catch (err) {
@@ -543,8 +551,8 @@ function doSlice(stl: ArrayBuffer, config: OrcaConfig) {
     const configJson = JSON.stringify(flat)
     const gcode = sliceStl(orcaModule, session, new Uint8Array(stl), configJson)
     logInfo(
-      `[OrcaWASM] slice done in ${Math.round(performance.now() - startedAt)}ms `
-      + `— G-code ${(gcode.length / 1e6).toFixed(2)} MB`,
+      `[OrcaWASM] slice done in ${Math.round(performance.now() - startedAt)}ms ` +
+        `— G-code ${(gcode.length / 1e6).toFixed(2)} MB`,
     )
     send({ type: 'SLICE_COMPLETE', gcode })
   } catch (err) {

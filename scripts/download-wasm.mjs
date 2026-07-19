@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 /**
  * Downloads pre-built OrcaSlicer WASM artifacts for local development.
  *
@@ -9,9 +10,9 @@
  * Run once: node scripts/download-wasm.mjs
  */
 
-import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
-import { join, dirname } from 'path'
+import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs'
+import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { REPO, resolveLatestWasmTag } from './lib/wasm-release.mjs'
 
@@ -26,7 +27,7 @@ const WASM_DIR = join(__dirname, '../public/wasm')
 // dependency bump) made the check permanently fail and re-download every
 // run — exactly what happened here going from ~9 MB to ~36 MB.
 const ARTIFACTS = [
-  { name: 'slicer.js',   approxSize: 220_000 },
+  { name: 'slicer.js', approxSize: 220_000 },
   { name: 'slicer.wasm', approxSize: 36_000_000 },
 ]
 
@@ -91,7 +92,7 @@ async function download(name, approxSize, releaseBase, tag) {
     }
   }
 
-  await new Promise((resolve, reject) => out.end(err => err ? reject(err) : resolve()))
+  await new Promise((resolve, reject) => out.end((err) => (err ? reject(err) : resolve())))
   process.stdout.write(`\r  ✓ ${name} — ${formatBytes(received)}\n`)
 }
 
@@ -118,7 +119,10 @@ async function main() {
   // does `npm run setup`) exercise that real runtime-resolution path — and
   // show the actual engine version in the header — instead of silently
   // falling back to the build-time baked app version.
-  const version = createHash('sha256').update(readFileSync(join(WASM_DIR, 'slicer.wasm'))).digest('hex').slice(0, 16)
+  const version = createHash('sha256')
+    .update(readFileSync(join(WASM_DIR, 'slicer.wasm')))
+    .digest('hex')
+    .slice(0, 16)
   const label = tag.replace(/^wasm-/, '')
   writeFileSync(join(WASM_DIR, 'engine-version.json'), `${JSON.stringify({ label, version })}\n`)
 
@@ -126,7 +130,7 @@ async function main() {
   console.log('  Run `npm run dev` to start the web UI\n')
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error('\n  Error:', err.message)
   process.exit(1)
 })

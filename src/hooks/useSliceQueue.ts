@@ -1,14 +1,8 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import type { OrcaConfig, QueueItem, SliceProgress, WorkerOutMessage } from '../types'
-import { parseOrcaProfileJson } from '../lib/profiles'
-import {
-  getWorker,
-  addWorkerListener,
-  getWasmStatus,
-  terminateWorker,
-  type WasmStatus,
-} from '../lib/worker-singleton'
 import { logError, logWarn } from '../lib/log'
+import { parseOrcaProfileJson } from '../lib/profiles'
+import { addWorkerListener, getWasmStatus, getWorker, terminateWorker, type WasmStatus } from '../lib/worker-singleton'
+import type { OrcaConfig, QueueItem, SliceProgress, WorkerOutMessage } from '../types'
 
 export interface PlateState {
   slicing: boolean
@@ -75,7 +69,7 @@ const INITIAL_STATE: QueueState = {
 class ItemRemovedError extends Error {}
 
 function toGcodeFilename(name: string): string {
-  return name.replace(/\.(stl|3mf|obj|step|stp)$/i, '') + '.gcode'
+  return `${name.replace(/\.(stl|3mf|obj|step|stp)$/i, '')}.gcode`
 }
 
 function patchItem(items: QueueItem[], id: string, patch: Partial<QueueItem>): QueueItem[] {
@@ -136,9 +130,7 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
           items: patchItem(state.items, state.currentId, { progress: action.progress }),
         }
       }
-      return state.plate.slicing
-        ? { ...state, plate: { ...state.plate, progress: action.progress } }
-        : state
+      return state.plate.slicing ? { ...state, plate: { ...state.plate, progress: action.progress } } : state
 
     case 'SLICE_DONE': {
       if (!state.currentId) return state // cancelled while the result was in transit
@@ -187,7 +179,10 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
       }
 
     case 'PLATE_FAILED':
-      return { ...state, plate: { slicing: false, gcode: null, error: action.message, stale: false, progress: undefined } }
+      return {
+        ...state,
+        plate: { slicing: false, gcode: null, error: action.message, stale: false, progress: undefined },
+      }
 
     case 'CONFIG_CHANGED': {
       return {
@@ -217,13 +212,9 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
         running: false,
         currentId: null,
         items: state.items.map((i) =>
-          i.status === 'slicing' || i.status === 'converting'
-            ? { ...i, status: 'error', error: action.message }
-            : i,
+          i.status === 'slicing' || i.status === 'converting' ? { ...i, status: 'error', error: action.message } : i,
         ),
-        plate: state.plate.slicing
-          ? { slicing: false, gcode: null, error: action.message, stale: false }
-          : state.plate,
+        plate: state.plate.slicing ? { slicing: false, gcode: null, error: action.message, stale: false } : state.plate,
       }
 
     default:
@@ -270,7 +261,9 @@ export function useSliceQueue(
   const sliceRequestGeneration = useRef(0)
 
   const onSettingsImportedRef = useRef(onSettingsImported)
-  useEffect(() => { onSettingsImportedRef.current = onSettingsImported }, [onSettingsImported])
+  useEffect(() => {
+    onSettingsImportedRef.current = onSettingsImported
+  }, [onSettingsImported])
 
   // WRITE_3MF / READ_3MF are one-off request/response round trips, not part
   // of the queue state machine — resolved directly against the promise the
@@ -281,7 +274,14 @@ export function useSliceQueue(
     new Map<string, { itemId: string; resolve: (data: ArrayBuffer) => void; reject: (err: Error) => void }>(),
   )
   const read3mfResolvers = useRef(
-    new Map<string, { itemId: string; resolve: (data: { stl: ArrayBuffer; configJson: string }) => void; reject: (err: Error) => void }>(),
+    new Map<
+      string,
+      {
+        itemId: string
+        resolve: (data: { stl: ArrayBuffer; configJson: string }) => void
+        reject: (err: Error) => void
+      }
+    >(),
   )
 
   // Terminating the worker (cancel/removeItem) or a WASM_ERROR both orphan
@@ -362,11 +362,19 @@ export function useSliceQueue(
           return
         case 'OBJ_STL_ERROR':
           logError(`[queue] OBJ_STL_ERROR for item ${msg.requestId}:`, msg.message)
-          dispatch({ type: 'PATCH_ITEM', id: msg.requestId, patch: { status: 'error', error: `OBJ conversion failed: ${msg.message}` } })
+          dispatch({
+            type: 'PATCH_ITEM',
+            id: msg.requestId,
+            patch: { status: 'error', error: `OBJ conversion failed: ${msg.message}` },
+          })
           return
         case 'CAD_STL_ERROR':
           logError(`[queue] CAD_STL_ERROR for item ${msg.requestId}:`, msg.message)
-          dispatch({ type: 'PATCH_ITEM', id: msg.requestId, patch: { status: 'error', error: `CAD conversion failed: ${msg.message}` } })
+          dispatch({
+            type: 'PATCH_ITEM',
+            id: msg.requestId,
+            patch: { status: 'error', error: `CAD conversion failed: ${msg.message}` },
+          })
           return
         case 'WRITE_3MF_COMPLETE': {
           const resolver = export3mfResolvers.current.get(msg.requestId)
@@ -489,65 +497,71 @@ export function useSliceQueue(
   // batch loop (see there) — it handles its own success/error dispatch
   // end-to-end, the same shape as postConversion(), just for 3MF instead
   // of OBJ/STEP.
-  const importMf3 = useCallback(async (item: QueueItem) => {
-    const f = item.sourceFile
-    try {
-      const buf = await f.arrayBuffer()
-      const { stl, configJson } = await readMf3ViaEngine(buf, item.id)
-      const profileConfig = parseOrcaProfileJson(configJson)
-      if (Object.keys(profileConfig).length > 0) {
-        onSettingsImportedRef.current(profileConfig, f.name)
-      }
-      dispatch({ type: 'CONVERSION_DONE', id: item.id, stl })
-    } catch (err) {
-      // Removal is cancellation, not an engine-read failure.
-      if (err instanceof ItemRemovedError) return
-      logError(`[queue] 3MF import failed for "${f.name}":`, err)
-      dispatch({
-        type: 'PATCH_ITEM',
-        id: item.id,
-        patch: { status: 'error', error: err instanceof Error ? err.message : String(err) },
-      })
-    }
-  }, [readMf3ViaEngine])
-
-  const addFiles = useCallback((files: File[]) => {
-    const newItems: QueueItem[] = files.map((f) => ({
-      id: crypto.randomUUID(),
-      name: f.name,
-      originalSize: f.size,
-      sourceFile: f,
-      stlFile: null,
-      status: 'converting',
-    }))
-    dispatch({ type: 'ADD_ITEMS', items: newItems })
-
-    void (async () => {
-      for (const item of newItems) {
-        const f = item.sourceFile
-        try {
-          if (/\.3mf$/i.test(f.name)) {
-            // Fire-and-forget, like the OBJ/STEP branch below — importMf3
-            // resolves its own success/fallback/error internally, so one
-            // slow (or WASM-load-blocked) .3mf doesn't hold up every other
-            // file dropped in the same batch behind it in this loop.
-            void importMf3(item)
-          } else if (/\.(step|stp|obj)$/i.test(f.name)) {
-            await postConversion(item)
-          } else {
-            dispatch({ type: 'PATCH_ITEM', id: item.id, patch: { stlFile: f, status: 'ready' } })
-          }
-        } catch (err) {
-          logError(`[queue] failed to process "${f.name}":`, err)
-          dispatch({
-            type: 'PATCH_ITEM',
-            id: item.id,
-            patch: { status: 'error', error: err instanceof Error ? err.message : String(err) },
-          })
+  const importMf3 = useCallback(
+    async (item: QueueItem) => {
+      const f = item.sourceFile
+      try {
+        const buf = await f.arrayBuffer()
+        const { stl, configJson } = await readMf3ViaEngine(buf, item.id)
+        const profileConfig = parseOrcaProfileJson(configJson)
+        if (Object.keys(profileConfig).length > 0) {
+          onSettingsImportedRef.current(profileConfig, f.name)
         }
+        dispatch({ type: 'CONVERSION_DONE', id: item.id, stl })
+      } catch (err) {
+        // Removal is cancellation, not an engine-read failure.
+        if (err instanceof ItemRemovedError) return
+        logError(`[queue] 3MF import failed for "${f.name}":`, err)
+        dispatch({
+          type: 'PATCH_ITEM',
+          id: item.id,
+          patch: { status: 'error', error: err instanceof Error ? err.message : String(err) },
+        })
       }
-    })()
-  }, [postConversion, importMf3])
+    },
+    [readMf3ViaEngine],
+  )
+
+  const addFiles = useCallback(
+    (files: File[]) => {
+      const newItems: QueueItem[] = files.map((f) => ({
+        id: crypto.randomUUID(),
+        name: f.name,
+        originalSize: f.size,
+        sourceFile: f,
+        stlFile: null,
+        status: 'converting',
+      }))
+      dispatch({ type: 'ADD_ITEMS', items: newItems })
+
+      void (async () => {
+        for (const item of newItems) {
+          const f = item.sourceFile
+          try {
+            if (/\.3mf$/i.test(f.name)) {
+              // Fire-and-forget, like the OBJ/STEP branch below — importMf3
+              // resolves its own success/fallback/error internally, so one
+              // slow (or WASM-load-blocked) .3mf doesn't hold up every other
+              // file dropped in the same batch behind it in this loop.
+              void importMf3(item)
+            } else if (/\.(step|stp|obj)$/i.test(f.name)) {
+              await postConversion(item)
+            } else {
+              dispatch({ type: 'PATCH_ITEM', id: item.id, patch: { stlFile: f, status: 'ready' } })
+            }
+          } catch (err) {
+            logError(`[queue] failed to process "${f.name}":`, err)
+            dispatch({
+              type: 'PATCH_ITEM',
+              id: item.id,
+              patch: { status: 'error', error: err instanceof Error ? err.message : String(err) },
+            })
+          }
+        }
+      })()
+    },
+    [postConversion, importMf3],
+  )
 
   // Terminating the worker also kills any conversions queued inside it —
   // re-post them (from the retained source files) to the fresh worker.
@@ -561,7 +575,9 @@ export function useSliceQueue(
 
   const cancel = useCallback(() => {
     if (!state.currentId && !state.plate.slicing) return
-    logWarn(`[queue] cancel requested (currentId=${state.currentId ?? 'none'}, plate.slicing=${state.plate.slicing}) — restarting engine`)
+    logWarn(
+      `[queue] cancel requested (currentId=${state.currentId ?? 'none'}, plate.slicing=${state.plate.slicing}) — restarting engine`,
+    )
     sliceRequestGeneration.current += 1
     terminateWorker()
     setWasmStatus('idle')
@@ -570,25 +586,28 @@ export function useSliceQueue(
     rejectAllPendingMf('Slice cancelled — engine restarted')
   }, [state.currentId, state.plate.slicing, repostConversions, rejectAllPendingMf])
 
-  const removeItem = useCallback((id: string) => {
-    if (state.currentId === id) {
-      // Removing the item being sliced: only a worker restart can abort the
-      // synchronous WASM call. The queue keeps running — the next ready item
-      // is posted to the fresh worker automatically.
-      logWarn(`[queue] removing in-flight item ${id} — restarting engine to abort its slice`)
-      sliceRequestGeneration.current += 1
-      terminateWorker()
-      setWasmStatus('idle')
-      repostConversions()
-      rejectAllPendingMf('Engine restarted — export cancelled')
-    }
-    // Independent of the above: this item may have its own in-flight
-    // export3mf()/engine 3MF-read request (keyed by a UUID unrelated to
-    // currentId) that would otherwise still resolve after removal — e.g.
-    // silently downloading a .3mf for an item the user just deleted.
-    rejectPendingForItem(id, 'Item removed from queue')
-    dispatch({ type: 'REMOVE_ITEM', id })
-  }, [state.currentId, repostConversions, rejectAllPendingMf, rejectPendingForItem])
+  const removeItem = useCallback(
+    (id: string) => {
+      if (state.currentId === id) {
+        // Removing the item being sliced: only a worker restart can abort the
+        // synchronous WASM call. The queue keeps running — the next ready item
+        // is posted to the fresh worker automatically.
+        logWarn(`[queue] removing in-flight item ${id} — restarting engine to abort its slice`)
+        sliceRequestGeneration.current += 1
+        terminateWorker()
+        setWasmStatus('idle')
+        repostConversions()
+        rejectAllPendingMf('Engine restarted — export cancelled')
+      }
+      // Independent of the above: this item may have its own in-flight
+      // export3mf()/engine 3MF-read request (keyed by a UUID unrelated to
+      // currentId) that would otherwise still resolve after removal — e.g.
+      // silently downloading a .3mf for an item the user just deleted.
+      rejectPendingForItem(id, 'Item removed from queue')
+      dispatch({ type: 'REMOVE_ITEM', id })
+    },
+    [state.currentId, repostConversions, rejectAllPendingMf, rejectPendingForItem],
+  )
 
   const sliceAll = useCallback(() => {
     if (state.plate.slicing) return

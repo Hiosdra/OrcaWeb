@@ -1,18 +1,16 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
 import clsx from 'clsx'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FileUpload } from './components/FileUpload'
+import { ErrorDotIcon, GithubIcon, ModelIconSm, OrcaLogo, SpinnerIcon, XIcon } from './components/icons'
 import { ModelViewer } from './components/ModelViewer'
 import { SettingsPanel } from './components/SettingsPanel'
-import { SliceHeader, QueueItemCard, PlateResultCard, ConfigSummary } from './components/SliceCards'
-import {
-  OrcaLogo, GithubIcon, SpinnerIcon, ErrorDotIcon, ModelIconSm, XIcon,
-} from './components/icons'
-import type { OrcaConfig } from './types'
-import { buildConfig, PRESETS, PRINTER_PRESETS, FILAMENT_PRESETS, DISPLAY_DEFAULTS } from './lib/profiles'
-import { formatBytes } from './lib/format'
+import { ConfigSummary, PlateResultCard, QueueItemCard, SliceHeader } from './components/SliceCards'
 import { useSliceQueue } from './hooks/useSliceQueue'
-import type { WasmStatus } from './lib/worker-singleton'
+import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
+import { buildConfig, DISPLAY_DEFAULTS, FILAMENT_PRESETS, PRESETS, PRINTER_PRESETS } from './lib/profiles'
+import type { WasmStatus } from './lib/worker-singleton'
+import type { OrcaConfig } from './types'
 
 // ── Persisted settings ────────────────────────────────────────────────────────
 
@@ -62,21 +60,25 @@ function loadSavedSettings(): SavedSettings | null {
     // ships — a preset renamed between releases must not leave the UI
     // pointing at a selection that no longer exists.
     return {
-      printer: typeof s.printer === 'string' && s.printer in PRINTER_PRESETS
-        ? s.printer : Object.keys(PRINTER_PRESETS)[0],
-      filament: typeof s.filament === 'string' && s.filament in FILAMENT_PRESETS
-        ? s.filament : 'PLA',
-      preset: typeof s.preset === 'string' && PRESETS.some((p) => p.name === s.preset)
-        ? s.preset : 'standard',
-      manualOverrides: s.manualOverrides && typeof s.manualOverrides === 'object'
-        ? s.manualOverrides
-        : s.overrides && typeof s.overrides === 'object' ? s.overrides : {},
-      importedProfile: s.importedProfile && typeof s.importedProfile === 'object'
-        && typeof s.importedProfile.name === 'string'
-        && isProfileType(s.importedProfile.type)
-        && s.importedProfile.settings && typeof s.importedProfile.settings === 'object'
-        ? s.importedProfile as ImportedProfile
-        : undefined,
+      printer:
+        typeof s.printer === 'string' && s.printer in PRINTER_PRESETS ? s.printer : Object.keys(PRINTER_PRESETS)[0],
+      filament: typeof s.filament === 'string' && s.filament in FILAMENT_PRESETS ? s.filament : 'PLA',
+      preset: typeof s.preset === 'string' && PRESETS.some((p) => p.name === s.preset) ? s.preset : 'standard',
+      manualOverrides:
+        s.manualOverrides && typeof s.manualOverrides === 'object'
+          ? s.manualOverrides
+          : s.overrides && typeof s.overrides === 'object'
+            ? s.overrides
+            : {},
+      importedProfile:
+        s.importedProfile &&
+        typeof s.importedProfile === 'object' &&
+        typeof s.importedProfile.name === 'string' &&
+        isProfileType(s.importedProfile.type) &&
+        s.importedProfile.settings &&
+        typeof s.importedProfile.settings === 'object'
+          ? (s.importedProfile as ImportedProfile)
+          : undefined,
     }
   } catch (err) {
     logWarn('Failed to load saved settings — falling back to defaults', err)
@@ -131,13 +133,16 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-        printer: selectedPrinter,
-        filament: selectedFilament,
-        preset: selectedPreset,
-        manualOverrides,
-        ...(importedProfile ? { importedProfile } : {}),
-      } satisfies SavedSettings))
+      localStorage.setItem(
+        SETTINGS_KEY,
+        JSON.stringify({
+          printer: selectedPrinter,
+          filament: selectedFilament,
+          preset: selectedPreset,
+          manualOverrides,
+          ...(importedProfile ? { importedProfile } : {}),
+        } satisfies SavedSettings),
+      )
     } catch (err) {
       logWarn('Failed to persist settings — storage full or unavailable', err)
     }
@@ -170,7 +175,16 @@ export default function App() {
   }, [importNotice])
 
   const {
-    items: queue, plate, wasmStatus, engineLabel, addFiles, removeItem, sliceAll, slicePlate, cancel, export3mf,
+    items: queue,
+    plate,
+    wasmStatus,
+    engineLabel,
+    addFiles,
+    removeItem,
+    sliceAll,
+    slicePlate,
+    cancel,
+    export3mf,
   } = useSliceQueue(config, handleSettingsImported)
 
   const bedX = config.bed_size_x ?? DISPLAY_DEFAULTS.bed_size_x
@@ -180,19 +194,21 @@ export default function App() {
   const handlePresetChange = (name: string) => {
     setSelectedPreset(name)
     setManualOverrides({})
-    setImportedProfile((profile) => profile?.type === 'process' ? null : profile)
+    setImportedProfile((profile) => (profile?.type === 'process' ? null : profile))
   }
 
   const handleProfileImported = (profile: ImportedProfile) => {
     setImportedProfile(profile)
     setManualOverrides({})
-    const printer = profile.settings.printer_model === undefined
-      ? undefined
-      : findPresetKeyByField(PRINTER_PRESETS, 'printer_model', profile.settings.printer_model)
+    const printer =
+      profile.settings.printer_model === undefined
+        ? undefined
+        : findPresetKeyByField(PRINTER_PRESETS, 'printer_model', profile.settings.printer_model)
     if (printer) setSelectedPrinter(printer)
-    const filament = profile.settings.filament_type === undefined
-      ? undefined
-      : findPresetKeyByField(FILAMENT_PRESETS, 'filament_type', profile.settings.filament_type)
+    const filament =
+      profile.settings.filament_type === undefined
+        ? undefined
+        : findPresetKeyByField(FILAMENT_PRESETS, 'filament_type', profile.settings.filament_type)
     if (filament) setSelectedFilament(filament)
   }
 
@@ -200,23 +216,20 @@ export default function App() {
     if (name === `Imported: ${importedProfile?.name}`) return
     setSelectedPrinter(name)
     setManualOverrides({})
-    setImportedProfile((profile) => profile?.type === 'machine' ? null : profile)
+    setImportedProfile((profile) => (profile?.type === 'machine' ? null : profile))
   }
 
   const handleFilamentChange = (name: string) => {
     setSelectedFilament(name)
     setManualOverrides({})
-    setImportedProfile((profile) => profile?.type === 'filament' ? null : profile)
+    setImportedProfile((profile) => (profile?.type === 'filament' ? null : profile))
   }
 
   // ── Derived state ─────────────────────────────────────────────────────────
 
-  const previewFile = useMemo(
-    () => queue.find(i => i.stlFile != null)?.stlFile ?? null,
-    [queue],
-  )
-  const hasAnyReady = queue.some(i => i.stlFile != null)
-  const isConverting = queue.some(i => i.status === 'converting')
+  const previewFile = useMemo(() => queue.find((i) => i.stlFile != null)?.stlFile ?? null, [queue])
+  const hasAnyReady = queue.some((i) => i.stlFile != null)
+  const isConverting = queue.some((i) => i.status === 'converting')
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -285,7 +298,7 @@ export default function App() {
 
             {queue.length > 0 && (
               <div className="space-y-2">
-                {queue.map(item => (
+                {queue.map((item) => (
                   <div
                     key={item.id}
                     className="flex items-center gap-3 px-4 py-3 bg-white rounded-xl border border-slate-200"
@@ -301,18 +314,17 @@ export default function App() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-slate-800 truncate">{item.name}</p>
-                      {item.status === 'converting' && (
-                        <p className="text-xs text-amber-600">Converting…</p>
-                      )}
-                      {item.status === 'error' && (
-                        <p className="text-xs text-red-500 truncate">{item.error}</p>
-                      )}
+                      {item.status === 'converting' && <p className="text-xs text-amber-600">Converting…</p>}
+                      {item.status === 'error' && <p className="text-xs text-red-500 truncate">{item.error}</p>}
                       {(item.status === 'ready' || item.status === 'done') && item.originalSize > 0 && (
                         <p className="text-xs text-slate-400">{formatBytes(item.originalSize)}</p>
                       )}
                     </div>
                     <button
-                      onClick={(e) => { e.stopPropagation(); removeItem(item.id) }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        removeItem(item.id)
+                      }}
                       title="Remove"
                       className="text-slate-300 hover:text-red-400 transition-colors p-1"
                     >
@@ -338,9 +350,7 @@ export default function App() {
               </button>
             )}
 
-            {isConverting && !hasAnyReady && (
-              <p className="text-sm text-center text-slate-400">Converting files…</p>
-            )}
+            {isConverting && !hasAnyReady && <p className="text-sm text-center text-slate-400">Converting files…</p>}
           </div>
         )}
 
@@ -360,16 +370,20 @@ export default function App() {
                 config={config}
                 onChange={(patch) => setManualOverrides((prev) => mergeConfigLayers(prev, patch))}
                 onProfileImport={handleProfileImported}
-                activeImport={importedProfile && {
-                  name: importedProfile.name,
-                  type: importedProfile.type,
-                  settingCount: countProfileSettings(importedProfile.settings),
-                }}
+                activeImport={
+                  importedProfile && {
+                    name: importedProfile.name,
+                    type: importedProfile.type,
+                    settingCount: countProfileSettings(importedProfile.settings),
+                  }
+                }
                 onRemoveImport={() => setImportedProfile(null)}
                 selectedPreset={selectedPreset}
                 onPresetChange={handlePresetChange}
                 selectedPrinter={selectedPrinter}
-                importedPrinterLabel={importedProfile?.type === 'machine' ? `Imported: ${importedProfile.name}` : undefined}
+                importedPrinterLabel={
+                  importedProfile?.type === 'machine' ? `Imported: ${importedProfile.name}` : undefined
+                }
                 onPrinterChange={handlePrinterChange}
                 selectedFilament={selectedFilament}
                 onFilamentChange={handleFilamentChange}
@@ -401,7 +415,7 @@ export default function App() {
             )}
 
             <div className="space-y-3">
-              {queue.map(item => (
+              {queue.map((item) => (
                 <QueueItemCard
                   key={item.id}
                   item={item}
