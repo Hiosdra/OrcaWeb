@@ -5,6 +5,7 @@ import { ErrorDotIcon, GithubIcon, ModelIconSm, OrcaLogo, SpinnerIcon, XIcon } f
 import { ModelViewer } from './components/ModelViewer'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ConfigSummary, PlateResultCard, QueueItemCard, SliceHeader } from './components/SliceCards'
+import { ViewerErrorBoundary } from './components/ViewerErrorBoundary'
 import { useSliceQueue } from './hooks/useSliceQueue'
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
@@ -339,7 +340,9 @@ export default function App() {
 
             {previewFile && (
               <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white" style={{ height: 300 }}>
-                <ModelViewer file={previewFile} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+                <ViewerErrorBoundary message="3D preview unavailable">
+                  <ModelViewer file={previewFile} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+                </ViewerErrorBoundary>
               </div>
             )}
 
@@ -365,7 +368,9 @@ export default function App() {
                 className="rounded-2xl overflow-hidden border border-slate-200 bg-white order-last sm:order-first"
                 style={{ height: 320 }}
               >
-                <ModelViewer file={previewFile} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+                <ViewerErrorBoundary message="3D preview unavailable">
+                  <ModelViewer file={previewFile} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+                </ViewerErrorBoundary>
               </div>
             )}
             <div className="bg-white rounded-2xl border border-slate-200 p-5 overflow-y-auto">

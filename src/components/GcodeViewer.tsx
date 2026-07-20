@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js'
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js'
+import { isWebGLAvailable } from '../lib/webgl'
 
 interface Props {
   gcode: string
@@ -397,7 +398,7 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
 
   useEffect(() => {
     const el = mountRef.current
-    if (!el || layers.length === 0) return
+    if (!el || layers.length === 0 || !isWebGLAvailable()) return
 
     const w = el.clientWidth
     const h = el.clientHeight
@@ -610,6 +611,14 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
   if (layers.length === 0) {
     return (
       <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">No toolpaths found</div>
+    )
+  }
+
+  if (!isWebGLAvailable()) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">
+        3D preview unavailable in this browser
+      </div>
     )
   }
 
