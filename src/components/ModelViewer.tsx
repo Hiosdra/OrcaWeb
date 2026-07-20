@@ -82,12 +82,12 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
   useEffect(() => {
     const el = mountRef.current
     if (!el) return
-    setLoadError(null)
 
     if (!isWebGLAvailable()) {
       setLoadError('3D preview unavailable in this browser')
       return
     }
+    setLoadError(null)
 
     const w = el.clientWidth
     const h = el.clientHeight

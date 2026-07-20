@@ -367,6 +367,11 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
   const [showTravels, setShowTravels] = useState(false)
 
   useEffect(() => {
+    // No point spinning up the parser worker if there's no WebGL to render
+    // the result into — this can be a multi-MB file, so skip the CPU/memory
+    // cost entirely rather than parsing something that'll never be shown.
+    if (!isWebGLAvailable()) return
+
     const worker = new Worker(new URL('../workers/gcode-parser.worker.ts', import.meta.url), { type: 'module' })
     parserWorkerRef.current = worker
     worker.onmessage = ({ data }: MessageEvent<{ id: number; result: ParseResult }>) => {
@@ -378,6 +383,7 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
   }, [])
 
   useEffect(() => {
+    if (!isWebGLAvailable()) return
     const id = ++parseRequestRef.current
     if (parserCacheRef.current?.gcode === gcode) {
       setParsed(parserCacheRef.current.result)
@@ -604,6 +610,14 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
     return Array.from(seen.entries())
   }, [layers, hasFeatureTypes])
 
+  if (!isWebGLAvailable()) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">
+        3D preview unavailable in this browser
+      </div>
+    )
+  }
+
   if (!parsed) {
     return <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">Parsing preview…</div>
   }
@@ -611,14 +625,6 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
   if (layers.length === 0) {
     return (
       <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">No toolpaths found</div>
-    )
-  }
-
-  if (!isWebGLAvailable()) {
-    return (
-      <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">
-        3D preview unavailable in this browser
-      </div>
     )
   }
 
