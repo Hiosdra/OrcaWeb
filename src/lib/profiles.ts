@@ -27,6 +27,7 @@ export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = orcaProfiles
 // viewers) quoting the same number instead of each hardcoding its own.
 export const DISPLAY_DEFAULTS = {
   printer_model: 'Generic',
+  nozzle_diameter: 0.4,
   bed_size_x: 256,
   bed_size_y: 256,
   bed_shape: 'rectangle',
@@ -50,6 +51,22 @@ export const DISPLAY_DEFAULTS = {
   support_type: 'normal(auto)',
   brim_width: 0,
 } as const satisfies OrcaConfig
+
+/**
+ * Parse the current config's filament_type into its individual AMS-style
+ * slots — OrcaSlicer represents a multi-material machine profile's filament
+ * types as one semicolon/comma-joined string (e.g. "PLA;PETG;ABS;TPU"), one
+ * entry per physical slot. A single-material config just returns one entry.
+ * Shared by ConfigSummary (slot count/name display) and the per-object
+ * filament-slot picker on the Slice tab (orc_slice_multi's extruder_ids —
+ * see slicePlate() in useSliceQueue.ts) so both read the same slot list.
+ */
+export function filamentSlots(config: OrcaConfig): string[] {
+  return String(config.filament_type ?? DISPLAY_DEFAULTS.filament_type)
+    .split(/[;,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+}
 
 export function buildConfig(
   printer: string,
@@ -145,6 +162,10 @@ const ORCA_FIELD_MAP: Record<string, { key: keyof OrcaConfig; type: 'num' | 'pct
   initial_layer_speed: { key: 'initial_layer_speed', type: 'num' },
   first_layer_speed: { key: 'initial_layer_speed', type: 'num' },
   brim_width: { key: 'brim_width', type: 'num' },
+  brim_type: { key: 'brim_type', type: 'str' },
+  skirt_loops: { key: 'skirt_loops', type: 'num' },
+  skirt_distance: { key: 'skirt_distance', type: 'num' },
+  raft_layers: { key: 'raft_layers', type: 'num' },
   seam_position: { key: 'seam_position', type: 'str' },
   enable_support: { key: 'enable_support', type: 'bool' },
   support_type: { key: 'support_type', type: 'str' },
@@ -372,4 +393,52 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
   } catch {
     return {}
   }
+}
+
+// Reverse of ORCA_FIELD_MAP: for each internal OrcaConfig key, the canonical
+// (non-alias) OrcaSlicer field name to write on export. ORCA_FIELD_MAP lists
+// the canonical name before its aliases (e.g. `layer_height` before
+// `perimeters`'s alias entry for `wall_loops`), so keeping only the first
+// field seen for a given key picks the canonical one.
+const REVERSE_FIELD_MAP: Partial<Record<keyof OrcaConfig, string>> = {}
+for (const [field, meta] of Object.entries(ORCA_FIELD_MAP)) {
+  if (!(meta.key in REVERSE_FIELD_MAP)) REVERSE_FIELD_MAP[meta.key] = field
+}
+
+/**
+ * Serialize the current in-app config back into an OrcaSlicer-compatible
+ * profile JSON — the mirror of parseOrcaProfileJson(). Re-importing the
+ * result through this app's own Import button round-trips every field
+ * (canonical OrcaSlicer field names via REVERSE_FIELD_MAP, `_passthrough`
+ * written back verbatim), and uses OrcaSlicer's own field names/formats
+ * (percentages as "NN%", printable_area as bed-corner strings) so the file
+ * is also loadable by desktop OrcaSlicer as a user profile.
+ *
+ * default_speed/enable_ironing are OrcaConfig-only names with no real
+ * OrcaSlicer option (see toEngineConfig's doc comment) — REVERSE_FIELD_MAP
+ * still maps them to their nearest named equivalent (inner_wall_speed,
+ * ironing) since those aliases exist in ORCA_FIELD_MAP, keeping the export
+ * at least round-trippable through this app even though desktop OrcaSlicer
+ * would interpret them slightly differently.
+ */
+export function exportOrcaProfileJson(config: OrcaConfig, name: string): string {
+  const { _passthrough, bed_size_x, bed_size_y, ...rest } = config
+  const out: Record<string, unknown> = {
+    type: 'process',
+    name,
+    from: 'User',
+  }
+  for (const [orcaKey, value] of Object.entries(rest)) {
+    if (value === undefined || value === null) continue
+    const field = REVERSE_FIELD_MAP[orcaKey as keyof OrcaConfig]
+    if (!field) continue
+    const meta = ORCA_FIELD_MAP[field]
+    out[field] = meta.type === 'pct' ? `${value}%` : typeof value === 'boolean' ? (value ? '1' : '0') : String(value)
+  }
+  if (bed_size_x !== undefined && bed_size_y !== undefined) {
+    // Same bed-corner format parsePrintableArea() reads back.
+    out.printable_area = ['0x0', `${bed_size_x}x0`, `${bed_size_x}x${bed_size_y}`, `0x${bed_size_y}`]
+  }
+  if (_passthrough) Object.assign(out, _passthrough)
+  return JSON.stringify(out, null, 2)
 }

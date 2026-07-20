@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseGcode } from './GcodeViewer'
+import { parseGcode } from '../lib/gcode-parse'
 
 const parsedSegments = (gcode: string) => {
   const layer = parseGcode(gcode).layers[0]

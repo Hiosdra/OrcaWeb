@@ -9,9 +9,16 @@ import { ViewerErrorBoundary } from './components/ViewerErrorBoundary'
 import { useSliceQueue } from './hooks/useSliceQueue'
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
-import { buildConfig, DISPLAY_DEFAULTS, FILAMENT_PRESETS, PRESETS, PRINTER_PRESETS } from './lib/profiles'
+import {
+  buildConfig,
+  DISPLAY_DEFAULTS,
+  FILAMENT_PRESETS,
+  filamentSlots,
+  PRESETS,
+  PRINTER_PRESETS,
+} from './lib/profiles'
 import type { WasmStatus } from './lib/worker-singleton'
-import type { OrcaConfig } from './types'
+import type { OrcaConfig, UserPreset } from './types'
 
 // ── Persisted settings ────────────────────────────────────────────────────────
 
@@ -87,6 +94,51 @@ function loadSavedSettings(): SavedSettings | null {
   }
 }
 
+// ── User presets ──────────────────────────────────────────────────────────────
+// Named, savable snapshots of a full settings selection — separate from the
+// single auto-persisted "current selection" above (SETTINGS_KEY), so a user
+// can keep e.g. "PETG structural" and "PLA fast draft" side by side instead
+// of overwriting one working set every time they switch printer/preset.
+
+const USER_PRESETS_KEY = 'orcaweb.userPresets.v1'
+
+function isUserPreset(value: unknown): value is UserPreset {
+  if (!value || typeof value !== 'object') return false
+  const p = value as Partial<UserPreset>
+  return (
+    typeof p.id === 'string' &&
+    typeof p.name === 'string' &&
+    typeof p.printer === 'string' &&
+    p.printer in PRINTER_PRESETS &&
+    typeof p.filament === 'string' &&
+    p.filament in FILAMENT_PRESETS &&
+    typeof p.preset === 'string' &&
+    PRESETS.some((preset) => preset.name === p.preset) &&
+    !!p.overrides &&
+    typeof p.overrides === 'object'
+  )
+}
+
+function loadUserPresets(): UserPreset[] {
+  try {
+    const raw = localStorage.getItem(USER_PRESETS_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    // A preset referencing a printer/filament/preset removed in a later app
+    // version is dropped rather than crashing the whole list.
+    const valid = parsed.filter(isUserPreset)
+    const droppedCount = parsed.length - valid.length
+    if (droppedCount > 0) {
+      logWarn(`Dropped ${droppedCount} saved preset(s) referencing a printer/filament/preset that no longer exists`)
+    }
+    return valid
+  } catch (err) {
+    logWarn('Failed to load saved presets — starting with an empty list', err)
+    return []
+  }
+}
+
 // Reverse-lookup a preset key (e.g. "Bambu Lab X1C") from a raw engine field
 // value (e.g. printer_model: "Bambu Lab X1 Carbon") — the two differ because
 // preset keys are UI labels while the field values are the literal OrcaSlicer
@@ -122,6 +174,7 @@ export default function App() {
   const [manualOverrides, setManualOverrides] = useState<Partial<OrcaConfig>>(saved?.manualOverrides ?? {})
   const [importedProfile, setImportedProfile] = useState<ImportedProfile | null>(saved?.importedProfile ?? null)
   const [importNotice, setImportNotice] = useState<string | null>(null)
+  const [userPresets, setUserPresets] = useState<UserPreset[]>(loadUserPresets)
 
   const baseConfig = useMemo(
     () => buildConfig(selectedPrinter, selectedFilament, selectedPreset),
@@ -148,6 +201,58 @@ export default function App() {
       logWarn('Failed to persist settings — storage full or unavailable', err)
     }
   }, [selectedPrinter, selectedFilament, selectedPreset, manualOverrides, importedProfile])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(USER_PRESETS_KEY, JSON.stringify(userPresets))
+    } catch (err) {
+      logWarn('Failed to persist saved presets — storage full or unavailable', err)
+    }
+  }, [userPresets])
+
+  // Captures the full current selection (printer/filament/quality + manual
+  // overrides) under a name. Deliberately excludes any active imported
+  // profile — a saved preset is meant to be a self-contained, portable
+  // selection built from the app's own presets, not a pointer to a specific
+  // imported file the user may not still have.
+  const saveUserPreset = useCallback(
+    (name: string) => {
+      const preset: UserPreset = {
+        id: crypto.randomUUID(),
+        name,
+        printer: selectedPrinter,
+        filament: selectedFilament,
+        preset: selectedPreset,
+        overrides: manualOverrides,
+        createdAt: new Date().toISOString(),
+      }
+      setUserPresets((prev) => [...prev, preset])
+    },
+    [selectedPrinter, selectedFilament, selectedPreset, manualOverrides],
+  )
+
+  // Applies a saved preset's full selection in one go. The four setState
+  // calls below are batched into a single re-render (called from a plain
+  // event handler), so `config` recomputes exactly once and useSliceQueue's
+  // configEpoch bumps once — not once per field — matching how
+  // handlePresetChange/handlePrinterChange/handleProfileImported already
+  // apply their own multi-field updates atomically.
+  const loadUserPreset = useCallback(
+    (id: string) => {
+      const p = userPresets.find((preset) => preset.id === id)
+      if (!p) return
+      setSelectedPrinter(p.printer)
+      setSelectedFilament(p.filament)
+      setSelectedPreset(p.preset)
+      setManualOverrides(p.overrides)
+      setImportedProfile(null)
+    },
+    [userPresets],
+  )
+
+  const deleteUserPreset = useCallback((id: string) => {
+    setUserPresets((prev) => prev.filter((p) => p.id !== id))
+  }, [])
 
   // Settings embedded in an imported file (3MF) form their own layer so later
   // dropdown changes cannot silently erase them.
@@ -184,6 +289,7 @@ export default function App() {
     removeItem,
     sliceAll,
     slicePlate,
+    setExtruderId,
     cancel,
     export3mf,
   } = useSliceQueue(config, handleSettingsImported)
@@ -228,9 +334,17 @@ export default function App() {
 
   // ── Derived state ─────────────────────────────────────────────────────────
 
-  const previewFile = useMemo(() => queue.find((i) => i.stlFile != null)?.stlFile ?? null, [queue])
+  // Every ready/done model, not just the first — the preview shows the whole
+  // set laid out on a grid (see ModelViewer's doc comment) instead of only
+  // ever showing one object when multiple files are queued.
+  const previewFiles = useMemo(() => queue.map((i) => i.stlFile).filter((f): f is File => f != null), [queue])
+  // Remounts the ViewerErrorBoundary (clearing any previous crash) whenever
+  // the actual file set changes, without remounting on every unrelated
+  // re-render — mirrors the single-file `key={previewFile.name}` pattern.
+  const previewFilesKey = previewFiles.map((f) => f.name).join('|')
   const hasAnyReady = queue.some((i) => i.stlFile != null)
   const isConverting = queue.some((i) => i.status === 'converting')
+  const filamentSlotCount = filamentSlots(config).length
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -338,10 +452,10 @@ export default function App() {
               </div>
             )}
 
-            {previewFile && (
+            {previewFiles.length > 0 && (
               <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white" style={{ height: 300 }}>
-                <ViewerErrorBoundary key={previewFile.name} message="3D preview unavailable">
-                  <ModelViewer file={previewFile} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+                <ViewerErrorBoundary key={previewFilesKey} message="3D preview unavailable">
+                  <ModelViewer files={previewFiles} bedX={bedX} bedY={bedY} bedShape={bedShape} />
                 </ViewerErrorBoundary>
               </div>
             )}
@@ -363,13 +477,13 @@ export default function App() {
         {/* ── Settings tab ── */}
         {activeTab === 'settings' && hasAnyReady && (
           <div className="grid sm:grid-cols-[1fr_1.4fr] gap-6">
-            {previewFile && (
+            {previewFiles.length > 0 && (
               <div
                 className="rounded-2xl overflow-hidden border border-slate-200 bg-white order-last sm:order-first"
                 style={{ height: 320 }}
               >
-                <ViewerErrorBoundary key={previewFile.name} message="3D preview unavailable">
-                  <ModelViewer file={previewFile} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+                <ViewerErrorBoundary key={previewFilesKey} message="3D preview unavailable">
+                  <ModelViewer files={previewFiles} bedX={bedX} bedY={bedY} bedShape={bedShape} />
                 </ViewerErrorBoundary>
               </div>
             )}
@@ -395,6 +509,10 @@ export default function App() {
                 onPrinterChange={handlePrinterChange}
                 selectedFilament={selectedFilament}
                 onFilamentChange={handleFilamentChange}
+                userPresets={userPresets}
+                onSaveUserPreset={saveUserPreset}
+                onLoadUserPreset={loadUserPreset}
+                onDeleteUserPreset={deleteUserPreset}
               />
               <button
                 type="button"
@@ -432,6 +550,8 @@ export default function App() {
                   bedY={bedY}
                   bedShape={bedShape}
                   onExport3mf={export3mf}
+                  filamentSlotCount={filamentSlotCount}
+                  onSetExtruderId={setExtruderId}
                 />
               ))}
             </div>

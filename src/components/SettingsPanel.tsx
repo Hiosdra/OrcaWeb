@@ -1,8 +1,24 @@
 import clsx from 'clsx'
 import { useId, useRef, useState } from 'react'
-import { FILAMENT_PRESETS, PRESETS, PRINTER_PRESETS, parseOrcaProfileJson } from '../lib/profiles'
-import type { FuzzySkin, InfillPattern, OrcaConfig, SeamPosition, SupportType, WallGenerator } from '../types'
-import { ChevronIcon, UploadIcon } from './icons'
+import { downloadBlob } from '../lib/download'
+import {
+  exportOrcaProfileJson,
+  FILAMENT_PRESETS,
+  PRESETS,
+  PRINTER_PRESETS,
+  parseOrcaProfileJson,
+} from '../lib/profiles'
+import type {
+  BrimType,
+  FuzzySkin,
+  InfillPattern,
+  OrcaConfig,
+  SeamPosition,
+  SupportType,
+  UserPreset,
+  WallGenerator,
+} from '../types'
+import { ChevronIcon, DownloadIcon, UploadIcon, XIcon } from './icons'
 
 interface Props {
   config: OrcaConfig
@@ -21,6 +37,10 @@ interface Props {
   onPrinterChange: (name: string) => void
   selectedFilament: string
   onFilamentChange: (name: string) => void
+  userPresets: UserPreset[]
+  onSaveUserPreset: (name: string) => void
+  onLoadUserPreset: (id: string) => void
+  onDeleteUserPreset: (id: string) => void
 }
 
 export function SettingsPanel({
@@ -36,11 +56,16 @@ export function SettingsPanel({
   onPrinterChange,
   selectedFilament,
   onFilamentChange,
+  userPresets,
+  onSaveUserPreset,
+  onLoadUserPreset,
+  onDeleteUserPreset,
 }: Props) {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [importMsg, setImportMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const densityId = useId()
+  const [savingPresetName, setSavingPresetName] = useState<string | null>(null)
 
   function handleProfileFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -75,9 +100,92 @@ export function SettingsPanel({
     reader.readAsText(file)
   }
 
+  function handleExportProfile() {
+    const name = `OrcaWeb — ${selectedPrinter} / ${selectedFilament} / ${selectedPreset}`
+    const json = exportOrcaProfileJson(config, name)
+    downloadBlob(new Blob([json], { type: 'application/json' }), 'orcaweb-settings.json')
+  }
+
+  function handleConfirmSavePreset() {
+    const name = savingPresetName?.trim()
+    if (!name) return
+    onSaveUserPreset(name)
+    setSavingPresetName(null)
+  }
+
   return (
     <div className="space-y-6">
-      {/* Profile import */}
+      {/* My presets */}
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">My presets</h3>
+        {userPresets.length > 0 && (
+          <div className="space-y-1.5 mb-2">
+            {userPresets.map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-1.5"
+              >
+                <button
+                  type="button"
+                  onClick={() => onLoadUserPreset(p.id)}
+                  title={`Load "${p.name}" (${p.printer} · ${p.filament} · ${p.preset})`}
+                  className="min-w-0 flex-1 truncate text-left text-sm text-slate-700 hover:text-orca-600"
+                >
+                  {p.name}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDeleteUserPreset(p.id)}
+                  title="Delete this preset"
+                  className="shrink-0 text-slate-300 hover:text-red-400 transition-colors"
+                >
+                  <XIcon className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {savingPresetName === null ? (
+          <button
+            type="button"
+            onClick={() => setSavingPresetName('')}
+            className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border-2 border-dashed border-slate-200 text-sm text-slate-500 hover:border-orca-400 hover:text-orca-600 hover:bg-orca-50 transition-all"
+          >
+            Save current settings as a preset…
+          </button>
+        ) : (
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={savingPresetName}
+              onChange={(e) => setSavingPresetName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleConfirmSavePreset()
+                if (e.key === 'Escape') setSavingPresetName(null)
+              }}
+              placeholder="Preset name…"
+              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-orca-400"
+            />
+            <button
+              type="button"
+              onClick={handleConfirmSavePreset}
+              disabled={!savingPresetName.trim()}
+              className="shrink-0 px-3 py-2 rounded-lg bg-orca-500 hover:bg-orca-600 disabled:bg-slate-200 disabled:text-slate-400 text-white text-sm font-semibold transition-colors"
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={() => setSavingPresetName(null)}
+              className="shrink-0 px-3 py-2 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-700 text-sm transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Profile import / export */}
       <div>
         <input
           ref={fileInputRef}
@@ -87,14 +195,26 @@ export function SettingsPanel({
           className="hidden"
           onChange={handleProfileFile}
         />
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border-2 border-dashed border-slate-200 text-sm text-slate-500 hover:border-orca-400 hover:text-orca-600 hover:bg-orca-50 transition-all"
-        >
-          <UploadIcon className="w-4 h-4" />
-          Import OrcaSlicer profile (.json)
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl border-2 border-dashed border-slate-200 text-sm text-slate-500 hover:border-orca-400 hover:text-orca-600 hover:bg-orca-50 transition-all"
+          >
+            <UploadIcon className="w-4 h-4" />
+            Import (.json)
+          </button>
+          <button
+            type="button"
+            onClick={handleExportProfile}
+            title="Save the current settings as an OrcaSlicer-compatible profile"
+            data-testid="export-profile-button"
+            className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl border-2 border-dashed border-slate-200 text-sm text-slate-500 hover:border-orca-400 hover:text-orca-600 hover:bg-orca-50 transition-all"
+          >
+            <DownloadIcon className="w-4 h-4" />
+            Export (.json)
+          </button>
+        </div>
         {importMsg && (
           <p className={clsx('mt-1.5 text-xs px-2', importMsg.ok ? 'text-green-600' : 'text-red-500')}>
             {importMsg.ok ? '✓ ' : '✗ '}
@@ -131,6 +251,17 @@ export function SettingsPanel({
           }
           onChange={onPrinterChange}
         />
+        <div className="mt-3">
+          <NumberField
+            label="Nozzle diameter"
+            unit="mm"
+            value={config.nozzle_diameter ?? 0.4}
+            min={0.1}
+            max={1.2}
+            step={0.05}
+            onChange={(v) => onChange({ nozzle_diameter: v })}
+          />
+        </div>
       </Section>
 
       {/* Filament */}
@@ -204,6 +335,35 @@ export function SettingsPanel({
             onChange={(v) => onChange({ wall_loops: v })}
           />
         </div>
+        <div className="grid grid-cols-3 gap-3 mt-3">
+          <NumberField
+            label="First layer height"
+            unit="mm"
+            value={config.initial_layer_height ?? config.layer_height ?? 0.2}
+            min={0.05}
+            max={0.5}
+            step={0.05}
+            onChange={(v) => onChange({ initial_layer_height: v })}
+          />
+          <NumberField
+            label="Top shells"
+            unit="layers"
+            value={config.top_shell_layers ?? 4}
+            min={0}
+            max={20}
+            step={1}
+            onChange={(v) => onChange({ top_shell_layers: v })}
+          />
+          <NumberField
+            label="Bottom shells"
+            unit="layers"
+            value={config.bottom_shell_layers ?? 3}
+            min={0}
+            max={20}
+            step={1}
+            onChange={(v) => onChange({ bottom_shell_layers: v })}
+          />
+        </div>
         <SelectField
           label="Wall generator"
           value={config.wall_generator ?? 'arachne'}
@@ -272,7 +432,7 @@ export function SettingsPanel({
             className="mt-3"
           />
         )}
-        <div className="mt-3">
+        <div className="grid grid-cols-2 gap-3 mt-3">
           <NumberField
             label="Brim width"
             unit="mm"
@@ -281,6 +441,41 @@ export function SettingsPanel({
             max={30}
             step={1}
             onChange={(v) => onChange({ brim_width: v })}
+          />
+          <SelectField
+            label="Brim type"
+            value={config.brim_type ?? 'outer_only'}
+            options={['no_brim', 'outer_only', 'inner_only', 'outer_and_inner'] as BrimType[]}
+            onChange={(v) => onChange({ brim_type: v as BrimType })}
+          />
+        </div>
+        <div className="grid grid-cols-3 gap-3 mt-3">
+          <NumberField
+            label="Raft layers"
+            unit="layers"
+            value={config.raft_layers ?? 0}
+            min={0}
+            max={100}
+            step={1}
+            onChange={(v) => onChange({ raft_layers: v })}
+          />
+          <NumberField
+            label="Skirt loops"
+            unit="loops"
+            value={config.skirt_loops ?? 0}
+            min={0}
+            max={10}
+            step={1}
+            onChange={(v) => onChange({ skirt_loops: v })}
+          />
+          <NumberField
+            label="Skirt distance"
+            unit="mm"
+            value={config.skirt_distance ?? 2}
+            min={0}
+            max={60}
+            step={1}
+            onChange={(v) => onChange({ skirt_distance: v })}
           />
         </div>
       </Section>

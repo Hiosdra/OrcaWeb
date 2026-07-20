@@ -237,6 +237,9 @@ export interface SliceQueue {
   sliceAll: () => void
   /** Arrange all ready items on one plate and slice them together. */
   slicePlate: () => void
+  /** Set (or clear, via undefined) an item's 1-based filament-slot override
+   *  for the next "One plate" slice — see slicePlate()'s extruderIds build. */
+  setExtruderId: (id: string, extruderId: number | undefined) => void
   /** Abort the running slice — terminates the worker and restarts the engine. */
   cancel: () => void
   /** Export one item's current model + live config as a .3mf (no plate/gcode data). */
@@ -564,14 +567,28 @@ export function useSliceQueue(
   )
 
   // Terminating the worker also kills any conversions queued inside it —
-  // re-post them (from the retained source files) to the fresh worker.
+  // re-post them (from the retained source files) to the fresh worker. This
+  // includes in-flight .3mf reads (READ_3MF), not just OBJ/STEP: without the
+  // 3mf branch, an unrelated .3mf import running when the user cancels a
+  // *different* item's slice (or removes the item currently slicing) would
+  // get caught by the blanket rejectAllPendingMf() that follows this call
+  // and flip to a permanent error — even though nothing about that import
+  // itself failed. rejectPendingForItem() rejects with ItemRemovedError,
+  // which importMf3()'s catch block treats as a silent no-op (not an error
+  // dispatch), so the stale pre-restart request is discarded quietly before
+  // the fresh one is posted, and rejectAllPendingMf() finds nothing left to
+  // reject for this item.
   const repostConversions = useCallback(() => {
     for (const item of state.items) {
-      if (item.status === 'converting' && /\.(obj|step|stp)$/i.test(item.sourceFile.name)) {
+      if (item.status !== 'converting') continue
+      if (/\.(obj|step|stp)$/i.test(item.sourceFile.name)) {
         void postConversion(item)
+      } else if (/\.3mf$/i.test(item.sourceFile.name)) {
+        rejectPendingForItem(item.id, 'Engine restarted — retrying import')
+        void importMf3(item)
       }
     }
-  }, [state.items, postConversion])
+  }, [state.items, postConversion, importMf3, rejectPendingForItem])
 
   const cancel = useCallback(() => {
     if (!state.currentId && !state.plate.slicing) return
@@ -644,12 +661,18 @@ export function useSliceQueue(
     const configSnapshot = configSnapshotRef.current
     dispatch({ type: 'PLATE_STARTED', configEpoch: configSnapshot.epoch })
     const requestGeneration = sliceRequestGeneration.current
+    // Only send an extruderIds array when at least one item actually has an
+    // override set — omitting it entirely (undefined) keeps the common
+    // single-material case byte-identical to before this field existed,
+    // matching orc_slice_multi's "extruderIdsPtr == 0 → default for every
+    // object" contract (slicer.worker.ts's doSliceMulti).
+    const extruderIds = readyItems.some((i) => i.extruderId) ? readyItems.map((i) => i.extruderId ?? 0) : undefined
     void (async () => {
       try {
         const stls = await Promise.all(readyItems.map((i) => i.stlFile!.arrayBuffer()))
         if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
-        getWorker().postMessage({ type: 'SLICE_MULTI', stls, config: configSnapshot.config }, stls)
+        getWorker().postMessage({ type: 'SLICE_MULTI', stls, config: configSnapshot.config, extruderIds }, stls)
       } catch (err) {
         if (requestGeneration !== sliceRequestGeneration.current) return
         logError('[queue] failed to prepare plate slice:', err)
@@ -657,6 +680,10 @@ export function useSliceQueue(
       }
     })()
   }, [state.plate.slicing, state.currentId, state.running, state.items])
+
+  const setExtruderId = useCallback((id: string, extruderId: number | undefined) => {
+    dispatch({ type: 'PATCH_ITEM', id, patch: { extruderId } })
+  }, [])
 
   return {
     items,
@@ -668,6 +695,7 @@ export function useSliceQueue(
     removeItem,
     sliceAll,
     slicePlate,
+    setExtruderId,
     cancel,
     export3mf,
   }

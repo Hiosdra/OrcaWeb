@@ -5,7 +5,11 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import { isWebGLAvailable } from '../lib/webgl'
 
 interface Props {
-  file: File
+  /** One or more STL files to preview together, laid out on a simple grid —
+   *  NOT the engine's real "One plate" arrangement (only orc_slice_multi's
+   *  arrange_objects() computes that); this is just enough to see every
+   *  loaded model at once instead of only the first. */
+  files: File[]
   /** Bed width (X axis) in mm — default 256 */
   bedX?: number
   /** Bed depth (Y axis) in mm — default 256 */
@@ -75,7 +79,7 @@ function buildBed(scene: THREE.Scene, bedX: number, bedY: number, bedShape: 'rec
   return disposables
 }
 
-export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangle' }: Props) {
+export function ModelViewer({ files, bedX = 256, bedY = 256, bedShape = 'rectangle' }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -123,49 +127,77 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
     controls.target.set(0, 0, 0)
 
     const loader = new STLLoader()
-    let mesh: THREE.Mesh | null = null
+    const meshes: THREE.Mesh[] = []
+    const material = new THREE.MeshPhongMaterial({
+      color: 0x0a84ff,
+      specular: 0x222222,
+      shininess: 30,
+      side: THREE.DoubleSide,
+    })
     let cancelled = false
 
-    file
-      .arrayBuffer()
-      .then((buffer) => {
-        if (cancelled) return
-
-        let geometry: THREE.BufferGeometry
+    void Promise.all(
+      files.map(async (file) => {
         try {
-          geometry = loader.parse(buffer)
+          const buffer = await file.arrayBuffer()
+          const geometry = loader.parse(buffer)
+          geometry.computeBoundingBox()
+          const box = geometry.boundingBox
+          if (!box) return null
+          return { geometry, box }
         } catch {
-          setLoadError('Could not read this model file')
-          return
+          return null
         }
-        geometry.computeBoundingBox()
-        const box = geometry.boundingBox!
-        const size = box.getSize(new THREE.Vector3())
+      }),
+    ).then((results) => {
+      if (cancelled) return
+      const loaded = results.filter((r): r is { geometry: THREE.BufferGeometry; box: THREE.Box3 } => r !== null)
+      const failedCount = results.length - loaded.length
+      if (failedCount > 0) {
+        setLoadError(
+          loaded.length === 0
+            ? 'Could not read this model file'
+            : `Could not read ${failedCount} of ${results.length} model files`,
+        )
+      }
+      if (loaded.length === 0) return
+
+      // Naive preview grid, not the engine's real "One plate" arrangement:
+      // equal-sized cells sized to the largest loaded object's footprint
+      // plus a fixed gap, filled row-major and centred on the bed origin.
+      const sizes = loaded.map(({ box }) => box.getSize(new THREE.Vector3()))
+      const gap = 10
+      const cellX = Math.max(...sizes.map((s) => s.x)) + gap
+      const cellY = Math.max(...sizes.map((s) => s.y)) + gap
+      const cols = Math.ceil(Math.sqrt(loaded.length))
+      const gridW = cols * cellX
+      const gridH = Math.ceil(loaded.length / cols) * cellY
+
+      let maxZ = 0
+      loaded.forEach(({ geometry, box }, i) => {
+        const col = i % cols
+        const row = Math.floor(i / cols)
+        const cellCenterX = -gridW / 2 + cellX * (col + 0.5)
+        const cellCenterY = gridH / 2 - cellY * (row + 0.5)
+
         const center = box.getCenter(new THREE.Vector3())
+        // Centre this object within its cell; bottom at Z=0 (engine: X/Y flat, Z = height)
+        geometry.translate(cellCenterX - center.x, cellCenterY - center.y, -box.min.z)
 
-        // Centre X/Y on bed origin; place bottom at Z=0 (engine: X/Y flat, Z = height)
-        geometry.translate(-center.x, -center.y, -box.min.z)
-
-        const material = new THREE.MeshPhongMaterial({
-          color: 0x0a84ff,
-          specular: 0x222222,
-          shininess: 30,
-          side: THREE.DoubleSide,
-        })
-        mesh = new THREE.Mesh(geometry, material)
+        const mesh = new THREE.Mesh(geometry, material)
         mesh.castShadow = true
         scene.add(mesh)
+        meshes.push(mesh)
+        maxZ = Math.max(maxZ, box.max.z - box.min.z)
+      })
 
-        // Fit camera to model — Z-up: position camera above and to the side
-        const maxDim = Math.max(size.x, size.y, size.z, 50)
-        const dist = maxDim * 2.5
-        camera.position.set(dist * 0.6, -dist, dist * 0.7)
-        controls.target.set(0, 0, size.z / 2)
-        controls.update()
-      })
-      .catch(() => {
-        if (!cancelled) setLoadError('Could not read this model file')
-      })
+      // Fit camera to the whole grid — Z-up: position camera above and to the side
+      const maxDim = Math.max(gridW, gridH, maxZ, 50)
+      const dist = maxDim * 2
+      camera.position.set(dist * 0.6, -dist, dist * 0.7)
+      controls.target.set(0, 0, maxZ / 2)
+      controls.update()
+    })
 
     let animId: number
     const animate = () => {
@@ -190,8 +222,8 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
       resizeObs.disconnect()
       controls.dispose()
       renderer.dispose()
-      mesh?.geometry.dispose()
-      ;(mesh?.material as THREE.Material | undefined)?.dispose()
+      for (const mesh of meshes) mesh.geometry.dispose()
+      material.dispose()
       for (const obj of bedObjects) {
         if (obj instanceof THREE.Mesh || obj instanceof THREE.Line || obj instanceof THREE.LineSegments) {
           obj.geometry.dispose()
@@ -206,7 +238,7 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
       }
       el.removeChild(renderer.domElement)
     }
-  }, [file, bedX, bedY, bedShape])
+  }, [files, bedX, bedY, bedShape])
 
   return (
     <div className="relative w-full h-full min-h-48">

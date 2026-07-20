@@ -39,6 +39,10 @@ export interface OrcaConfig {
 
   // Process — adhesion
   brim_width?: number
+  brim_type?: BrimType
+  skirt_loops?: number
+  skirt_distance?: number
+  raft_layers?: number
 
   // Process — other
   seam_position?: SeamPosition
@@ -80,6 +84,12 @@ export type SupportType = 'normal(auto)' | 'normal(manual)' | 'tree(auto)' | 'tr
 
 export type SeamPosition = 'aligned' | 'nearest' | 'back' | 'random'
 
+// Subset of PrintConfig.cpp's BrimType enum that set_deserialize_strict
+// actually accepts (s_keys_map_BrimType) — 'auto_brim'/'brim_ears'/'painted'
+// are desktop-interactive dropdown entries with no headless equivalent (they
+// need manual brim painting or per-object analysis this bridge doesn't do).
+export type BrimType = 'no_brim' | 'outer_only' | 'inner_only' | 'outer_and_inner'
+
 export type FuzzySkin = 'none' | 'external' | 'all'
 
 export interface SlicePreset {
@@ -87,6 +97,19 @@ export interface SlicePreset {
   label: string
   description: string
   config: Partial<OrcaConfig>
+}
+
+// A user-named, savable snapshot of a full settings selection (printer +
+// filament + quality preset + manual overrides) — see App.tsx's
+// USER_PRESETS_KEY persistence and SettingsPanel's "My presets" UI.
+export interface UserPreset {
+  id: string
+  name: string
+  printer: string
+  filament: string
+  preset: string
+  overrides: Partial<OrcaConfig>
+  createdAt: string
 }
 
 // --- Slice queue ---
@@ -110,6 +133,10 @@ export interface QueueItem {
   error?: string
   /** Latest progress emitted by a progress-capable WASM engine while slicing. */
   progress?: SliceProgress
+  /** 1-based filament slot override for "One plate" (AMS-style multi-material
+   *  via orc_slice_multi's extruder_ids) — 0/undefined inherits the default
+   *  slot. Has no effect on a single-item Slice; only slicePlate() reads it. */
+  extruderId?: number
 }
 
 export interface SliceProgress {

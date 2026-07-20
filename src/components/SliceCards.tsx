@@ -2,8 +2,9 @@ import clsx from 'clsx'
 import { strToU8, zipSync } from 'fflate'
 import { useEffect, useMemo, useState } from 'react'
 import type { PlateState } from '../hooks/useSliceQueue'
+import { downloadBlob } from '../lib/download'
 import { extractGcodeStats, gcodeStatsLabel } from '../lib/gcode-stats'
-import { DISPLAY_DEFAULTS } from '../lib/profiles'
+import { DISPLAY_DEFAULTS, filamentSlots } from '../lib/profiles'
 import type { WasmStatus } from '../lib/worker-singleton'
 import type { OrcaConfig, QueueItem } from '../types'
 import { GcodeViewer } from './GcodeViewer'
@@ -28,17 +29,6 @@ interface BedProps {
 }
 
 // ── Download helpers ──────────────────────────────────────────────────────────
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  setTimeout(() => URL.revokeObjectURL(url), 0)
-}
 
 function downloadGcode(gcode: string, filename: string) {
   downloadBlob(new Blob([gcode], { type: 'text/plain' }), filename)
@@ -90,7 +80,12 @@ export function SliceHeader({
   const readyForPlate = queue.filter((i) => i.status === 'ready' && i.stlFile != null).length
   const allDone = totalCount > 0 && doneCount + errorCount === totalCount && staleCount === 0
   const canSlice = sliceableCount > 0 && !isSlicing && !plate.slicing
-  const canPlate = readyForPlate >= 2 && !isSlicing && !plate.slicing && wasmStatus === 'ready'
+  // No wasmStatus gate here, matching canSlice: doSliceMulti() buffers the
+  // request in pendingPlate exactly like doSlice() buffers pendingSlice while
+  // the engine is still loading (slicer.worker.ts), so there's no need to
+  // block the click — it would just needlessly make users wait for the
+  // engine before they can even queue a plate slice.
+  const canPlate = readyForPlate >= 2 && !isSlicing && !plate.slicing
 
   const sliceLabel = isSlicing
     ? `Slicing… (${doneCount + busyCount}/${totalCount})`
@@ -186,11 +181,24 @@ export function QueueItemCard({
   bedY,
   bedShape,
   onExport3mf,
-}: { item: QueueItem; onExport3mf: (item: QueueItem) => Promise<ArrayBuffer> } & BedProps) {
+  filamentSlotCount,
+  onSetExtruderId,
+}: {
+  item: QueueItem
+  onExport3mf: (item: QueueItem) => Promise<ArrayBuffer>
+  /** Number of AMS-style filament slots in the current filament_type — the
+   *  slot picker below only makes sense (and is only shown) when there's
+   *  more than one to choose from. See filamentSlots() in lib/profiles.ts. */
+  filamentSlotCount: number
+  onSetExtruderId: (id: string, extruderId: number | undefined) => void
+} & BedProps) {
   const [expanded, setExpanded] = useState(false)
   const [exporting3mf, setExporting3mf] = useState(false)
   const [export3mfError, setExport3mfError] = useState<string | null>(null)
   const statsLabel = useMemo(() => (item.gcode ? gcodeStatsLabel(extractGcodeStats(item.gcode)) : ''), [item.gcode])
+  // Stable array reference so ModelViewer's effect doesn't recreate the
+  // WebGL scene on every unrelated re-render while the card is expanded.
+  const previewFiles = useMemo(() => (item.stlFile ? [item.stlFile] : []), [item.stlFile])
 
   const handleExport3mf = async () => {
     setExporting3mf(true)
@@ -254,6 +262,22 @@ export function QueueItemCard({
             {item.status === 'error' && (item.error ?? 'Error')}
           </p>
         </div>
+
+        {filamentSlotCount > 1 && (item.status === 'ready' || item.status === 'done' || item.status === 'error') && (
+          <select
+            value={item.extruderId ?? 0}
+            onChange={(e) => onSetExtruderId(item.id, Number(e.target.value) || undefined)}
+            title="Filament slot to use when slicing this file as part of a One-plate multi-material slice"
+            className="shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 focus:outline-none focus:ring-2 focus:ring-orca-400"
+          >
+            <option value={0}>Default slot</option>
+            {Array.from({ length: filamentSlotCount }, (_, i) => i + 1).map((slot) => (
+              <option key={slot} value={slot}>
+                Slot {slot}
+              </option>
+            ))}
+          </select>
+        )}
 
         {item.status === 'done' && item.gcode && item.gcodeFilename && (
           <div className="flex items-center gap-2">
@@ -331,7 +355,7 @@ export function QueueItemCard({
               <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Model</div>
               <div style={{ height: 270 }}>
                 <ViewerErrorBoundary key={item.id} message="3D preview unavailable">
-                  <ModelViewer file={item.stlFile} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+                  <ModelViewer files={previewFiles} bedX={bedX} bedY={bedY} bedShape={bedShape} />
                 </ViewerErrorBoundary>
               </div>
             </div>
@@ -452,10 +476,7 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
 // ── Config summary ────────────────────────────────────────────────────────────
 
 export function ConfigSummary({ config, fileCount }: { config: OrcaConfig; fileCount: number }) {
-  const filamentEntries = String(config.filament_type ?? DISPLAY_DEFAULTS.filament_type)
-    .split(/[;,]/)
-    .map((entry) => entry.trim())
-    .filter(Boolean)
+  const filamentEntries = filamentSlots(config)
   const filamentTypes = [...new Set(filamentEntries)]
   const material =
     filamentEntries.length > 1
@@ -464,6 +485,7 @@ export function ConfigSummary({ config, fileCount }: { config: OrcaConfig; fileC
   const rows: [string, string][] = [
     ['Files', `${fileCount} file${fileCount !== 1 ? 's' : ''}`],
     ['Printer', config.printer_model ?? DISPLAY_DEFAULTS.printer_model],
+    ['Nozzle', `${config.nozzle_diameter ?? DISPLAY_DEFAULTS.nozzle_diameter} mm`],
     ['Material', material],
     ['Layer height', `${config.layer_height ?? DISPLAY_DEFAULTS.layer_height} mm`],
     [
