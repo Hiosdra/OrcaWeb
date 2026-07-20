@@ -54,18 +54,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # No explicit `ref` here (deliberately -- a previous version pinned
-          # this to `github.event.workflow_run.head_sha`, meaning to deploy the
-          # exact commit build-wasm.yml just built for). That backfired live:
-          # a ~13 min build meant several more commits could land on master in
-          # the meantime, and pinning to the stale head_sha silently checked
-          # out an OLD package.json, confusing the auto-bump step below. The
-          # engine release is always resolved as "whatever's latest published"
-          # regardless of which frontend commit is checked out (see "Download
-          # WASM artifacts"), so there's no actual pairing requirement to
-          # protect here -- default checkout behavior (current master tip for
-          # workflow_run, the pushed commit for push) is exactly what we want.
-          #
+          # Always deploy the CURRENT master tip, never a frozen commit. An
+          # earlier version pinned `ref` to github.event.workflow_run.head_sha
+          # to deploy the exact commit build-wasm.yml built; that checked out a
+          # stale package.json (several commits can land during a ~13 min build)
+          # and confused the auto-bump step. Dropping the pin fixed workflow_run
+          # but NOT push: a push event's default checkout is the pushed commit,
+          # so when several PRs merge within seconds, each deploy still checked
+          # out its own already-superseded commit. The auto-bump step then saw a
+          # package.json sitting behind a tag another deploy had just pushed,
+          # treated it as a "manual" bump, and tried to roll the version back —
+          # hitting a rebase conflict (confirmed live across Dependabot bumps
+          # #146–#149: one deploy shipped fine, the rest failed on the conflict).
+          # Pinning to `master` makes every trigger type deploy the tip. Nothing
+          # here needs to pair with a specific frontend commit: the engine
+          # release is resolved as "whatever's latest published" regardless
+          # (see "Download WASM artifacts").
+          ref: master
           # Full history + tags — the auto-bump step below needs to see the
           # latest vX.Y.Z release tag to decide whether to bump the patch.
           fetch-depth: 0
@@ -93,47 +98,63 @@ jobs:
       # ── Auto-bump app version ──────────────────────────────────────────
       # Replaces the old manual /release flow (hand-editing package.json +
       # status.md, committing "chore(release): bump to vX.Y.Z"). Every deploy
-      # now bumps the version itself: if package.json's version still matches
-      # the latest vX.Y.Z tag, nobody bumped it in this push, so auto-increment
-      # the patch number. If it already differs (someone deliberately bumped
-      # minor/major in their PR), respect that value instead of bumping again.
+      # now bumps the version itself, comparing package.json to the latest
+      # vX.Y.Z tag: if package.json is STRICTLY AHEAD of the tag, someone
+      # deliberately bumped minor/major in their PR — respect it as-is.
+      # Otherwise (equal, behind, or no tag yet) auto-increment the patch from
+      # whichever of the two is higher. The "or behind" case matters: it means
+      # a checkout that's lagging a tag another deploy just pushed still moves
+      # the version FORWARD instead of trying to reissue or roll it back, which
+      # is what turned rapid multi-PR merges into rebase-conflict failures.
       - name: Auto-bump app version
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          CURRENT_VERSION=$(jq -r .version package.json)
-          # Query the remote directly rather than relying on local tag refs:
-          # a previous version of this checkout pinned `ref` to a raw commit
-          # SHA (see the checkout step's comment above for why that got
-          # dropped), and SHA-pinned checkouts don't reliably bring tags down
-          # even with fetch-depth: 0 -- confirmed live, where this used to
-          # read no v0.7.1 tag at all and treat 0.7.1 as a "manual" bump to
-          # preserve, silently never auto-incrementing. Kept as ls-remote
-          # regardless of the ref fix, since it's the more robust source of
-          # truth either way.
-          LATEST_TAG=$(git ls-remote --tags --refs origin \
-            | sed 's#.*refs/tags/##' \
-            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-            | sort -V | tail -n1)
-          LATEST_VERSION=${LATEST_TAG#v}
+          # Compute the target version from the working tree + latest remote
+          # tag, then rewrite the version files and stage them. Defined as a
+          # function because the push-race retry below re-runs it verbatim
+          # against a fresh master tip (see there for why recompute beats
+          # rebase). Sets NEW_VERSION for callers.
+          stage_version_bump() {
+            CURRENT_VERSION=$(jq -r .version package.json)
+            # Query the remote directly rather than relying on local tag refs:
+            # SHA-pinned checkouts historically didn't reliably bring tags down
+            # even with fetch-depth: 0 (confirmed live), and ls-remote is the
+            # more robust source of truth regardless.
+            LATEST_TAG=$(git ls-remote --tags --refs origin \
+              | sed 's#.*refs/tags/##' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sort -V | tail -n1)
+            LATEST_VERSION=${LATEST_TAG#v}
 
-          if [ -z "$LATEST_VERSION" ] || [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
-            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-            NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
-            echo "Auto-bumping ${CURRENT_VERSION} -> ${NEW_VERSION} (patch)"
-          else
-            NEW_VERSION="$CURRENT_VERSION"
-            echo "package.json already bumped to ${NEW_VERSION} manually — using as-is"
-          fi
+            # sort -V picks the higher of package.json vs the latest tag. If
+            # package.json is that higher value AND differs from the tag, it was
+            # deliberately bumped ahead in a PR (minor/major) — keep it. In every
+            # other case (equal, behind, or no tag) increment the patch from the
+            # higher of the two, so a stale checkout that trails a just-pushed
+            # tag still advances rather than colliding with it.
+            if [ -n "$LATEST_VERSION" ] \
+               && [ "$CURRENT_VERSION" != "$LATEST_VERSION" ] \
+               && [ "$(printf '%s\n%s\n' "$CURRENT_VERSION" "$LATEST_VERSION" | sort -V | tail -n1)" = "$CURRENT_VERSION" ]; then
+              NEW_VERSION="$CURRENT_VERSION"
+              echo "package.json v${NEW_VERSION} is ahead of latest tag v${LATEST_VERSION} — using in-PR bump as-is"
+            else
+              BASE_VERSION=$(printf '%s\n%s\n' "$CURRENT_VERSION" "${LATEST_VERSION:-0.0.0}" | sort -V | tail -n1)
+              IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE_VERSION"
+              NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+              echo "Auto-bumping from ${BASE_VERSION} (package.json ${CURRENT_VERSION}, latest tag v${LATEST_VERSION:-none}) -> ${NEW_VERSION} (patch)"
+            fi
 
-          TODAY=$(date -u +%Y-%m-%d)
-          jq --arg v "$NEW_VERSION" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
-          jq --arg v "$NEW_VERSION" '.version = $v | .packages[""].version = $v' package-lock.json > package-lock.json.tmp && mv package-lock.json.tmp package-lock.json
-          sed -i -E "s/Last updated: \*\*[0-9-]+\*\*/Last updated: **${TODAY}**/" mkdocs-docs/status.md
-          sed -i -E "s/app version: \*\*v[0-9]+\.[0-9]+\.[0-9]+\*\*/app version: **v${NEW_VERSION}**/" mkdocs-docs/status.md
+            TODAY=$(date -u +%Y-%m-%d)
+            jq --arg v "$NEW_VERSION" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
+            jq --arg v "$NEW_VERSION" '.version = $v | .packages[""].version = $v' package-lock.json > package-lock.json.tmp && mv package-lock.json.tmp package-lock.json
+            sed -i -E "s/Last updated: \*\*[0-9-]+\*\*/Last updated: **${TODAY}**/" mkdocs-docs/status.md
+            sed -i -E "s/app version: \*\*v[0-9]+\.[0-9]+\.[0-9]+\*\*/app version: **v${NEW_VERSION}**/" mkdocs-docs/status.md
+            git add package.json package-lock.json mkdocs-docs/status.md
+          }
 
-          git add package.json package-lock.json mkdocs-docs/status.md
+          stage_version_bump
           if git diff --cached --quiet; then
             echo "No version-file changes to commit"
           else
@@ -146,22 +167,32 @@ jobs:
             # happened to break the cycle).
             git commit -m "chore(release): auto-bump to v${NEW_VERSION} [skip ci]"
             # A concurrent deploy could have pushed to master between our checkout
-            # and this push (concurrency's cancel-in-progress narrows but doesn't
-            # eliminate the window) — retry against the latest master once or
-            # twice rather than failing the whole deploy over a race. Track
-            # success explicitly: silently falling through after 3 failed
-            # attempts (e.g. a read-only deploy key, an auth problem) would
-            # otherwise look like a normal deploy while never actually
-            # publishing the version bump.
+            # and this push (cancel-in-progress narrows but doesn't eliminate the
+            # window). On rejection, do NOT rebase-replay this commit onto the new
+            # tip: the replayed diff touches the exact version/date lines the other
+            # deploy just wrote, so it conflicts — that was the live failure mode.
+            # Instead reset to the new tip and recompute the bump from scratch;
+            # stage_version_bump always moves forward from max(package.json, tag),
+            # so the retry lands a clean, conflict-free commit. Track success
+            # explicitly: silently falling through after 3 failed attempts (a
+            # read-only deploy key, an auth problem) would look like a normal
+            # deploy while never actually publishing the version bump.
             pushed=""
             for attempt in 1 2 3; do
               if git push origin HEAD:master; then
                 pushed=1
                 break
               fi
-              echo "Push rejected (attempt ${attempt}) — rebasing onto latest master and retrying"
+              echo "Push rejected (attempt ${attempt}) — resetting to latest master and recomputing bump"
               git fetch origin master
-              git rebase origin/master
+              git reset --hard origin/master
+              stage_version_bump
+              if git diff --cached --quiet; then
+                echo "Master already carries an equal-or-newer bump — nothing left to push"
+                pushed=1
+                break
+              fi
+              git commit -m "chore(release): auto-bump to v${NEW_VERSION} [skip ci]"
             done
             if [ -z "$pushed" ]; then
               echo "::error::Failed to push version-bump commit to master after 3 attempts"
