@@ -2,7 +2,9 @@
 
 OrcaSlicer compiled to WebAssembly. Slice STL files directly in the browser — no server, no upload, 100% private.
 
-**[Live app →](https://hiosdra.github.io/OrcaWeb/app/)**  |  **[Documentation →](https://hiosdra.github.io/OrcaWeb/docs/)**
+**[Live app →](https://hiosdra.github.io/OrcaWeb/app/)**  |  **[Live app, multithreaded engine →](https://orcaweb-cf-pages.themppsplx.workers.dev/)**  |  **[Documentation →](https://hiosdra.github.io/OrcaWeb/docs/)**
+
+The Cloudflare mirror is cross-origin isolated, so it runs the real multithreaded (MT) WASM engine instead of the single-threaded build GitHub Pages is stuck with — see below.
 
 ## Features
 
@@ -55,7 +57,8 @@ The engine ships as two builds: a **single-threaded (ST)** variant
 (`slicer.js`/`slicer.wasm`) served everywhere, and a **multithreaded (MT)**
 variant (`slicer-mt.js`/`slicer-mt.wasm`, real oneTBB linked against
 Emscripten pthreads) served only where the page is cross-origin isolated —
-today, only the Cloudflare mirror. GitHub Pages cannot send the required
+today, only the [Cloudflare mirror](https://orcaweb-cf-pages.themppsplx.workers.dev/).
+GitHub Pages cannot send the required
 `Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy` headers, so it
 always serves ST. The worker probes for the MT engine at runtime and falls
 back to ST on any failure. See [ADR-011](mkdocs-docs/adr/adr-011-multithreaded-engine.md)
