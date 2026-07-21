@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import type { QueueItem } from '../types'
 import { sliceQueueReducer } from './useSliceQueue'
 
 const state = {
@@ -10,19 +9,6 @@ const state = {
   configEpoch: 0,
   sliceStartEpoch: 0,
   plateStartEpoch: 0,
-}
-
-function makeItem(overrides: Partial<QueueItem> = {}): QueueItem {
-  const sourceFile = new File(['x'], 'part.stl')
-  return {
-    id: 'item-1',
-    name: 'part.stl',
-    originalSize: 1,
-    sourceFile,
-    stlFile: sourceFile,
-    status: 'ready',
-    ...overrides,
-  }
 }
 
 describe('slice queue mutual exclusion', () => {
@@ -43,19 +29,5 @@ describe('slice queue mutual exclusion', () => {
       ...state,
       plate: { ...plate, slicing: false, progress: undefined },
     })
-  })
-})
-
-describe('CONFIG_CHANGED extruder-slot clamping', () => {
-  it("clears an item's extruderId when it no longer fits the new filament_type slot count", () => {
-    const items = [makeItem({ extruderId: 3 })]
-    const result = sliceQueueReducer({ ...state, items }, { type: 'CONFIG_CHANGED', epoch: 1, maxFilamentSlot: 1 })
-    expect(result.items[0].extruderId).toBeUndefined()
-  })
-
-  it('leaves a still-valid extruderId untouched', () => {
-    const items = [makeItem({ extruderId: 2 })]
-    const result = sliceQueueReducer({ ...state, items }, { type: 'CONFIG_CHANGED', epoch: 1, maxFilamentSlot: 4 })
-    expect(result.items[0].extruderId).toBe(2)
   })
 })

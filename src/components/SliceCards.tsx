@@ -160,17 +160,6 @@ export function SliceHeader({
         </button>
       )}
 
-      {/* orc_slice_multi drops the whole per-object extruder mapping unless
-          every file loaded as exactly one object (slicer.cpp's
-          can_map_extruders), and the bridge has no channel to report that
-          back — so surface the condition up front rather than let the
-          assignment silently do nothing. */}
-      {queue.some((i) => i.extruderId) && (
-        <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
-          Filament slots apply only if each file contains a single object
-        </span>
-      )}
-
       {wasmStatus === 'loading' && readyCount === 0 && !isSlicing && (
         <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
           Loading slicer engine…
@@ -192,16 +181,9 @@ export function QueueItemCard({
   bedY,
   bedShape,
   onExport3mf,
-  filamentSlotCount,
-  onSetExtruderId,
 }: {
   item: QueueItem
   onExport3mf: (item: QueueItem) => Promise<ArrayBuffer>
-  /** Number of AMS-style filament slots in the current filament_type — the
-   *  slot picker below only makes sense (and is only shown) when there's
-   *  more than one to choose from. See filamentSlots() in lib/profiles.ts. */
-  filamentSlotCount: number
-  onSetExtruderId: (id: string, extruderId: number | undefined) => void
 } & BedProps) {
   const [expanded, setExpanded] = useState(false)
   const [exporting3mf, setExporting3mf] = useState(false)
@@ -274,30 +256,6 @@ export function QueueItemCard({
             {item.status === 'error' && (item.error ?? 'Error')}
           </p>
         </div>
-
-        {/* Only relevant while the item is 'ready' — slicePlate() reads
-            extruderId off exactly that filter, so showing this for a
-            'done'/'error' item would let a choice silently have no effect
-            until the item is re-queued (via a re-slice) and picked up again. */}
-        {filamentSlotCount > 1 && item.status === 'ready' && (
-          <select
-            value={item.extruderId ?? 0}
-            onChange={(e) => onSetExtruderId(item.id, Number(e.target.value) || undefined)}
-            title={
-              'Filament slot to use when slicing this file as part of a One-plate multi-material slice.\n' +
-              'Applies only if the file loads as exactly one object — a file containing several ' +
-              'separate solids falls back to the default slot.'
-            }
-            className="shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 focus:outline-none focus:ring-2 focus:ring-orca-400"
-          >
-            <option value={0}>Default slot</option>
-            {Array.from({ length: filamentSlotCount }, (_, i) => i + 1).map((slot) => (
-              <option key={slot} value={slot}>
-                Slot {slot}
-              </option>
-            ))}
-          </select>
-        )}
 
         {/* Destructured so the narrowing survives into the click handlers —
             TypeScript can't keep a mutable property's narrowing inside a

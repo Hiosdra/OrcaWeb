@@ -151,10 +151,6 @@ export interface QueueItem {
    *  silently not handling `.3mf` after a worker restart was exactly that
    *  bug. `undefined` means the file is already an STL. */
   conversion?: ConversionKind
-  /** 1-based filament slot override for "One plate" (AMS-style multi-material
-   *  via orc_slice_multi's extruder_ids) — 0/undefined inherits the default
-   *  slot. Has no effect on a single-item Slice; only slicePlate() reads it. */
-  extruderId?: number
 }
 
 export interface SliceProgress {

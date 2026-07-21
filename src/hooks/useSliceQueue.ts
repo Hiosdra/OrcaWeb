@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { logError, logWarn } from '../lib/log'
-import { filamentSlots, parseOrcaProfileJson } from '../lib/profiles'
+import { parseOrcaProfileJson } from '../lib/profiles'
 import { addWorkerListener, getWasmStatus, getWorker, terminateWorker, type WasmStatus } from '../lib/worker-singleton'
 import type { ConversionKind, OrcaConfig, QueueItem, SliceProgress, WorkerOutMessage } from '../types'
 
@@ -50,11 +50,7 @@ type QueueAction =
   | { type: 'PLATE_STARTED'; configEpoch: number }
   | { type: 'PLATE_DONE'; gcode: string }
   | { type: 'PLATE_FAILED'; message: string }
-  // maxFilamentSlot clamps/clears any item's extruderId that's no longer
-  // valid for the new config's filament_type slot count (see filamentSlots()
-  // in lib/profiles.ts) — a stale slot index from a wider filament profile
-  // must not silently ride along into orc_slice_multi against a narrower one.
-  | { type: 'CONFIG_CHANGED'; epoch: number; maxFilamentSlot: number }
+  | { type: 'CONFIG_CHANGED'; epoch: number }
   | { type: 'CANCELLED' }
   | { type: 'ENGINE_FAILED'; message: string }
 
@@ -206,12 +202,7 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
       return {
         ...state,
         configEpoch: action.epoch,
-        items: state.items.map((i) => {
-          const patch: Partial<QueueItem> = {}
-          if (i.status === 'done') patch.stale = true
-          if (i.extruderId != null && i.extruderId > action.maxFilamentSlot) patch.extruderId = undefined
-          return Object.keys(patch).length > 0 ? { ...i, ...patch } : i
-        }),
+        items: state.items.map((i) => (i.status === 'done' ? { ...i, stale: true } : i)),
         plate: state.plate.gcode ? { ...state.plate, stale: true } : state.plate,
       }
     }
@@ -260,9 +251,6 @@ export interface SliceQueue {
   sliceAll: () => void
   /** Arrange all ready items on one plate and slice them together. */
   slicePlate: () => void
-  /** Set (or clear, via undefined) an item's 1-based filament-slot override
-   *  for the next "One plate" slice — see slicePlate()'s extruderIds build. */
-  setExtruderId: (id: string, extruderId: number | undefined) => void
   /** Abort the running slice — terminates the worker and restarts the engine. */
   cancel: () => void
   /** Export one item's current model + live config as a .3mf (no plate/gcode data). */
@@ -356,7 +344,7 @@ export function useSliceQueue(
       epoch: configSnapshotRef.current.epoch + 1,
     }
     configSnapshotRef.current = snapshot
-    dispatch({ type: 'CONFIG_CHANGED', epoch: snapshot.epoch, maxFilamentSlot: filamentSlots(config).length })
+    dispatch({ type: 'CONFIG_CHANGED', epoch: snapshot.epoch })
   }, [config])
 
   // ── Worker messages → reducer ─────────────────────────────────────────────
@@ -742,18 +730,12 @@ export function useSliceQueue(
     // removeItem() call racing this request can tell whether the item it's
     // removing is actually part of it — see platePreparedIdsRef's own comment.
     platePreparedIdsRef.current = new Set(readyItems.map((i) => i.id))
-    // Only send an extruderIds array when at least one item actually has an
-    // override set — omitting it entirely (undefined) keeps the common
-    // single-material case byte-identical to before this field existed,
-    // matching orc_slice_multi's "extruderIdsPtr == 0 → default for every
-    // object" contract (slicer.worker.ts's doSliceMulti).
-    const extruderIds = readyItems.some((i) => i.extruderId) ? readyItems.map((i) => i.extruderId ?? 0) : undefined
     void (async () => {
       try {
         const stls = await Promise.all(readyItems.map((i) => i.stlFile.arrayBuffer()))
         if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
-        getWorker().postMessage({ type: 'SLICE_MULTI', stls, config: configSnapshot.config, extruderIds }, stls)
+        getWorker().postMessage({ type: 'SLICE_MULTI', stls, config: configSnapshot.config }, stls)
       } catch (err) {
         if (requestGeneration !== sliceRequestGeneration.current) return
         logError('[queue] failed to prepare plate slice:', err)
@@ -769,10 +751,6 @@ export function useSliceQueue(
     })()
   }, [state.plate.slicing, state.currentId, state.running, state.items])
 
-  const setExtruderId = useCallback((id: string, extruderId: number | undefined) => {
-    dispatch({ type: 'PATCH_ITEM', id, patch: { extruderId } })
-  }, [])
-
   return {
     items,
     plate,
@@ -783,7 +761,6 @@ export function useSliceQueue(
     removeItem,
     sliceAll,
     slicePlate,
-    setExtruderId,
     cancel,
     export3mf,
   }

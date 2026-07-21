@@ -60,13 +60,18 @@ export const DISPLAY_DEFAULTS = {
 } as const satisfies OrcaConfig
 
 /**
- * Parse the current config's filament_type into its individual AMS-style
- * slots — OrcaSlicer represents a multi-material machine profile's filament
- * types as one semicolon/comma-joined string (e.g. "PLA;PETG;ABS;TPU"), one
- * entry per physical slot. A single-material config just returns one entry.
- * Shared by ConfigSummary (slot count/name display) and the per-object
- * filament-slot picker on the Slice tab (orc_slice_multi's extruder_ids —
- * see slicePlate() in useSliceQueue.ts) so both read the same slot list.
+ * Split the config's filament_type into the individual material names it
+ * mentions, for display only (ConfigSummary's "Material" row) — an imported
+ * profile can carry something like "PLA;PETG" and listing both reads better
+ * than printing the raw string.
+ *
+ * Explicitly NOT a slot count. It's tempting to read one entry here as one
+ * AMS slot, and an earlier revision of this file claimed exactly that, but
+ * it is false: measured against OrcaSlicer 2.4.2, "PLA;PETG" resolves to a
+ * single filament (`['PLA']`), "PLA,PETG" to `['PLA,PETG']`, and even a JSON
+ * array `["PLA","PETG"]` to `['PLA']`. The engine's filament count is the
+ * number of separate filament *presets* it was given, which this app does
+ * not model — see issue #155 before using this for anything but text.
  */
 export function filamentSlots(config: OrcaConfig): string[] {
   return String(config.filament_type ?? DISPLAY_DEFAULTS.filament_type)

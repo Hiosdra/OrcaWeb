@@ -9,14 +9,7 @@ import { ViewerErrorBoundary } from './components/ViewerErrorBoundary'
 import { useSliceQueue } from './hooks/useSliceQueue'
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
-import {
-  buildConfig,
-  DISPLAY_DEFAULTS,
-  FILAMENT_PRESETS,
-  filamentSlots,
-  PRESETS,
-  PRINTER_PRESETS,
-} from './lib/profiles'
+import { buildConfig, DISPLAY_DEFAULTS, FILAMENT_PRESETS, PRESETS, PRINTER_PRESETS } from './lib/profiles'
 import type { WasmStatus } from './lib/worker-singleton'
 import type { OrcaConfig, UserPreset } from './types'
 
@@ -349,7 +342,6 @@ export default function App() {
     removeItem,
     sliceAll,
     slicePlate,
-    setExtruderId,
     cancel,
     export3mf,
   } = useSliceQueue(config, handleSettingsImported)
@@ -410,7 +402,6 @@ export default function App() {
   const previewFilesKey = previewFiles.map((f) => `${f.name}:${f.size}:${f.lastModified}`).join('|')
   const hasAnyReady = queue.some((i) => i.stlFile != null)
   const isConverting = queue.some((i) => i.status === 'converting')
-  const filamentSlotCount = filamentSlots(config).length
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -616,8 +607,6 @@ export default function App() {
                   bedY={bedY}
                   bedShape={bedShape}
                   onExport3mf={export3mf}
-                  filamentSlotCount={filamentSlotCount}
-                  onSetExtruderId={setExtruderId}
                 />
               ))}
             </div>
