@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sliceQueueReducer } from './useSliceQueue'
+import { buildPlateExtruderIds, sliceQueueReducer } from './useSliceQueue'
 
 const state = {
   items: [],
@@ -29,5 +29,27 @@ describe('slice queue mutual exclusion', () => {
       ...state,
       plate: { ...plate, slicing: false, progress: undefined },
     })
+  })
+})
+
+describe('per-object filament-slot assignment', () => {
+  it('omits extruderIds when nothing is assigned (single-material plate)', () => {
+    expect(buildPlateExtruderIds([{}, {}, {}])).toBeUndefined()
+    expect(buildPlateExtruderIds([{ extruderId: 0 }, {}])).toBeUndefined()
+  })
+
+  it('emits a parallel array once any object is assigned, defaulting others to 0', () => {
+    expect(buildPlateExtruderIds([{ extruderId: 2 }, {}, { extruderId: 1 }])).toEqual([2, 0, 1])
+  })
+
+  it('marks an existing plate result stale when a slot is reassigned', () => {
+    const plate = { ...state.plate, gcode: 'G1 X0', stale: false }
+    const next = sliceQueueReducer({ ...state, plate }, { type: 'ASSIGN_EXTRUDER', id: 'a', extruderId: 2 })
+    expect(next.plate.stale).toBe(true)
+  })
+
+  it('leaves an empty plate untouched when a slot is reassigned', () => {
+    const next = sliceQueueReducer(state, { type: 'ASSIGN_EXTRUDER', id: 'a', extruderId: 2 })
+    expect(next.plate).toEqual(state.plate)
   })
 })

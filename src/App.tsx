@@ -10,7 +10,14 @@ import { useSliceQueue } from './hooks/useSliceQueue'
 import { type ConfigField, mergeConfigLayers, resolveConfig, revertField } from './lib/config-layers'
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
-import { buildConfig, DISPLAY_DEFAULTS, FILAMENT_PRESETS, PRESETS, PRINTER_PRESETS } from './lib/profiles'
+import {
+  buildConfig,
+  DISPLAY_DEFAULTS,
+  FILAMENT_PRESETS,
+  filamentSlots,
+  PRESETS,
+  PRINTER_PRESETS,
+} from './lib/profiles'
 import type { WasmStatus } from './lib/worker-singleton'
 import type { OrcaConfig, UserPreset } from './types'
 
@@ -342,6 +349,7 @@ export default function App() {
     addFiles,
     removeItem,
     sliceAll,
+    assignExtruder,
     slicePlate,
     cancel,
     export3mf,
@@ -350,6 +358,15 @@ export default function App() {
   const bedX = config.bed_size_x ?? DISPLAY_DEFAULTS.bed_size_x
   const bedY = config.bed_size_y ?? DISPLAY_DEFAULTS.bed_size_y
   const bedShape = config.bed_shape ?? DISPLAY_DEFAULTS.bed_shape
+
+  // Labels for the queue's per-object filament picker. These are the material
+  // names mentioned by filament_type, which is display text — NOT a slot count
+  // (see filamentSlots' own doc and #155). More than one name means the config
+  // came from a multi-material import, which is the only situation where
+  // assigning objects to different filaments is meaningful today, so it is a
+  // usable trigger for showing the picker even though the real slot count
+  // lives elsewhere.
+  const filamentSlotLabels = useMemo(() => filamentSlots(config), [config])
 
   // None of these three touch manualOverrides: they swap a layer *below* the
   // user's own edits, which outrank them and stay put (config-layers.ts).
@@ -628,6 +645,8 @@ export default function App() {
                   bedY={bedY}
                   bedShape={bedShape}
                   onExport3mf={export3mf}
+                  filamentSlotLabels={filamentSlotLabels}
+                  onAssignExtruder={assignExtruder}
                 />
               ))}
             </div>
