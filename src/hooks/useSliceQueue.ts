@@ -608,24 +608,33 @@ export function useSliceQueue(
   // includes in-flight .3mf reads (READ_3MF), not just OBJ/STEP: without the
   // 3mf branch, an unrelated .3mf import running when the user cancels a
   // *different* item's slice (or removes the item currently slicing) would
-  // get caught by the blanket rejectAllPendingMf() that follows this call
-  // and flip to a permanent error — even though nothing about that import
-  // itself failed. rejectPendingForItem() rejects with ItemRemovedError,
-  // which importMf3()'s catch block treats as a silent no-op (not an error
-  // dispatch), so the stale pre-restart request is discarded quietly before
-  // the fresh one is posted, and rejectAllPendingMf() finds nothing left to
-  // reject for this item.
-  const repostConversions = useCallback(() => {
+  // get caught by the blanket rejectAllPendingMf() that follows and flip to
+  // a permanent error — even though nothing about that import itself failed.
+  //
+  // Split into two phases, and it has to stay that way. Discarding the stale
+  // request must happen *before* the caller's rejectAllPendingMf() (it uses
+  // ItemRemovedError, which importMf3()'s catch treats as a silent no-op,
+  // whereas rejectAllPendingMf's plain Error would dispatch a spurious item
+  // error); posting the replacement must happen *after* it, or that blanket
+  // reject cancels the retry it was never meant to see. Returning the second
+  // phase as a thunk makes both orderings structural. Previously this posted
+  // immediately and survived only because importMf3() happens to await
+  // arrayBuffer() before registering its resolver — correct, but silently
+  // broken by anyone hoisting that registration.
+  const prepareConversionReposts = useCallback((): (() => void) => {
+    const reposts: (() => void)[] = []
     for (const item of state.items) {
       if (item.status !== 'converting') continue
       switch (item.conversion) {
         case 'obj':
         case 'cad':
-          void postConversion(item)
+          // No resolver of its own — the engine replies by requestId, so
+          // there is nothing stale to discard first.
+          reposts.push(() => void postConversion(item))
           break
         case '3mf':
           rejectPendingForItem(item.id, 'Engine restarted — retrying import')
-          void importMf3(item)
+          reposts.push(() => void importMf3(item))
           break
         default:
           // No conversion request was ever posted for this item (it was
@@ -633,6 +642,9 @@ export function useSliceQueue(
           // construction: a new ConversionKind fails to compile here.
           item.conversion satisfies undefined
       }
+    }
+    return () => {
+      for (const repost of reposts) repost()
     }
   }, [state.items, postConversion, importMf3, rejectPendingForItem])
 
@@ -645,10 +657,11 @@ export function useSliceQueue(
     terminateWorker()
     setWasmStatus('idle')
     dispatch({ type: 'CANCELLED' })
-    repostConversions()
+    const postReplacements = prepareConversionReposts()
     rejectAllPendingMf('Slice cancelled — engine restarted')
+    postReplacements()
     platePreparedIdsRef.current = null
-  }, [state.currentId, state.plate.slicing, repostConversions, rejectAllPendingMf])
+  }, [state.currentId, state.plate.slicing, prepareConversionReposts, rejectAllPendingMf])
 
   const removeItem = useCallback(
     (id: string) => {
@@ -670,8 +683,9 @@ export function useSliceQueue(
         sliceRequestGeneration.current += 1
         terminateWorker()
         setWasmStatus('idle')
-        repostConversions()
+        const postReplacements = prepareConversionReposts()
         rejectAllPendingMf('Engine restarted — export cancelled')
+        postReplacements()
         if (isPlateTarget) {
           platePreparedIdsRef.current = null
           dispatch({ type: 'CANCELLED' })
@@ -684,7 +698,7 @@ export function useSliceQueue(
       rejectPendingForItem(id, 'Item removed from queue')
       dispatch({ type: 'REMOVE_ITEM', id })
     },
-    [state.currentId, repostConversions, rejectAllPendingMf, rejectPendingForItem],
+    [state.currentId, prepareConversionReposts, rejectAllPendingMf, rejectPendingForItem],
   )
 
   const sliceAll = useCallback(() => {

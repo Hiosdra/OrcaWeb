@@ -25,6 +25,15 @@ export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = orcaProfiles
 // keep falling back to the engine's own default, which may differ). Having
 // one table keeps every surface (settings inputs, config summary, 3D bed
 // viewers) quoting the same number instead of each hardcoding its own.
+//
+// For every field the engine also has, the value here MUST equal that
+// engine default (PrintConfig.cpp's set_default_value), and new entries
+// should be checked against it. Not cosmetic: because these are display-only,
+// a field left unset is absent from exportOrcaProfileJson()'s output too —
+// desktop OrcaSlicer then resolves it from the same engine default, so an
+// entry that disagrees means the panel shows one number while both the local
+// slice and the exported preset silently use another. wall_loops sat at 3
+// against the engine's 2 for exactly that reason.
 export const DISPLAY_DEFAULTS = {
   printer_model: 'Generic',
   nozzle_diameter: 0.4,
@@ -38,7 +47,7 @@ export const DISPLAY_DEFAULTS = {
   initial_layer_print_height: 0.2,
   top_shell_layers: 4,
   bottom_shell_layers: 3,
-  wall_loops: 3,
+  wall_loops: 2,
   wall_generator: 'arachne',
   sparse_infill_density: 15,
   sparse_infill_pattern: 'grid',
@@ -119,6 +128,18 @@ export function buildConfig(
 function bedCorners(x: number, y: number): string[] {
   return ['0x0', `${x}x0`, `${x}x${y}`, `0x${y}`]
 }
+
+/**
+ * Nozzle diameters OrcaSlicer ships machine presets for.
+ *
+ * printerPresetName() below derives "<model> <diameter> nozzle" from the
+ * configured diameter, so a diameter outside this set names a preset that
+ * does not exist: the exported machine file's `inherits` dangles and desktop
+ * OrcaSlicer rejects it. The settings panel warns on export rather than
+ * restricting the input, because the engine itself accepts any diameter and
+ * slicing locally with an exotic nozzle is perfectly valid.
+ */
+export const STOCK_NOZZLE_DIAMETERS: readonly number[] = [0.2, 0.25, 0.4, 0.6, 0.8]
 
 /**
  * The name of the desktop OrcaSlicer printer preset this config corresponds
@@ -517,6 +538,22 @@ for (const [field, meta] of Object.entries(ORCA_FIELD_MAP)) {
 }
 
 /**
+ * `_passthrough` fields that must never reach an exported file, however they
+ * were spelled in the profile they came from.
+ *
+ * Both of these name (or test for) the printer the *imported* profile was
+ * written for, which is not necessarily the printer being exported here — a
+ * process preset imported from a Creality profile carries
+ * `compatible_printers: ["Creality Ender-3 0.4 nozzle"]`, and passing it
+ * through means the exported bundle claims compatibility with a printer its
+ * own machine.json isn't. OrcaSlicer then rejects the whole combination
+ * ("process not compatible with printer", CLI exit -17) — the exact failure
+ * the derived `compatible_printers` below exists to prevent. Dropping them
+ * lets the derived value stand.
+ */
+const PASSTHROUGH_EXPORT_DENYLIST = new Set(['compatible_printers', 'compatible_printers_condition'])
+
+/**
  * Serialize the current in-app config back into a single OrcaSlicer-
  * compatible profile JSON of one type (`process`/`filament`/`machine`) — the
  * mirror of parseOrcaProfileJson(). Only fields belonging to `category` are
@@ -537,11 +574,26 @@ for (const [field, meta] of Object.entries(ORCA_FIELD_MAP)) {
  * a given file's category is simply an unrecognized key there, same as any
  * other key set_deserialize_strict doesn't know.
  *
+ * A field this config leaves unset is deliberately absent from the output
+ * rather than filled in from DISPLAY_DEFAULTS: unset means "whatever the
+ * engine defaults to", and desktop OrcaSlicer resolves an absent key from
+ * that same default, so omitting it is what keeps the exported preset
+ * slicing the way this app sliced. That only holds while DISPLAY_DEFAULTS
+ * agrees with the engine — see its own comment.
+ *
+ * `machinePresetName` is the name of the machine file exported alongside
+ * this one, when this call is part of a bundle (see exportOrcaProfileBundle).
+ *
  * Exported by exportOrcaProfileBundle() below for actual use; kept as its
  * own function (rather than inlined) so tests can assert one category's
  * output directly.
  */
-export function exportOrcaProfileJson(config: OrcaConfig, name: string, category: FieldCategory): string {
+export function exportOrcaProfileJson(
+  config: OrcaConfig,
+  name: string,
+  category: FieldCategory,
+  machinePresetName?: string,
+): string {
   const { _passthrough, bed_size_x, bed_size_y, ...rest } = config
   const out: Record<string, unknown> = {
     type: category,
@@ -574,10 +626,32 @@ export function exportOrcaProfileJson(config: OrcaConfig, name: string, category
     // same way in desktop OrcaSlicer as it did here.
     out.hot_plate_temp_initial_layer = String(config.bed_temperature)
   }
+
+  // Passthrough goes on *before* the derived keys below, not after. A
+  // passthrough value describes the profile it was imported from; the derived
+  // keys describe the selection actually being exported, so where the two
+  // collide the derived one has to win. (Applying it last is how an imported
+  // profile's foreign `compatible_printers` used to silently replace the
+  // derived one and make the bundle unloadable.) printable_area is the one
+  // deliberate exception, re-applied further down.
+  if (_passthrough) {
+    for (const [field, value] of Object.entries(_passthrough)) {
+      if (PASSTHROUGH_EXPORT_DENYLIST.has(field)) continue
+      out[field] = value
+    }
+  }
+
   const printer = printerPresetName(config)
-  if (printer && (category === 'process' || category === 'filament')) {
+  if (category === 'process' || category === 'filament') {
     // Without this the preset is rejected on load — see printerPresetName().
-    out.compatible_printers = [printer]
+    // Two entries, not one: the stock preset this config corresponds to, and
+    // the machine preset exported alongside this file. Listing only the stock
+    // one leaves the bundle unable to refer to itself — selecting the
+    // exported printer in OrcaSlicer would find the exported process and
+    // filament incompatible with it, since a preset is matched here by name
+    // and the machine file carries the bundle's name, not the stock one.
+    const compatible = [printer, machinePresetName].filter((n): n is string => n !== undefined)
+    if (compatible.length > 0) out.compatible_printers = compatible
   }
   if (printer && category === 'machine') {
     // A machine preset has to derive from a printer OrcaSlicer already knows;
@@ -587,10 +661,23 @@ export function exportOrcaProfileJson(config: OrcaConfig, name: string, category
     // and printer_model/nozzle_diameter/printable_height come from here.
     out.inherits = printer
   }
-  if (category === 'machine' && bed_size_x !== undefined && bed_size_y !== undefined) {
-    out.printable_area = bedCorners(bed_size_x, bed_size_y)
+  if (category === 'machine') {
+    // An imported profile's own printable_area wins over the rectangle
+    // derived from bed_size_x/y, so non-rectangular and offset beds survive
+    // import -> export (see parseOrcaProfileJson's SKIP_BED comment). It
+    // arrives flattened to a comma-joined string; real machine profiles use
+    // the array form, so restore that here rather than shipping a shape
+    // OrcaSlicer's own exports never produce.
+    const imported = _passthrough?.printable_area
+    if (imported !== undefined) {
+      out.printable_area = imported
+        .split(',')
+        .map((vertex) => vertex.trim())
+        .filter(Boolean)
+    } else if (bed_size_x !== undefined && bed_size_y !== undefined) {
+      out.printable_area = bedCorners(bed_size_x, bed_size_y)
+    }
   }
-  if (_passthrough) Object.assign(out, _passthrough)
   return JSON.stringify(out, null, 2)
 }
 
@@ -606,9 +693,15 @@ export function exportOrcaProfileBundle(
   config: OrcaConfig,
   baseName: string,
 ): { filename: string; category: FieldCategory; json: string }[] {
+  const presetName = (category: FieldCategory) => `${baseName} (${category})`
+  // Threaded into the process/filament files so they list the machine file
+  // shipped next to them among their compatible printers — see
+  // exportOrcaProfileJson. Computed here because only the bundle knows the
+  // machine file's name.
+  const machinePresetName = presetName('machine')
   return (['process', 'filament', 'machine'] as const).map((category) => ({
     filename: `${category}.json`,
     category,
-    json: exportOrcaProfileJson(config, `${baseName} (${category})`, category),
+    json: exportOrcaProfileJson(config, presetName(category), category, machinePresetName),
   }))
 }

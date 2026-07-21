@@ -97,6 +97,38 @@ describe('exportOrcaProfileBundle', () => {
     expect(process.inherits).toBeUndefined()
   })
 
+  it('lists the machine file shipped in the same bundle as a compatible printer', () => {
+    // Without this the three files can't refer to each other: a preset is
+    // matched by name, and the bundle's machine file carries the bundle's own
+    // name, not the stock one. Selecting the exported printer in OrcaSlicer
+    // would leave the exported process and filament incompatible with it.
+    const bundle = exportOrcaProfileBundle({ ...config, printer_model: 'Bambu Lab P1S' }, 'test')
+    const byCategory = Object.fromEntries(
+      bundle.map((f) => [f.category, JSON.parse(f.json) as Record<string, unknown>]),
+    )
+    for (const category of ['process', 'filament'] as const) {
+      expect(byCategory[category].compatible_printers).toEqual([
+        'Bambu Lab P1S 0.6 nozzle', // the stock preset this config corresponds to
+        'test (machine)', // the machine file next to it in this bundle
+      ])
+    }
+    expect(byCategory.machine.name).toBe('test (machine)')
+  })
+
+  it('still names its own machine file when the stock preset name cannot be derived', () => {
+    // printerPresetName() needs printer_model *and* nozzle_diameter; without
+    // both it returns nothing, and the bundle used to come out with no
+    // compatible_printers at all — which OrcaSlicer treats as "compatible
+    // with nothing", not "with anything". The bundle's own machine file is
+    // always nameable, so the three files stay mutually consistent.
+    const bundle = exportOrcaProfileBundle({ layer_height: 0.2 }, 'test')
+    const byCategory = Object.fromEntries(
+      bundle.map((f) => [f.category, JSON.parse(f.json) as Record<string, unknown>]),
+    )
+    expect(byCategory.process.compatible_printers).toEqual(['test (machine)'])
+    expect(byCategory.filament.compatible_printers).toEqual(['test (machine)'])
+  })
+
   it('omits compatible_printers when the printer is not fully known', () => {
     const parsed = JSON.parse(exportOrcaProfileJson({ layer_height: 0.2 }, 'p', 'process')) as Record<string, unknown>
     expect(parsed.compatible_printers).toBeUndefined()
@@ -129,6 +161,46 @@ describe('exportOrcaProfileJson', () => {
     const json = exportOrcaProfileJson({ _passthrough: { some_unmapped_field: '42' } }, 'p', 'process')
     const parsed = JSON.parse(json) as Record<string, unknown>
     expect(parsed.some_unmapped_field).toBe('42')
+  })
+
+  it("does not let an imported profile's compatible_printers override the derived one", () => {
+    // An imported profile carries the printer *it* was written for. Letting
+    // that through means the exported bundle claims compatibility with a
+    // printer its own machine.json isn't, and OrcaSlicer rejects the whole
+    // combination ("process not compatible with printer", CLI exit -17) —
+    // the exact failure the derived value exists to prevent. This is
+    // reachable straight from the panel: import a vendor .json, hit Export.
+    const imported = parseOrcaProfileJson(
+      JSON.stringify({
+        type: 'process',
+        name: 'Some vendor 0.20mm Standard',
+        layer_height: '0.2',
+        compatible_printers: ['Creality Ender-3 0.4 nozzle'],
+        compatible_printers_condition: 'nozzle_diameter[0]==0.4',
+      }),
+    )
+    const json = exportOrcaProfileJson(
+      { ...imported, printer_model: 'Bambu Lab P1S', nozzle_diameter: 0.4 },
+      'p',
+      'process',
+    )
+    const parsed = JSON.parse(json) as Record<string, unknown>
+    expect(parsed.compatible_printers).toEqual(['Bambu Lab P1S 0.4 nozzle'])
+    // Dropped rather than kept: it tests the printer the import came from, so
+    // it can reject the combination on its own even with the list corrected.
+    expect(parsed.compatible_printers_condition).toBeUndefined()
+  })
+
+  it("keeps an imported profile's printable_area, restored to the array form real profiles use", () => {
+    // Deliberately the one passthrough field that outranks a derived value —
+    // it's how a non-rectangular or offset bed survives import -> export,
+    // where bed_size_x/y can only describe a rectangle.
+    const imported = parseOrcaProfileJson(
+      JSON.stringify({ type: 'machine', printable_area: ['10x10', '210x10', '210x210', '10x210'] }),
+    )
+    const json = exportOrcaProfileJson({ ...imported, bed_size_x: 256, bed_size_y: 256 }, 'p', 'machine')
+    const parsed = JSON.parse(json) as Record<string, unknown>
+    expect(parsed.printable_area).toEqual(['10x10', '210x10', '210x210', '10x210'])
   })
 
   it('writes the real inner_wall_speed field for default_speed, not the synthetic OrcaConfig-only name', () => {

@@ -9,6 +9,7 @@ import {
   PRESETS,
   PRINTER_PRESETS,
   parseOrcaProfileJson,
+  STOCK_NOZZLE_DIAMETERS,
 } from '../lib/profiles'
 import type {
   BrimType,
@@ -64,7 +65,9 @@ export function SettingsPanel({
   onDeleteUserPreset,
 }: Props) {
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [importMsg, setImportMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  // Shared by the import and export buttons — both report their outcome in
+  // the same line under that row.
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const densityId = useId()
   const [savingPresetName, setSavingPresetName] = useState<string | null>(null)
@@ -84,7 +87,7 @@ export function SettingsPanel({
         const passthroughCount = _passthrough ? Object.keys(_passthrough).length : 0
         const total = knownCount + passthroughCount
         if (total === 0) {
-          setImportMsg({ ok: false, text: 'No recognised settings found in this JSON.' })
+          setNotice({ ok: false, text: 'No recognised settings found in this JSON.' })
         } else {
           const rawType = parsed?.type
           const profileType =
@@ -92,12 +95,12 @@ export function SettingsPanel({
           const profileName = typeof parsed?.name === 'string' ? parsed.name : null
           const label = profileName ? `"${profileName}"` : `"${file.name}"`
           onProfileImport({ name: profileName ?? file.name, type: profileType, settings: patch })
-          setImportMsg({ ok: true, text: `Imported ${label} · ${profileType} profile · ${total} settings` })
+          setNotice({ ok: true, text: `Imported ${label} · ${profileType} profile · ${total} settings` })
         }
       } catch {
-        setImportMsg({ ok: false, text: 'Invalid JSON file.' })
+        setNotice({ ok: false, text: 'Invalid JSON file.' })
       }
-      setTimeout(() => setImportMsg(null), 4000)
+      setTimeout(() => setNotice(null), 4000)
     }
     reader.readAsText(file)
   }
@@ -112,6 +115,25 @@ export function SettingsPanel({
     const files = exportOrcaProfileBundle(config, name)
     const zipped = zipSync(Object.fromEntries(files.map((f) => [f.filename, strToU8(f.json)])))
     downloadBlob(new Blob([zipped], { type: 'application/zip' }), 'orcaweb-settings.zip')
+
+    // The machine file inherits from the stock preset named after the
+    // configured nozzle diameter, which only exists for the sizes OrcaSlicer
+    // ships (see STOCK_NOZZLE_DIAMETERS). Slicing here is unaffected — the
+    // engine takes any diameter — so this is a note on the download, not a
+    // reason to block it or to restrict the input above.
+    const nozzle = config.nozzle_diameter
+    const stockNozzle = nozzle === undefined || STOCK_NOZZLE_DIAMETERS.includes(nozzle)
+    setNotice(
+      stockNozzle
+        ? { ok: true, text: `Exported ${files.length} preset files as orcaweb-settings.zip` }
+        : {
+            ok: false,
+            text:
+              `Exported — but OrcaSlicer ships no preset for a ${nozzle} mm nozzle, so it will reject ` +
+              `machine.json until you point its "inherits" at a printer you have.`,
+          },
+    )
+    setTimeout(() => setNotice(null), stockNozzle ? 4000 : 10000)
   }
 
   function handleConfirmSavePreset() {
@@ -223,10 +245,13 @@ export function SettingsPanel({
             Export (.zip)
           </button>
         </div>
-        {importMsg && (
-          <p className={clsx('mt-1.5 text-xs px-2', importMsg.ok ? 'text-green-600' : 'text-red-500')}>
-            {importMsg.ok ? '✓ ' : '✗ '}
-            {importMsg.text}
+        {notice && (
+          <p
+            data-testid="settings-notice"
+            className={clsx('mt-1.5 text-xs px-2', notice.ok ? 'text-green-600' : 'text-red-500')}
+          >
+            {notice.ok ? '✓ ' : '✗ '}
+            {notice.text}
           </p>
         )}
       </div>
@@ -284,7 +309,7 @@ export function SettingsPanel({
           <NumberField
             label="Nozzle temp"
             unit="°C"
-            value={config.nozzle_temperature ?? 220}
+            value={config.nozzle_temperature ?? DISPLAY_DEFAULTS.nozzle_temperature}
             min={150}
             max={350}
             step={5}
@@ -293,7 +318,7 @@ export function SettingsPanel({
           <NumberField
             label="Bed temp"
             unit="°C"
-            value={config.bed_temperature ?? 60}
+            value={config.bed_temperature ?? DISPLAY_DEFAULTS.bed_temperature}
             min={0}
             max={150}
             step={5}
@@ -327,7 +352,7 @@ export function SettingsPanel({
           <NumberField
             label="Layer height"
             unit="mm"
-            value={config.layer_height ?? 0.2}
+            value={config.layer_height ?? DISPLAY_DEFAULTS.layer_height}
             min={0.05}
             max={0.5}
             step={0.05}
@@ -336,7 +361,7 @@ export function SettingsPanel({
           <NumberField
             label="Walls"
             unit="loops"
-            value={config.wall_loops ?? 3}
+            value={config.wall_loops ?? DISPLAY_DEFAULTS.wall_loops}
             min={1}
             max={10}
             step={1}
@@ -376,7 +401,7 @@ export function SettingsPanel({
         </div>
         <SelectField
           label="Wall generator"
-          value={config.wall_generator ?? 'arachne'}
+          value={config.wall_generator ?? DISPLAY_DEFAULTS.wall_generator}
           options={['arachne', 'classic'] as WallGenerator[]}
           onChange={(v) => onChange({ wall_generator: v as WallGenerator })}
           className="mt-3"
@@ -392,7 +417,7 @@ export function SettingsPanel({
         <div className="flex items-center gap-4">
           <div className="flex-1">
             <label htmlFor={densityId} className="block text-xs font-medium text-slate-600 mb-1">
-              Density: {config.sparse_infill_density ?? 15}%
+              Density: {config.sparse_infill_density ?? DISPLAY_DEFAULTS.sparse_infill_density}%
             </label>
             <input
               id={densityId}
@@ -400,7 +425,7 @@ export function SettingsPanel({
               min={0}
               max={100}
               step={5}
-              value={config.sparse_infill_density ?? 15}
+              value={config.sparse_infill_density ?? DISPLAY_DEFAULTS.sparse_infill_density}
               onChange={(e) => onChange({ sparse_infill_density: Number(e.target.value) })}
               className="w-full accent-orca-500"
             />
@@ -408,7 +433,7 @@ export function SettingsPanel({
         </div>
         <SelectField
           label="Pattern"
-          value={config.sparse_infill_pattern ?? 'grid'}
+          value={config.sparse_infill_pattern ?? DISPLAY_DEFAULTS.sparse_infill_pattern}
           options={
             [
               'grid',
@@ -430,13 +455,13 @@ export function SettingsPanel({
       <Section title="Supports & Adhesion">
         <ToggleField
           label="Enable supports"
-          value={config.enable_support ?? false}
+          value={config.enable_support ?? DISPLAY_DEFAULTS.enable_support}
           onChange={(v) => onChange({ enable_support: v })}
         />
         {config.enable_support && (
           <SelectField
             label="Support type"
-            value={config.support_type ?? 'normal(auto)'}
+            value={config.support_type ?? DISPLAY_DEFAULTS.support_type}
             options={['normal(auto)', 'normal(manual)', 'tree(auto)', 'tree(manual)'] as SupportType[]}
             onChange={(v) => onChange({ support_type: v as SupportType })}
             className="mt-3"
@@ -446,7 +471,7 @@ export function SettingsPanel({
           <NumberField
             label="Brim width"
             unit="mm"
-            value={config.brim_width ?? 0}
+            value={config.brim_width ?? DISPLAY_DEFAULTS.brim_width}
             min={0}
             max={30}
             step={1}
@@ -507,7 +532,7 @@ export function SettingsPanel({
               <NumberField
                 label="Default"
                 unit="mm/s"
-                value={config.default_speed ?? 100}
+                value={config.default_speed ?? DISPLAY_DEFAULTS.default_speed}
                 min={10}
                 max={500}
                 step={10}
@@ -516,7 +541,7 @@ export function SettingsPanel({
               <NumberField
                 label="Outer wall"
                 unit="mm/s"
-                value={config.outer_wall_speed ?? 60}
+                value={config.outer_wall_speed ?? DISPLAY_DEFAULTS.outer_wall_speed}
                 min={10}
                 max={500}
                 step={10}
@@ -525,7 +550,7 @@ export function SettingsPanel({
               <NumberField
                 label="First layer"
                 unit="mm/s"
-                value={config.initial_layer_speed ?? 30}
+                value={config.initial_layer_speed ?? DISPLAY_DEFAULTS.initial_layer_speed}
                 min={5}
                 max={100}
                 step={5}
@@ -534,7 +559,7 @@ export function SettingsPanel({
               <NumberField
                 label="Travel"
                 unit="mm/s"
-                value={config.travel_speed ?? 150}
+                value={config.travel_speed ?? DISPLAY_DEFAULTS.travel_speed}
                 min={50}
                 max={1000}
                 step={10}
@@ -546,23 +571,23 @@ export function SettingsPanel({
           <Section title="Seam & Surface">
             <SelectField
               label="Seam position"
-              value={config.seam_position ?? 'aligned'}
+              value={config.seam_position ?? DISPLAY_DEFAULTS.seam_position}
               options={['aligned', 'nearest', 'back', 'random'] as SeamPosition[]}
               onChange={(v) => onChange({ seam_position: v as SeamPosition })}
             />
             <SelectField
               label="Fuzzy skin"
-              value={config.fuzzy_skin ?? 'none'}
+              value={config.fuzzy_skin ?? DISPLAY_DEFAULTS.fuzzy_skin}
               options={['none', 'external', 'all'] as FuzzySkin[]}
               onChange={(v) => onChange({ fuzzy_skin: v as FuzzySkin })}
               className="mt-3"
             />
-            {(config.fuzzy_skin ?? 'none') !== 'none' && (
+            {(config.fuzzy_skin ?? DISPLAY_DEFAULTS.fuzzy_skin) !== 'none' && (
               <div className="grid grid-cols-2 gap-3 mt-3">
                 <NumberField
                   label="Thickness"
                   unit="mm"
-                  value={config.fuzzy_skin_thickness ?? 0.3}
+                  value={config.fuzzy_skin_thickness ?? DISPLAY_DEFAULTS.fuzzy_skin_thickness}
                   min={0.05}
                   max={2}
                   step={0.05}
@@ -571,7 +596,7 @@ export function SettingsPanel({
                 <NumberField
                   label="Point dist"
                   unit="mm"
-                  value={config.fuzzy_skin_point_dist ?? 0.8}
+                  value={config.fuzzy_skin_point_dist ?? DISPLAY_DEFAULTS.fuzzy_skin_point_dist}
                   min={0.1}
                   max={5}
                   step={0.1}

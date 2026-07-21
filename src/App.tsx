@@ -102,9 +102,15 @@ function isUserPreset(value: unknown): value is UserPreset {
     typeof p.id === 'string' &&
     typeof p.name === 'string' &&
     typeof p.printer === 'string' &&
-    p.printer in PRINTER_PRESETS &&
+    // Own keys only, not `in`: the preset tables are plain objects, so `in`
+    // also answers yes for "constructor"/"toString"/… — inherited names that
+    // name no preset. Harmless downstream today (buildConfig spreads a
+    // function to nothing), but a validator that accepts values it is meant
+    // to reject is the wrong thing to leave in place. Matches how the quality
+    // preset is checked against PRESETS just below; both tables are tiny.
+    Object.keys(PRINTER_PRESETS).includes(p.printer) &&
     typeof p.filament === 'string' &&
-    p.filament in FILAMENT_PRESETS &&
+    Object.keys(FILAMENT_PRESETS).includes(p.filament) &&
     typeof p.preset === 'string' &&
     PRESETS.some((preset) => preset.name === p.preset) &&
     !!p.overrides &&
