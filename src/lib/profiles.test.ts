@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { OrcaConfig } from '../types'
-import { exportOrcaProfileBundle, exportOrcaProfileJson, filamentSlots, parseOrcaProfileJson } from './profiles'
+import {
+  describeExportCompatibility,
+  exportOrcaProfileBundle,
+  exportOrcaProfileJson,
+  filamentSlots,
+  parseOrcaProfileJson,
+} from './profiles'
 
 describe('filamentSlots', () => {
   it('returns a single slot for a plain filament_type', () => {
@@ -97,36 +103,23 @@ describe('exportOrcaProfileBundle', () => {
     expect(process.inherits).toBeUndefined()
   })
 
-  it('lists the machine file shipped in the same bundle as a compatible printer', () => {
-    // Without this the three files can't refer to each other: a preset is
-    // matched by name, and the bundle's machine file carries the bundle's own
-    // name, not the stock one. Selecting the exported printer in OrcaSlicer
-    // would leave the exported process and filament incompatible with it.
+  it('names only the stock preset — the one string the compatibility check compares against', () => {
+    // Measured against OrcaSlicer 2.4.2's CLI: each compatible_printers entry
+    // is tested against the printer preset's `inherits`, never against its
+    // name. Listing the bundle's own machine file here reads like it would
+    // make the three files refer to each other, but it is inert — a bundle
+    // whose list contains only that name is rejected (-17) even though that
+    // file is the printer being loaded. Keeping the list to the one string
+    // that is actually matched is what makes it load.
     const bundle = exportOrcaProfileBundle({ ...config, printer_model: 'Bambu Lab P1S' }, 'test')
     const byCategory = Object.fromEntries(
       bundle.map((f) => [f.category, JSON.parse(f.json) as Record<string, unknown>]),
     )
     for (const category of ['process', 'filament'] as const) {
-      expect(byCategory[category].compatible_printers).toEqual([
-        'Bambu Lab P1S 0.6 nozzle', // the stock preset this config corresponds to
-        'test (machine)', // the machine file next to it in this bundle
-      ])
+      expect(byCategory[category].compatible_printers).toEqual(['Bambu Lab P1S 0.6 nozzle'])
     }
-    expect(byCategory.machine.name).toBe('test (machine)')
-  })
-
-  it('still names its own machine file when the stock preset name cannot be derived', () => {
-    // printerPresetName() needs printer_model *and* nozzle_diameter; without
-    // both it returns nothing, and the bundle used to come out with no
-    // compatible_printers at all — which OrcaSlicer treats as "compatible
-    // with nothing", not "with anything". The bundle's own machine file is
-    // always nameable, so the three files stay mutually consistent.
-    const bundle = exportOrcaProfileBundle({ layer_height: 0.2 }, 'test')
-    const byCategory = Object.fromEntries(
-      bundle.map((f) => [f.category, JSON.parse(f.json) as Record<string, unknown>]),
-    )
-    expect(byCategory.process.compatible_printers).toEqual(['test (machine)'])
-    expect(byCategory.filament.compatible_printers).toEqual(['test (machine)'])
+    // …and it is the machine file's `inherits` that the entry has to equal.
+    expect(byCategory.machine.inherits).toBe('Bambu Lab P1S 0.6 nozzle')
   })
 
   it('omits compatible_printers when the printer is not fully known', () => {
@@ -147,6 +140,28 @@ describe('exportOrcaProfileBundle', () => {
     const merged: Partial<OrcaConfig> = {}
     for (const f of bundle) Object.assign(merged, parseOrcaProfileJson(f.json))
     expect(merged).toMatchObject(config)
+  })
+})
+
+describe('describeExportCompatibility', () => {
+  it('passes a config that names a printer OrcaSlicer actually ships', () => {
+    expect(describeExportCompatibility({ printer_model: 'Bambu Lab P1S', nozzle_diameter: 0.4 })).toBeNull()
+  })
+
+  it('flags a nozzle size no stock preset is named after', () => {
+    // The derived "<model> 0.3 nozzle" names nothing, so machine.json's
+    // `inherits` dangles and the bundle is rejected. Slicing here still works
+    // — the engine takes any diameter — so this warns rather than blocking.
+    const problem = describeExportCompatibility({ printer_model: 'Bambu Lab P1S', nozzle_diameter: 0.3 })
+    expect(problem).toContain('0.3 mm nozzle')
+  })
+
+  it('flags a config with no derivable printer name at all', () => {
+    // This one exports with neither `inherits` nor `compatible_printers`.
+    // Verified against OrcaSlicer 2.4.2: that is rejected exactly like naming
+    // the wrong printer (-17) — an absent list is not "compatible with any
+    // printer" on the CLI path, so this can't be reported as a plain success.
+    expect(describeExportCompatibility({ layer_height: 0.2 })).toContain('which printer model')
   })
 })
 

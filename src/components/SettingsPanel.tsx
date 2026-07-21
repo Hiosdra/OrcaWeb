@@ -4,12 +4,12 @@ import { useId, useRef, useState } from 'react'
 import { downloadBlob } from '../lib/download'
 import {
   DISPLAY_DEFAULTS,
+  describeExportCompatibility,
   exportOrcaProfileBundle,
   FILAMENT_PRESETS,
   PRESETS,
   PRINTER_PRESETS,
   parseOrcaProfileJson,
-  STOCK_NOZZLE_DIAMETERS,
 } from '../lib/profiles'
 import type {
   BrimType,
@@ -116,24 +116,16 @@ export function SettingsPanel({
     const zipped = zipSync(Object.fromEntries(files.map((f) => [f.filename, strToU8(f.json)])))
     downloadBlob(new Blob([zipped], { type: 'application/zip' }), 'orcaweb-settings.zip')
 
-    // The machine file inherits from the stock preset named after the
-    // configured nozzle diameter, which only exists for the sizes OrcaSlicer
-    // ships (see STOCK_NOZZLE_DIAMETERS). Slicing here is unaffected — the
-    // engine takes any diameter — so this is a note on the download, not a
-    // reason to block it or to restrict the input above.
-    const nozzle = config.nozzle_diameter
-    const stockNozzle = nozzle === undefined || STOCK_NOZZLE_DIAMETERS.includes(nozzle)
+    // The download always happens; this only reports whether desktop
+    // OrcaSlicer will actually accept the result (see
+    // describeExportCompatibility).
+    const problem = describeExportCompatibility(config)
     setNotice(
-      stockNozzle
-        ? { ok: true, text: `Exported ${files.length} preset files as orcaweb-settings.zip` }
-        : {
-            ok: false,
-            text:
-              `Exported — but OrcaSlicer ships no preset for a ${nozzle} mm nozzle, so it will reject ` +
-              `machine.json until you point its "inherits" at a printer you have.`,
-          },
+      problem
+        ? { ok: false, text: problem }
+        : { ok: true, text: `Exported ${files.length} preset files as orcaweb-settings.zip` },
     )
-    setTimeout(() => setNotice(null), stockNozzle ? 4000 : 10000)
+    setTimeout(() => setNotice(null), problem ? 12000 : 4000)
   }
 
   function handleConfirmSavePreset() {
