@@ -569,10 +569,18 @@ export function exportOrcaProfileJson(config: OrcaConfig, name: string, category
     // same way in desktop OrcaSlicer as it did here.
     out.hot_plate_temp_initial_layer = String(config.bed_temperature)
   }
-  if (category === 'process' || category === 'filament') {
+  const printer = printerPresetName(config)
+  if (printer && (category === 'process' || category === 'filament')) {
     // Without this the preset is rejected on load — see printerPresetName().
-    const printer = printerPresetName(config)
-    if (printer) out.compatible_printers = [printer]
+    out.compatible_printers = [printer]
+  }
+  if (printer && category === 'machine') {
+    // A machine preset has to derive from a printer OrcaSlicer already knows;
+    // a standalone one is rejected the same way an uncompatible process is.
+    // Inheriting from the stock preset of the same model makes this a normal
+    // user printer preset — verified end to end: the exported file slices,
+    // and printer_model/nozzle_diameter/printable_height come from here.
+    out.inherits = printer
   }
   if (category === 'machine' && bed_size_x !== undefined && bed_size_y !== undefined) {
     out.printable_area = bedCorners(bed_size_x, bed_size_y)

@@ -90,8 +90,11 @@ describe('exportOrcaProfileBundle', () => {
     expect(process.compatible_printers).toEqual(['Bambu Lab P1S 0.4 nozzle'])
     expect(filament.compatible_printers).toEqual(['Bambu Lab P1S 0.4 nozzle'])
     // A machine preset naming itself as its own compatible printer is
-    // meaningless — the key belongs only to the two dependent types.
+    // meaningless — it inherits from the stock printer instead, which is what
+    // makes OrcaSlicer accept it as a printer at all.
     expect(machine.compatible_printers).toBeUndefined()
+    expect(machine.inherits).toBe('Bambu Lab P1S 0.4 nozzle')
+    expect(process.inherits).toBeUndefined()
   })
 
   it('omits compatible_printers when the printer is not fully known', () => {
