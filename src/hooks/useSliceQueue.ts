@@ -453,7 +453,10 @@ export function useSliceQueue(
           msg satisfies never
       }
     })
-  }, [])
+    // rejectAllPendingMf is a useCallback with an empty dependency list, so
+    // its reference is stable for the hook's lifetime — listing it keeps the
+    // linter honest without ever re-registering the worker listener.
+  }, [rejectAllPendingMf])
 
   // ── Queue auto-advance ────────────────────────────────────────────────────
   // Single side-effect driving the engine: whenever the queue is running and
@@ -464,7 +467,9 @@ export function useSliceQueue(
   useEffect(() => {
     if (!running || currentId || plate.slicing) return
 
-    const next = items.find((i) => i.status === 'ready' && i.stlFile)
+    // Narrowed via the predicate so `next.stlFile` stays non-null inside the
+    // async closure below, where a property narrowing wouldn't survive.
+    const next = items.find((i): i is QueueItem & { stlFile: File } => i.status === 'ready' && i.stlFile != null)
     if (!next) {
       // Items still converting will re-trigger this effect when they finish.
       if (!items.some((i) => i.status === 'converting')) dispatch({ type: 'QUEUE_IDLE' })
@@ -476,7 +481,7 @@ export function useSliceQueue(
     const requestGeneration = sliceRequestGeneration.current
     void (async () => {
       try {
-        const stl = await next.stlFile!.arrayBuffer()
+        const stl = await next.stlFile.arrayBuffer()
         if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
         getWorker().postMessage({ type: 'SLICE', stl, config: configSnapshot.config }, [stl])
@@ -702,14 +707,16 @@ export function useSliceQueue(
   // Exports one queue item's current STL + config snapshot as a .3mf.
   // Independent of slicing — works on any item with STL data, sliced or not.
   const export3mf = useCallback((item: QueueItem): Promise<ArrayBuffer> => {
-    if (!item.stlFile) return Promise.reject(new Error('No model data for this item'))
+    // Bound to a local so the guard still holds inside the async closure.
+    const stlFile = item.stlFile
+    if (!stlFile) return Promise.reject(new Error('No model data for this item'))
     const configSnapshot = configSnapshotRef.current
     return new Promise<ArrayBuffer>((resolve, reject) => {
       const requestId = crypto.randomUUID()
       export3mfResolvers.current.set(requestId, { itemId: item.id, resolve, reject })
       void (async () => {
         try {
-          const stl = await item.stlFile!.arrayBuffer()
+          const stl = await stlFile.arrayBuffer()
           if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
           getWorker().postMessage({ type: 'WRITE_3MF', stl, config: configSnapshot.config, requestId }, [stl])
         } catch (err) {
@@ -723,7 +730,9 @@ export function useSliceQueue(
 
   const slicePlate = useCallback(() => {
     if (state.plate.slicing || state.currentId !== null || state.running) return
-    const readyItems = state.items.filter((i) => i.status === 'ready' && i.stlFile != null)
+    const readyItems = state.items.filter(
+      (i): i is QueueItem & { stlFile: File } => i.status === 'ready' && i.stlFile != null,
+    )
     if (readyItems.length === 0) return
 
     const configSnapshot = configSnapshotRef.current
@@ -741,7 +750,7 @@ export function useSliceQueue(
     const extruderIds = readyItems.some((i) => i.extruderId) ? readyItems.map((i) => i.extruderId ?? 0) : undefined
     void (async () => {
       try {
-        const stls = await Promise.all(readyItems.map((i) => i.stlFile!.arrayBuffer()))
+        const stls = await Promise.all(readyItems.map((i) => i.stlFile.arrayBuffer()))
         if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
         getWorker().postMessage({ type: 'SLICE_MULTI', stls, config: configSnapshot.config, extruderIds }, stls)

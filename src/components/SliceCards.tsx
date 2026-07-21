@@ -207,6 +207,7 @@ export function QueueItemCard({
   const [exporting3mf, setExporting3mf] = useState(false)
   const [export3mfError, setExport3mfError] = useState<string | null>(null)
   const statsLabel = useMemo(() => (item.gcode ? gcodeStatsLabel(extractGcodeStats(item.gcode)) : ''), [item.gcode])
+  const { gcode, gcodeFilename } = item
   // Stable array reference so ModelViewer's effect doesn't recreate the
   // WebGL scene on every unrelated re-render while the card is expanded.
   const previewFiles = useMemo(() => (item.stlFile ? [item.stlFile] : []), [item.stlFile])
@@ -298,7 +299,10 @@ export function QueueItemCard({
           </select>
         )}
 
-        {item.status === 'done' && item.gcode && item.gcodeFilename && (
+        {/* Destructured so the narrowing survives into the click handlers —
+            TypeScript can't keep a mutable property's narrowing inside a
+            closure, which is what the non-null assertions here were hiding. */}
+        {item.status === 'done' && gcode && gcodeFilename && (
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -310,7 +314,7 @@ export function QueueItemCard({
             </button>
             <button
               type="button"
-              onClick={() => downloadGcode(item.gcode!, item.gcodeFilename!)}
+              onClick={() => downloadGcode(gcode, gcodeFilename)}
               data-testid="download-gcode-button"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors"
             >
@@ -398,6 +402,9 @@ export function QueueItemCard({
 // ── Plate result card ─────────────────────────────────────────────────────────
 
 export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateState } & BedProps) {
+  // See QueueItemCard: narrowing a property doesn't reach the click handler,
+  // so bind it once here instead of asserting non-null at each use.
+  const plateGcode = plate.gcode
   const [expanded, setExpanded] = useState(false)
   const statsLabel = useMemo(() => (plate.gcode ? gcodeStatsLabel(extractGcodeStats(plate.gcode)) : ''), [plate.gcode])
 
@@ -443,7 +450,7 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
                   : 'Done')}
           </p>
         </div>
-        {plate.gcode && (
+        {plateGcode && (
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -455,7 +462,7 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
             </button>
             <button
               type="button"
-              onClick={() => downloadGcode(plate.gcode!, 'plate.gcode')}
+              onClick={() => downloadGcode(plateGcode, 'plate.gcode')}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors"
             >
               <DownloadIcon className="w-3.5 h-3.5" />

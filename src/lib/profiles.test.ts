@@ -78,6 +78,27 @@ describe('exportOrcaProfileBundle', () => {
     expect(filament.bed_temperature).toBeUndefined()
   })
 
+  // Verified against a stock OrcaSlicer 2.4.2: without compatible_printers
+  // the process/filament presets are rejected on load ("process not
+  // compatible with printer", CLI exit -17), and an empty list doesn't mean
+  // "any printer". The name follows OrcaSlicer's machine-preset convention.
+  it('names the compatible printer on process and filament presets', () => {
+    const cfg: OrcaConfig = { printer_model: 'Bambu Lab P1S', nozzle_diameter: 0.4, layer_height: 0.2 }
+    const process = JSON.parse(exportOrcaProfileJson(cfg, 'p', 'process')) as Record<string, unknown>
+    const filament = JSON.parse(exportOrcaProfileJson(cfg, 'p', 'filament')) as Record<string, unknown>
+    const machine = JSON.parse(exportOrcaProfileJson(cfg, 'p', 'machine')) as Record<string, unknown>
+    expect(process.compatible_printers).toEqual(['Bambu Lab P1S 0.4 nozzle'])
+    expect(filament.compatible_printers).toEqual(['Bambu Lab P1S 0.4 nozzle'])
+    // A machine preset naming itself as its own compatible printer is
+    // meaningless — the key belongs only to the two dependent types.
+    expect(machine.compatible_printers).toBeUndefined()
+  })
+
+  it('omits compatible_printers when the printer is not fully known', () => {
+    const parsed = JSON.parse(exportOrcaProfileJson({ layer_height: 0.2 }, 'p', 'process')) as Record<string, unknown>
+    expect(parsed.compatible_printers).toBeUndefined()
+  })
+
   it('never writes bed_shape — real machine profiles carry bed geometry only in printable_area', () => {
     const machine = JSON.parse(exportOrcaProfileJson({ bed_shape: 'circle' }, 'p', 'machine')) as Record<
       string,

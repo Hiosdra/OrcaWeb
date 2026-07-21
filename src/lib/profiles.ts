@@ -116,6 +116,28 @@ function bedCorners(x: number, y: number): string[] {
 }
 
 /**
+ * The name of the desktop OrcaSlicer printer preset this config corresponds
+ * to, following OrcaSlicer's own machine-preset naming convention
+ * "<printer model> <nozzle diameter> nozzle" (e.g. "Bambu Lab P1S 0.4
+ * nozzle" — verified against the profiles shipped inside OrcaSlicer 2.4.2).
+ *
+ * Needed because a process/filament preset OrcaSlicer will actually accept
+ * must name the printers it applies to in `compatible_printers`: without it
+ * the preset is rejected outright ("process not compatible with printer",
+ * CLI exit -17), and an empty list does not mean "any printer". Verified by
+ * slicing with the exported files against a stock OrcaSlicer install.
+ *
+ * A guess, necessarily — this app never sees the user's actual preset list,
+ * and a vendor whose presets don't follow the convention won't match. That
+ * only costs the user editing one field in a plain-text JSON, whereas
+ * omitting the key makes the export unusable for everyone.
+ */
+function printerPresetName(config: OrcaConfig): string | undefined {
+  if (config.printer_model === undefined || config.nozzle_diameter === undefined) return undefined
+  return `${config.printer_model} ${config.nozzle_diameter} nozzle`
+}
+
+/**
  * Translate OrcaConfig field names to the literal OrcaSlicer config option
  * names the WASM bridge expects, for the fields where they differ.
  *
@@ -546,6 +568,11 @@ export function exportOrcaProfileJson(config: OrcaConfig, name: string, category
     // toEngineConfig() sends to the engine, so an exported profile slices the
     // same way in desktop OrcaSlicer as it did here.
     out.hot_plate_temp_initial_layer = String(config.bed_temperature)
+  }
+  if (category === 'process' || category === 'filament') {
+    // Without this the preset is rejected on load — see printerPresetName().
+    const printer = printerPresetName(config)
+    if (printer) out.compatible_printers = [printer]
   }
   if (category === 'machine' && bed_size_x !== undefined && bed_size_y !== undefined) {
     out.printable_area = bedCorners(bed_size_x, bed_size_y)

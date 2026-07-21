@@ -275,7 +275,10 @@ export function GcodeViewer({ gcode, bedX = 256, bedY = 256, bedShape = 'rectang
       }
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement)
     }
-  }, [layers, bedX, bedY, bedShape, hasFeatureTypes])
+    // maxR comes off the same `parsed` result as `layers`, so listing it adds
+    // no extra rebuilds — it just stops the camera fit from reading a stale
+    // radius if the two ever stop changing together.
+  }, [layers, bedX, bedY, bedShape, hasFeatureTypes, maxR])
 
   // Sync layer visibility, travel toggle, and layer cursor position
   useEffect(() => {
