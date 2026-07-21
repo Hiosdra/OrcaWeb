@@ -156,8 +156,11 @@ const ORCA_FIELD_MAP: Record<string, { key: keyof OrcaConfig; type: 'num' | 'pct
   fill_pattern: { key: 'sparse_infill_pattern', type: 'str' },
   outer_wall_speed: { key: 'outer_wall_speed', type: 'num' },
   external_perimeter_speed: { key: 'outer_wall_speed', type: 'num' },
-  default_speed: { key: 'default_speed', type: 'num' },
+  // inner_wall_speed (the real OrcaSlicer field) must come before default_speed
+  // (an OrcaConfig-only synthetic name — see toEngineConfig's doc comment)
+  // so REVERSE_FIELD_MAP's first-seen-wins picks the real name to export.
   inner_wall_speed: { key: 'default_speed', type: 'num' },
+  default_speed: { key: 'default_speed', type: 'num' },
   travel_speed: { key: 'travel_speed', type: 'num' },
   initial_layer_speed: { key: 'initial_layer_speed', type: 'num' },
   first_layer_speed: { key: 'initial_layer_speed', type: 'num' },
@@ -169,8 +172,11 @@ const ORCA_FIELD_MAP: Record<string, { key: keyof OrcaConfig; type: 'num' | 'pct
   seam_position: { key: 'seam_position', type: 'str' },
   enable_support: { key: 'enable_support', type: 'bool' },
   support_type: { key: 'support_type', type: 'str' },
-  enable_ironing: { key: 'enable_ironing', type: 'bool' },
+  // Same reasoning as inner_wall_speed/default_speed above: ironing (the real
+  // field) must come first so it — not the synthetic enable_ironing — is
+  // what gets exported.
   ironing: { key: 'enable_ironing', type: 'bool' },
+  enable_ironing: { key: 'enable_ironing', type: 'bool' },
   fuzzy_skin: { key: 'fuzzy_skin', type: 'str' },
   fuzzy_skin_thickness: { key: 'fuzzy_skin_thickness', type: 'num' },
   fuzzy_skin_point_dist: { key: 'fuzzy_skin_point_dist', type: 'num' },
@@ -415,11 +421,12 @@ for (const [field, meta] of Object.entries(ORCA_FIELD_MAP)) {
  * is also loadable by desktop OrcaSlicer as a user profile.
  *
  * default_speed/enable_ironing are OrcaConfig-only names with no real
- * OrcaSlicer option (see toEngineConfig's doc comment) — REVERSE_FIELD_MAP
- * still maps them to their nearest named equivalent (inner_wall_speed,
- * ironing) since those aliases exist in ORCA_FIELD_MAP, keeping the export
- * at least round-trippable through this app even though desktop OrcaSlicer
- * would interpret them slightly differently.
+ * OrcaSlicer option (see toEngineConfig's doc comment) — ORCA_FIELD_MAP
+ * deliberately lists their real-name aliases (inner_wall_speed, ironing)
+ * *before* the synthetic entries so REVERSE_FIELD_MAP's first-seen-wins
+ * binds to the real field, not the synthetic one. Writing the synthetic
+ * names instead would silently drop these two settings on import into
+ * desktop OrcaSlicer (set_deserialize_strict ignores unrecognized keys).
  */
 export function exportOrcaProfileJson(config: OrcaConfig, name: string): string {
   const { _passthrough, bed_size_x, bed_size_y, ...rest } = config

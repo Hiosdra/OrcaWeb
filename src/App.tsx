@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FileUpload } from './components/FileUpload'
 import { ErrorDotIcon, GithubIcon, ModelIconSm, OrcaLogo, SpinnerIcon, XIcon } from './components/icons'
 import { ModelViewer } from './components/ModelViewer'
@@ -150,6 +150,24 @@ function findPresetKeyByField(
   value: unknown,
 ): string | undefined {
   return Object.keys(presets).find((key) => presets[key][field] === value)
+}
+
+// Returns an array with the same File objects, in the same order, as `next`
+// — but reuses the *previous* array reference whenever the actual set of
+// files hasn't changed. `queue` (from useSliceQueue) gets a brand-new array
+// reference on every SLICE_PROGRESS/CONFIG_CHANGED dispatch even though the
+// underlying File objects didn't change, so deriving previewFiles with a
+// plain `useMemo(..., [queue])` gave ModelViewer a "new" `files` prop on
+// every progress tick — tearing down and rebuilding the whole WebGL scene
+// (re-parsing every STL, resetting camera framing, visible flicker) while
+// slicing. Comparing by File identity here instead of by wrapper-array
+// identity keeps the prop stable across those unrelated re-renders.
+function useStableFileList(next: File[]): File[] {
+  const ref = useRef<File[]>([])
+  const prev = ref.current
+  const same = prev.length === next.length && prev.every((f, i) => f === next[i])
+  if (!same) ref.current = next
+  return ref.current
 }
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -336,8 +354,12 @@ export default function App() {
 
   // Every ready/done model, not just the first — the preview shows the whole
   // set laid out on a grid (see ModelViewer's doc comment) instead of only
-  // ever showing one object when multiple files are queued.
-  const previewFiles = useMemo(() => queue.map((i) => i.stlFile).filter((f): f is File => f != null), [queue])
+  // ever showing one object when multiple files are queued. Passed through
+  // useStableFileList so a queue update that doesn't actually add/remove/
+  // replace a model (e.g. a SLICE_PROGRESS tick) doesn't hand ModelViewer a
+  // "new" files array and force it to rebuild the WebGL scene.
+  const rawPreviewFiles = useMemo(() => queue.map((i) => i.stlFile).filter((f): f is File => f != null), [queue])
+  const previewFiles = useStableFileList(rawPreviewFiles)
   // Remounts the ViewerErrorBoundary (clearing any previous crash) whenever
   // the actual file set changes, without remounting on every unrelated
   // re-render — mirrors the single-file `key={previewFile.name}` pattern.

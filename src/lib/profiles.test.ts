@@ -57,4 +57,18 @@ describe('exportOrcaProfileJson', () => {
     const parsed = JSON.parse(json) as Record<string, unknown>
     expect(parsed.some_unmapped_field).toBe('42')
   })
+
+  it('writes the real OrcaSlicer field names for default_speed/enable_ironing, not the synthetic OrcaConfig-only ones', () => {
+    // Round-tripping through this app's own parseOrcaProfileJson can't catch
+    // a wrong field name here — it recognizes both the real and synthetic
+    // names — so this asserts the raw JSON keys directly, matching what a
+    // real desktop OrcaSlicer install (which only recognizes the real names)
+    // would actually see.
+    const json = exportOrcaProfileJson({ default_speed: 120, enable_ironing: true }, 'p')
+    const parsed = JSON.parse(json) as Record<string, unknown>
+    expect(parsed.inner_wall_speed).toBe('120')
+    expect(parsed.ironing).toBe('1')
+    expect(parsed.default_speed).toBeUndefined()
+    expect(parsed.enable_ironing).toBeUndefined()
+  })
 })

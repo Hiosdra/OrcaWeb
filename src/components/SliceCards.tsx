@@ -263,7 +263,11 @@ export function QueueItemCard({
           </p>
         </div>
 
-        {filamentSlotCount > 1 && (item.status === 'ready' || item.status === 'done' || item.status === 'error') && (
+        {/* Only relevant while the item is 'ready' — slicePlate() reads
+            extruderId off exactly that filter, so showing this for a
+            'done'/'error' item would let a choice silently have no effect
+            until the item is re-queued (via a re-slice) and picked up again. */}
+        {filamentSlotCount > 1 && item.status === 'ready' && (
           <select
             value={item.extruderId ?? 0}
             onChange={(e) => onSetExtruderId(item.id, Number(e.target.value) || undefined)}

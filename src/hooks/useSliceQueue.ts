@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { logError, logWarn } from '../lib/log'
-import { parseOrcaProfileJson } from '../lib/profiles'
+import { filamentSlots, parseOrcaProfileJson } from '../lib/profiles'
 import { addWorkerListener, getWasmStatus, getWorker, terminateWorker, type WasmStatus } from '../lib/worker-singleton'
 import type { OrcaConfig, QueueItem, SliceProgress, WorkerOutMessage } from '../types'
 
@@ -50,7 +50,11 @@ type QueueAction =
   | { type: 'PLATE_STARTED'; configEpoch: number }
   | { type: 'PLATE_DONE'; gcode: string }
   | { type: 'PLATE_FAILED'; message: string }
-  | { type: 'CONFIG_CHANGED'; epoch: number }
+  // maxFilamentSlot clamps/clears any item's extruderId that's no longer
+  // valid for the new config's filament_type slot count (see filamentSlots()
+  // in lib/profiles.ts) — a stale slot index from a wider filament profile
+  // must not silently ride along into orc_slice_multi against a narrower one.
+  | { type: 'CONFIG_CHANGED'; epoch: number; maxFilamentSlot: number }
   | { type: 'CANCELLED' }
   | { type: 'ENGINE_FAILED'; message: string }
 
@@ -188,7 +192,12 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
       return {
         ...state,
         configEpoch: action.epoch,
-        items: state.items.map((i) => (i.status === 'done' ? { ...i, stale: true } : i)),
+        items: state.items.map((i) => {
+          const patch: Partial<QueueItem> = {}
+          if (i.status === 'done') patch.stale = true
+          if (i.extruderId != null && i.extruderId > action.maxFilamentSlot) patch.extruderId = undefined
+          return Object.keys(patch).length > 0 ? { ...i, ...patch } : i
+        }),
         plate: state.plate.gcode ? { ...state.plate, stale: true } : state.plate,
       }
     }
@@ -263,6 +272,16 @@ export function useSliceQueue(
   // this generation invalidates the eventual postMessage from that read.
   const sliceRequestGeneration = useRef(0)
 
+  // Item IDs captured by the currently in-flight (preparing or slicing)
+  // "One plate" request — lets removeItem() tell whether the item it's
+  // removing actually needs to abort that plate slice, instead of either
+  // ignoring the removal (the item quietly survives into the resulting
+  // G-code — the WASM call is synchronous, so once posted nothing short of
+  // a worker restart can pull one object back out) or nuking every plate
+  // slice on any unrelated removal. Set at the start of slicePlate() (before
+  // its async STL-read gap) and cleared once that request truly concludes.
+  const platePreparedIdsRef = useRef<Set<string> | null>(null)
+
   const onSettingsImportedRef = useRef(onSettingsImported)
   useEffect(() => {
     onSettingsImportedRef.current = onSettingsImported
@@ -323,7 +342,7 @@ export function useSliceQueue(
       epoch: configSnapshotRef.current.epoch + 1,
     }
     configSnapshotRef.current = snapshot
-    dispatch({ type: 'CONFIG_CHANGED', epoch: snapshot.epoch })
+    dispatch({ type: 'CONFIG_CHANGED', epoch: snapshot.epoch, maxFilamentSlot: filamentSlots(config).length })
   }, [config])
 
   // ── Worker messages → reducer ─────────────────────────────────────────────
@@ -341,6 +360,7 @@ export function useSliceQueue(
           setWasmStatus('error')
           dispatch({ type: 'ENGINE_FAILED', message: `Slicer engine failed: ${msg.message}` })
           rejectAllPendingMf(`Slicer engine failed: ${msg.message}`)
+          platePreparedIdsRef.current = null
           return
         case 'SLICE_PROGRESS':
           dispatch({ type: 'SLICE_PROGRESS', progress: { percent: msg.percent, stage: msg.stage } })
@@ -354,10 +374,12 @@ export function useSliceQueue(
           return
         case 'SLICE_MULTI_COMPLETE':
           dispatch({ type: 'PLATE_DONE', gcode: msg.gcode })
+          platePreparedIdsRef.current = null
           return
         case 'SLICE_MULTI_ERROR':
           logError('[queue] SLICE_MULTI_ERROR (plate):', msg.message)
           dispatch({ type: 'PLATE_FAILED', message: msg.message })
+          platePreparedIdsRef.current = null
           return
         case 'OBJ_STL_COMPLETE':
         case 'CAD_STL_COMPLETE':
@@ -601,20 +623,35 @@ export function useSliceQueue(
     dispatch({ type: 'CANCELLED' })
     repostConversions()
     rejectAllPendingMf('Slice cancelled — engine restarted')
+    platePreparedIdsRef.current = null
   }, [state.currentId, state.plate.slicing, repostConversions, rejectAllPendingMf])
 
   const removeItem = useCallback(
     (id: string) => {
-      if (state.currentId === id) {
+      // Whether `id` is actually part of the plate request currently being
+      // prepared/sliced — not just "is *any* plate slice running" (that
+      // would abort an unrelated plate slice over an item that was never
+      // part of it, e.g. one added afterward).
+      const isPlateTarget = platePreparedIdsRef.current?.has(id) ?? false
+      if (state.currentId === id || isPlateTarget) {
         // Removing the item being sliced: only a worker restart can abort the
-        // synchronous WASM call. The queue keeps running — the next ready item
-        // is posted to the fresh worker automatically.
+        // synchronous WASM call. For the single-item case the queue keeps
+        // running — the next ready item is posted to the fresh worker
+        // automatically. For the plate case there's no "next item" to fall
+        // back to (arrangement covers the whole set), so the CANCELLED
+        // dispatch below also resets plate.slicing — same as the explicit
+        // Cancel button — rather than leaving the UI stuck on "Slicing
+        // plate…" waiting for a response the terminated worker will never send.
         logWarn(`[queue] removing in-flight item ${id} — restarting engine to abort its slice`)
         sliceRequestGeneration.current += 1
         terminateWorker()
         setWasmStatus('idle')
         repostConversions()
         rejectAllPendingMf('Engine restarted — export cancelled')
+        if (isPlateTarget) {
+          platePreparedIdsRef.current = null
+          dispatch({ type: 'CANCELLED' })
+        }
       }
       // Independent of the above: this item may have its own in-flight
       // export3mf()/engine 3MF-read request (keyed by a UUID unrelated to
@@ -661,6 +698,10 @@ export function useSliceQueue(
     const configSnapshot = configSnapshotRef.current
     dispatch({ type: 'PLATE_STARTED', configEpoch: configSnapshot.epoch })
     const requestGeneration = sliceRequestGeneration.current
+    // Recorded synchronously (before the STL-read await below) so a
+    // removeItem() call racing this request can tell whether the item it's
+    // removing is actually part of it — see platePreparedIdsRef's own comment.
+    platePreparedIdsRef.current = new Set(readyItems.map((i) => i.id))
     // Only send an extruderIds array when at least one item actually has an
     // override set — omitting it entirely (undefined) keeps the common
     // single-material case byte-identical to before this field existed,
