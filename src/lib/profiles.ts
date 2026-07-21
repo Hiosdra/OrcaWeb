@@ -35,6 +35,9 @@ export const DISPLAY_DEFAULTS = {
   nozzle_temperature: 220,
   bed_temperature: 60,
   layer_height: 0.2,
+  initial_layer_print_height: 0.2,
+  top_shell_layers: 4,
+  bottom_shell_layers: 3,
   wall_loops: 3,
   wall_generator: 'arachne',
   sparse_infill_density: 15,
@@ -50,6 +53,10 @@ export const DISPLAY_DEFAULTS = {
   enable_support: false,
   support_type: 'normal(auto)',
   brim_width: 0,
+  brim_type: 'auto_brim',
+  skirt_loops: 1,
+  skirt_distance: 2,
+  raft_layers: 0,
 } as const satisfies OrcaConfig
 
 /**
@@ -140,59 +147,76 @@ export function toEngineConfig(config: OrcaConfig): Record<string, unknown> {
   return out
 }
 
+// Which real OrcaSlicer profile file a field belongs to — desktop OrcaSlicer
+// profiles are split into separate print/filament/printer presets, each only
+// populated with its own option set (see exportOrcaProfileBundle below).
+type FieldCategory = 'process' | 'filament' | 'machine'
+
 // OrcaSlicer profile field → OrcaConfig key mapping.
-// OrcaSlicer often encodes numbers as strings (e.g. "0.2") and percentages as "15%".
-const ORCA_FIELD_MAP: Record<string, { key: keyof OrcaConfig; type: 'num' | 'pct' | 'bool' | 'str' }> = {
-  layer_height: { key: 'layer_height', type: 'num' },
-  initial_layer_height: { key: 'initial_layer_height', type: 'num' },
-  wall_loops: { key: 'wall_loops', type: 'num' },
-  perimeters: { key: 'wall_loops', type: 'num' }, // alias
-  wall_generator: { key: 'wall_generator', type: 'str' },
-  top_shell_layers: { key: 'top_shell_layers', type: 'num' },
-  bottom_shell_layers: { key: 'bottom_shell_layers', type: 'num' },
-  sparse_infill_density: { key: 'sparse_infill_density', type: 'pct' },
-  fill_density: { key: 'sparse_infill_density', type: 'pct' }, // alias
-  sparse_infill_pattern: { key: 'sparse_infill_pattern', type: 'str' },
-  fill_pattern: { key: 'sparse_infill_pattern', type: 'str' },
-  outer_wall_speed: { key: 'outer_wall_speed', type: 'num' },
-  external_perimeter_speed: { key: 'outer_wall_speed', type: 'num' },
+// OrcaSlicer often encodes numbers as strings (e.g. "0.2") and percentages as
+// "15%". 'ironing' is its own type (see enable_ironing/ironing_type below):
+// unlike bool, its true/false <-> string mapping isn't "1"/"0", it's the
+// IroningType enum (s_keys_map_IroningType in PrintConfig.cpp).
+const ORCA_FIELD_MAP: Record<
+  string,
+  { key: keyof OrcaConfig; type: 'num' | 'pct' | 'bool' | 'str' | 'ironing'; category: FieldCategory }
+> = {
+  layer_height: { key: 'layer_height', type: 'num', category: 'process' },
+  // The real FFF field is initial_layer_print_height — initial_layer_height
+  // (no "print_") is a distinct SLA-only option (PrintConfigDef::init_sla_params)
+  // that set_deserialize_strict on our FFF-only build silently ignores. See
+  // OrcaConfig.initial_layer_print_height's own doc comment.
+  initial_layer_print_height: { key: 'initial_layer_print_height', type: 'num', category: 'process' },
+  wall_loops: { key: 'wall_loops', type: 'num', category: 'process' },
+  perimeters: { key: 'wall_loops', type: 'num', category: 'process' }, // alias
+  wall_generator: { key: 'wall_generator', type: 'str', category: 'process' },
+  top_shell_layers: { key: 'top_shell_layers', type: 'num', category: 'process' },
+  bottom_shell_layers: { key: 'bottom_shell_layers', type: 'num', category: 'process' },
+  sparse_infill_density: { key: 'sparse_infill_density', type: 'pct', category: 'process' },
+  fill_density: { key: 'sparse_infill_density', type: 'pct', category: 'process' }, // alias
+  sparse_infill_pattern: { key: 'sparse_infill_pattern', type: 'str', category: 'process' },
+  fill_pattern: { key: 'sparse_infill_pattern', type: 'str', category: 'process' },
+  outer_wall_speed: { key: 'outer_wall_speed', type: 'num', category: 'process' },
+  external_perimeter_speed: { key: 'outer_wall_speed', type: 'num', category: 'process' },
   // inner_wall_speed (the real OrcaSlicer field) must come before default_speed
   // (an OrcaConfig-only synthetic name — see toEngineConfig's doc comment)
   // so REVERSE_FIELD_MAP's first-seen-wins picks the real name to export.
-  inner_wall_speed: { key: 'default_speed', type: 'num' },
-  default_speed: { key: 'default_speed', type: 'num' },
-  travel_speed: { key: 'travel_speed', type: 'num' },
-  initial_layer_speed: { key: 'initial_layer_speed', type: 'num' },
-  first_layer_speed: { key: 'initial_layer_speed', type: 'num' },
-  brim_width: { key: 'brim_width', type: 'num' },
-  brim_type: { key: 'brim_type', type: 'str' },
-  skirt_loops: { key: 'skirt_loops', type: 'num' },
-  skirt_distance: { key: 'skirt_distance', type: 'num' },
-  raft_layers: { key: 'raft_layers', type: 'num' },
-  seam_position: { key: 'seam_position', type: 'str' },
-  enable_support: { key: 'enable_support', type: 'bool' },
-  support_type: { key: 'support_type', type: 'str' },
-  // Same reasoning as inner_wall_speed/default_speed above: ironing (the real
-  // field) must come first so it — not the synthetic enable_ironing — is
-  // what gets exported.
-  ironing: { key: 'enable_ironing', type: 'bool' },
-  enable_ironing: { key: 'enable_ironing', type: 'bool' },
-  fuzzy_skin: { key: 'fuzzy_skin', type: 'str' },
-  fuzzy_skin_thickness: { key: 'fuzzy_skin_thickness', type: 'num' },
-  fuzzy_skin_point_dist: { key: 'fuzzy_skin_point_dist', type: 'num' },
+  inner_wall_speed: { key: 'default_speed', type: 'num', category: 'process' },
+  default_speed: { key: 'default_speed', type: 'num', category: 'process' },
+  travel_speed: { key: 'travel_speed', type: 'num', category: 'process' },
+  initial_layer_speed: { key: 'initial_layer_speed', type: 'num', category: 'process' },
+  first_layer_speed: { key: 'initial_layer_speed', type: 'num', category: 'process' },
+  brim_width: { key: 'brim_width', type: 'num', category: 'process' },
+  brim_type: { key: 'brim_type', type: 'str', category: 'process' },
+  skirt_loops: { key: 'skirt_loops', type: 'num', category: 'process' },
+  skirt_distance: { key: 'skirt_distance', type: 'num', category: 'process' },
+  raft_layers: { key: 'raft_layers', type: 'num', category: 'process' },
+  seam_position: { key: 'seam_position', type: 'str', category: 'process' },
+  enable_support: { key: 'enable_support', type: 'bool', category: 'process' },
+  support_type: { key: 'support_type', type: 'str', category: 'process' },
+  // ironing_type is the real OrcaSlicer field (s_keys_map_IroningType: "no
+  // ironing"/"top"/"topmost"/"solid") — there is no real "ironing" or
+  // "enable_ironing" option (verified against PrintConfig.cpp). enable_ironing
+  // is an OrcaConfig-only simplified boolean toggle for the UI; the 'ironing'
+  // type below is what translates it to/from the real enum string, mirroring
+  // toEngineConfig's own enable_ironing -> ironing_type conversion.
+  ironing_type: { key: 'enable_ironing', type: 'ironing', category: 'process' },
+  fuzzy_skin: { key: 'fuzzy_skin', type: 'str', category: 'process' },
+  fuzzy_skin_thickness: { key: 'fuzzy_skin_thickness', type: 'num', category: 'process' },
+  fuzzy_skin_point_dist: { key: 'fuzzy_skin_point_dist', type: 'num', category: 'process' },
   // filament fields
-  filament_type: { key: 'filament_type', type: 'str' },
-  nozzle_temperature: { key: 'nozzle_temperature', type: 'num' },
-  temperature: { key: 'nozzle_temperature', type: 'num' },
-  bed_temperature: { key: 'bed_temperature', type: 'num' },
-  hot_plate_temp: { key: 'bed_temperature', type: 'num' },
-  fan_min_speed: { key: 'fan_min_speed', type: 'num' },
+  filament_type: { key: 'filament_type', type: 'str', category: 'filament' },
+  nozzle_temperature: { key: 'nozzle_temperature', type: 'num', category: 'filament' },
+  temperature: { key: 'nozzle_temperature', type: 'num', category: 'filament' },
+  bed_temperature: { key: 'bed_temperature', type: 'num', category: 'filament' },
+  hot_plate_temp: { key: 'bed_temperature', type: 'num', category: 'filament' },
+  fan_min_speed: { key: 'fan_min_speed', type: 'num', category: 'filament' },
   // machine fields
-  printer_model: { key: 'printer_model', type: 'str' },
-  nozzle_diameter: { key: 'nozzle_diameter', type: 'num' },
-  printable_height: { key: 'printable_height', type: 'num' },
-  max_print_height: { key: 'printable_height', type: 'num' }, // alias
-  bed_shape: { key: 'bed_shape', type: 'str' },
+  printer_model: { key: 'printer_model', type: 'str', category: 'machine' },
+  nozzle_diameter: { key: 'nozzle_diameter', type: 'num', category: 'machine' },
+  printable_height: { key: 'printable_height', type: 'num', category: 'machine' },
+  max_print_height: { key: 'printable_height', type: 'num', category: 'machine' }, // alias
+  bed_shape: { key: 'bed_shape', type: 'str', category: 'machine' },
   // bed size — handled separately via parsePrintableArea() below
 }
 
@@ -321,6 +345,11 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
       } else if (meta.type === 'bool') {
         const s = String(raw_val).toLowerCase()
         out[meta.key] = s === '1' || s === 'true' || s === 'yes'
+      } else if (meta.type === 'ironing') {
+        // s_keys_map_IroningType: "no ironing"/"top"/"topmost"/"solid" — any
+        // non-empty value other than "no ironing" means ironing is enabled.
+        const s = String(raw_val).trim().toLowerCase()
+        out[meta.key] = s !== '' && s !== 'no ironing'
       } else {
         out[meta.key] = String(raw_val)
       }
@@ -412,26 +441,34 @@ for (const [field, meta] of Object.entries(ORCA_FIELD_MAP)) {
 }
 
 /**
- * Serialize the current in-app config back into an OrcaSlicer-compatible
- * profile JSON — the mirror of parseOrcaProfileJson(). Re-importing the
- * result through this app's own Import button round-trips every field
- * (canonical OrcaSlicer field names via REVERSE_FIELD_MAP, `_passthrough`
- * written back verbatim), and uses OrcaSlicer's own field names/formats
- * (percentages as "NN%", printable_area as bed-corner strings) so the file
- * is also loadable by desktop OrcaSlicer as a user profile.
+ * Serialize the current in-app config back into a single OrcaSlicer-
+ * compatible profile JSON of one type (`process`/`filament`/`machine`) — the
+ * mirror of parseOrcaProfileJson(). Only fields belonging to `category` are
+ * written (canonical OrcaSlicer field names via REVERSE_FIELD_MAP), matching
+ * how real OrcaSlicer print/filament/printer presets are three genuinely
+ * separate option sets, not one flat file — a "process" preset with e.g.
+ * nozzle_diameter (a machine-only option) mixed in isn't a shape desktop
+ * OrcaSlicer's preset bundles ever produce themselves. Percentages are
+ * written as "NN%" and printable_area as bed-corner strings, so each file is
+ * also loadable by desktop OrcaSlicer as a user preset of that type.
  *
- * default_speed/enable_ironing are OrcaConfig-only names with no real
- * OrcaSlicer option (see toEngineConfig's doc comment) — ORCA_FIELD_MAP
- * deliberately lists their real-name aliases (inner_wall_speed, ironing)
- * *before* the synthetic entries so REVERSE_FIELD_MAP's first-seen-wins
- * binds to the real field, not the synthetic one. Writing the synthetic
- * names instead would silently drop these two settings on import into
- * desktop OrcaSlicer (set_deserialize_strict ignores unrecognized keys).
+ * `_passthrough` fields can't be reliably attributed to a single category —
+ * they arrive pre-merged from potentially multiple sources (buildConfig
+ * merges every preset layer's _passthrough together; parseOrcaProfileJson
+ * dumps every unmapped field from whichever single file was imported into
+ * one bag) — so they're written to every category's file rather than
+ * risking silently dropping one. A passthrough field that doesn't belong to
+ * a given file's category is simply an unrecognized key there, same as any
+ * other key set_deserialize_strict doesn't know.
+ *
+ * Exported by exportOrcaProfileBundle() below for actual use; kept as its
+ * own function (rather than inlined) so tests can assert one category's
+ * output directly.
  */
-export function exportOrcaProfileJson(config: OrcaConfig, name: string): string {
+export function exportOrcaProfileJson(config: OrcaConfig, name: string, category: FieldCategory): string {
   const { _passthrough, bed_size_x, bed_size_y, ...rest } = config
   const out: Record<string, unknown> = {
-    type: 'process',
+    type: category,
     name,
     from: 'User',
   }
@@ -440,12 +477,43 @@ export function exportOrcaProfileJson(config: OrcaConfig, name: string): string 
     const field = REVERSE_FIELD_MAP[orcaKey as keyof OrcaConfig]
     if (!field) continue
     const meta = ORCA_FIELD_MAP[field]
-    out[field] = meta.type === 'pct' ? `${value}%` : typeof value === 'boolean' ? (value ? '1' : '0') : String(value)
+    if (meta.category !== category) continue
+    out[field] =
+      meta.type === 'pct'
+        ? `${value}%`
+        : meta.type === 'ironing'
+          ? value
+            ? 'top'
+            : 'no ironing'
+          : typeof value === 'boolean'
+            ? value
+              ? '1'
+              : '0'
+            : String(value)
   }
-  if (bed_size_x !== undefined && bed_size_y !== undefined) {
+  if (category === 'machine' && bed_size_x !== undefined && bed_size_y !== undefined) {
     // Same bed-corner format parsePrintableArea() reads back.
     out.printable_area = ['0x0', `${bed_size_x}x0`, `${bed_size_x}x${bed_size_y}`, `0x${bed_size_y}`]
   }
   if (_passthrough) Object.assign(out, _passthrough)
   return JSON.stringify(out, null, 2)
+}
+
+/**
+ * Export the current settings as a full OrcaSlicer preset bundle — one file
+ * per real preset type (process/filament/machine), matching how desktop
+ * OrcaSlicer itself stores and imports presets (see exportOrcaProfileJson's
+ * own doc comment for why a single flat file can't represent this). Used by
+ * SettingsPanel's "Export" button, which zips the three files together so
+ * the whole bundle downloads as one action.
+ */
+export function exportOrcaProfileBundle(
+  config: OrcaConfig,
+  baseName: string,
+): { filename: string; category: FieldCategory; json: string }[] {
+  return (['process', 'filament', 'machine'] as const).map((category) => ({
+    filename: `${category}.json`,
+    category,
+    json: exportOrcaProfileJson(config, `${baseName} (${category})`, category),
+  }))
 }

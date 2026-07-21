@@ -17,7 +17,10 @@ export interface OrcaConfig {
 
   // Process — quality
   layer_height?: number
-  initial_layer_height?: number
+  /** Real OrcaSlicer FFF field is `initial_layer_print_height` — the
+   *  similarly-named `initial_layer_height` is an SLA-only option
+   *  (PrintConfigDef::init_sla_params) with no effect on an FFF slice. */
+  initial_layer_print_height?: number
   top_shell_layers?: number
   bottom_shell_layers?: number
   wall_loops?: number
@@ -84,11 +87,16 @@ export type SupportType = 'normal(auto)' | 'normal(manual)' | 'tree(auto)' | 'tr
 
 export type SeamPosition = 'aligned' | 'nearest' | 'back' | 'random'
 
-// Subset of PrintConfig.cpp's BrimType enum that set_deserialize_strict
-// actually accepts (s_keys_map_BrimType) — 'auto_brim'/'brim_ears'/'painted'
-// are desktop-interactive dropdown entries with no headless equivalent (they
-// need manual brim painting or per-object analysis this bridge doesn't do).
-export type BrimType = 'no_brim' | 'outer_only' | 'inner_only' | 'outer_and_inner'
+// Subset of PrintConfig.cpp's BrimType enum (s_keys_map_BrimType accepts all
+// 7 keys — set_deserialize_strict doesn't reject any of them). 'auto_brim' is
+// included because it's engine-computed (PrintConfig.cpp: "the brim width is
+// analyzed and calculated automatically") and is also the engine's actual
+// default (btAutoBrim) — worth representing even headless. 'brim_ears' and
+// 'painted' are excluded: both require manual per-object markup done in the
+// desktop UI (ear placement / brim painting) that this headless bridge has
+// no equivalent input for, so setting either here would silently produce no
+// brim at all rather than the ears/painted regions the user intended.
+export type BrimType = 'auto_brim' | 'no_brim' | 'outer_only' | 'inner_only' | 'outer_and_inner'
 
 export type FuzzySkin = 'none' | 'external' | 'all'
 

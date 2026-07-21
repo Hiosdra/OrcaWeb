@@ -1,8 +1,10 @@
 import clsx from 'clsx'
+import { strToU8, zipSync } from 'fflate'
 import { useId, useRef, useState } from 'react'
 import { downloadBlob } from '../lib/download'
 import {
-  exportOrcaProfileJson,
+  DISPLAY_DEFAULTS,
+  exportOrcaProfileBundle,
   FILAMENT_PRESETS,
   PRESETS,
   PRINTER_PRESETS,
@@ -100,10 +102,16 @@ export function SettingsPanel({
     reader.readAsText(file)
   }
 
+  // Real OrcaSlicer presets are three separate files (print/filament/printer)
+  // — a single flat JSON can't represent all three at once (see
+  // exportOrcaProfileBundle's doc comment), so the export is a small zip
+  // bundling all three, matching the multi-file zip download already used
+  // for G-code exports in SliceCards.tsx.
   function handleExportProfile() {
     const name = `OrcaWeb — ${selectedPrinter} / ${selectedFilament} / ${selectedPreset}`
-    const json = exportOrcaProfileJson(config, name)
-    downloadBlob(new Blob([json], { type: 'application/json' }), 'orcaweb-settings.json')
+    const files = exportOrcaProfileBundle(config, name)
+    const zipped = zipSync(Object.fromEntries(files.map((f) => [f.filename, strToU8(f.json)])))
+    downloadBlob(new Blob([zipped], { type: 'application/zip' }), 'orcaweb-settings.zip')
   }
 
   function handleConfirmSavePreset() {
@@ -207,12 +215,12 @@ export function SettingsPanel({
           <button
             type="button"
             onClick={handleExportProfile}
-            title="Save the current settings as an OrcaSlicer-compatible profile"
+            title="Save the current settings as an OrcaSlicer-compatible preset bundle (print/filament/printer .json, zipped)"
             data-testid="export-profile-button"
             className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl border-2 border-dashed border-slate-200 text-sm text-slate-500 hover:border-orca-400 hover:text-orca-600 hover:bg-orca-50 transition-all"
           >
             <DownloadIcon className="w-4 h-4" />
-            Export (.json)
+            Export (.zip)
           </button>
         </div>
         {importMsg && (
@@ -255,7 +263,7 @@ export function SettingsPanel({
           <NumberField
             label="Nozzle diameter"
             unit="mm"
-            value={config.nozzle_diameter ?? 0.4}
+            value={config.nozzle_diameter ?? DISPLAY_DEFAULTS.nozzle_diameter}
             min={0.1}
             max={1.2}
             step={0.05}
@@ -339,16 +347,18 @@ export function SettingsPanel({
           <NumberField
             label="First layer height"
             unit="mm"
-            value={config.initial_layer_height ?? config.layer_height ?? 0.2}
+            value={
+              config.initial_layer_print_height ?? config.layer_height ?? DISPLAY_DEFAULTS.initial_layer_print_height
+            }
             min={0.05}
             max={0.5}
             step={0.05}
-            onChange={(v) => onChange({ initial_layer_height: v })}
+            onChange={(v) => onChange({ initial_layer_print_height: v })}
           />
           <NumberField
             label="Top shells"
             unit="layers"
-            value={config.top_shell_layers ?? 4}
+            value={config.top_shell_layers ?? DISPLAY_DEFAULTS.top_shell_layers}
             min={0}
             max={20}
             step={1}
@@ -357,7 +367,7 @@ export function SettingsPanel({
           <NumberField
             label="Bottom shells"
             unit="layers"
-            value={config.bottom_shell_layers ?? 3}
+            value={config.bottom_shell_layers ?? DISPLAY_DEFAULTS.bottom_shell_layers}
             min={0}
             max={20}
             step={1}
@@ -444,8 +454,8 @@ export function SettingsPanel({
           />
           <SelectField
             label="Brim type"
-            value={config.brim_type ?? 'outer_only'}
-            options={['no_brim', 'outer_only', 'inner_only', 'outer_and_inner'] as BrimType[]}
+            value={config.brim_type ?? DISPLAY_DEFAULTS.brim_type}
+            options={['auto_brim', 'no_brim', 'outer_only', 'inner_only', 'outer_and_inner'] as BrimType[]}
             onChange={(v) => onChange({ brim_type: v as BrimType })}
           />
         </div>
@@ -453,7 +463,7 @@ export function SettingsPanel({
           <NumberField
             label="Raft layers"
             unit="layers"
-            value={config.raft_layers ?? 0}
+            value={config.raft_layers ?? DISPLAY_DEFAULTS.raft_layers}
             min={0}
             max={100}
             step={1}
@@ -462,7 +472,7 @@ export function SettingsPanel({
           <NumberField
             label="Skirt loops"
             unit="loops"
-            value={config.skirt_loops ?? 0}
+            value={config.skirt_loops ?? DISPLAY_DEFAULTS.skirt_loops}
             min={0}
             max={10}
             step={1}
@@ -471,7 +481,7 @@ export function SettingsPanel({
           <NumberField
             label="Skirt distance"
             unit="mm"
-            value={config.skirt_distance ?? 2}
+            value={config.skirt_distance ?? DISPLAY_DEFAULTS.skirt_distance}
             min={0}
             max={60}
             step={1}

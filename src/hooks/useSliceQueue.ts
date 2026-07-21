@@ -718,6 +718,13 @@ export function useSliceQueue(
         if (requestGeneration !== sliceRequestGeneration.current) return
         logError('[queue] failed to prepare plate slice:', err)
         dispatch({ type: 'PLATE_FAILED', message: err instanceof Error ? err.message : String(err) })
+        // Otherwise this request's ids linger in platePreparedIdsRef forever
+        // (PLATE_DONE/SLICE_MULTI_ERROR/WASM_ERROR/cancel all clear it, but
+        // this early-failure path — e.g. a queued item's file changed on
+        // disk and arrayBuffer() rejects — didn't). A later removeItem() for
+        // any of those now-stale ids would then wrongly think it's aborting
+        // a live plate slice and restart the engine over nothing.
+        platePreparedIdsRef.current = null
       }
     })()
   }, [state.plate.slicing, state.currentId, state.running, state.items])
