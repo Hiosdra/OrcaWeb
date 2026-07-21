@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
+import { isWebGLAvailable } from '../lib/webgl'
 
 interface Props {
   file: File
@@ -81,6 +82,11 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
   useEffect(() => {
     const el = mountRef.current
     if (!el) return
+
+    if (!isWebGLAvailable()) {
+      setLoadError('3D preview unavailable in this browser')
+      return
+    }
     setLoadError(null)
 
     const w = el.clientWidth

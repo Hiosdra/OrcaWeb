@@ -19,6 +19,7 @@ import {
   XIcon,
 } from './icons'
 import { ModelViewer } from './ModelViewer'
+import { ViewerErrorBoundary } from './ViewerErrorBoundary'
 
 interface BedProps {
   bedX: number
@@ -329,7 +330,9 @@ export function QueueItemCard({
             <div className="border-r border-slate-100">
               <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Model</div>
               <div style={{ height: 270 }}>
-                <ModelViewer file={item.stlFile} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+                <ViewerErrorBoundary key={item.id} message="3D preview unavailable">
+                  <ModelViewer file={item.stlFile} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+                </ViewerErrorBoundary>
               </div>
             </div>
             <div className="bg-slate-900">
@@ -337,7 +340,9 @@ export function QueueItemCard({
                 G-code
               </div>
               <div style={{ height: 270 }}>
-                <GcodeViewer gcode={item.gcode} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+                <ViewerErrorBoundary key={`${item.id}-${item.gcode}`} message="G-code preview unavailable">
+                  <GcodeViewer gcode={item.gcode} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+                </ViewerErrorBoundary>
               </div>
             </div>
           </div>
@@ -435,7 +440,9 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
 
       {expanded && plate.gcode && (
         <div className="border-t border-slate-100 bg-slate-900" style={{ height: 300 }}>
-          <GcodeViewer gcode={plate.gcode} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+          <ViewerErrorBoundary key={plate.gcode} message="G-code preview unavailable">
+            <GcodeViewer gcode={plate.gcode} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+          </ViewerErrorBoundary>
         </div>
       )}
     </div>
