@@ -4,8 +4,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js'
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js'
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js'
-import { isWebGLAvailable } from '../lib/webgl'
 import type { ParseResult } from '../lib/gcode-parse'
+import { isWebGLAvailable } from '../lib/webgl'
 
 interface Props {
   gcode: string
