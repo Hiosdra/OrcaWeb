@@ -39,6 +39,7 @@ interface QueueState {
 type QueueAction =
   | { type: 'ADD_ITEMS'; items: QueueItem[] }
   | { type: 'PATCH_ITEM'; id: string; patch: Partial<QueueItem> }
+  | { type: 'ASSIGN_EXTRUDER'; id: string; extruderId?: number }
   | { type: 'CONVERSION_DONE'; id: string; stl: ArrayBuffer }
   | { type: 'REMOVE_ITEM'; id: string }
   | { type: 'RUN_QUEUE' }
@@ -82,6 +83,19 @@ function classifyConversion(filename: string): ConversionKind | undefined {
   return undefined
 }
 
+/**
+ * Build the per-object `extruderIds` array for a plate slice from the ready
+ * items' filament-slot assignments (parallel to `items`). Returns undefined
+ * when no object is assigned a slot, so a single-material plate omits the
+ * field entirely and hits the exact same orc_slice_multi path as before an
+ * assignment ever existed. Unassigned objects on an otherwise-assigned plate
+ * are sent as 0 (inherit the config's default extruder). Exported for tests.
+ */
+export function buildPlateExtruderIds(items: Pick<QueueItem, 'extruderId'>[]): number[] | undefined {
+  const ids = items.map((i) => i.extruderId ?? 0)
+  return ids.some((id) => id > 0) ? ids : undefined
+}
+
 function toGcodeFilename(name: string): string {
   return `${name.replace(/\.(stl|3mf|obj|step|stp)$/i, '')}.gcode`
 }
@@ -97,6 +111,17 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
 
     case 'PATCH_ITEM':
       return { ...state, items: patchItem(state.items, action.id, action.patch) }
+
+    case 'ASSIGN_EXTRUDER':
+      return {
+        ...state,
+        items: patchItem(state.items, action.id, { extruderId: action.extruderId }),
+        // A slot change alters what a plate slice would produce, so an existing
+        // plate result no longer matches the queue — same staleness rule
+        // CONFIG_CHANGED applies to settings edits. Per-item results are
+        // untouched: extruderIds only reach the engine via slicePlate().
+        plate: state.plate.gcode ? { ...state.plate, stale: true } : state.plate,
+      }
 
     case 'CONVERSION_DONE': {
       const item = state.items.find((i) => i.id === action.id)
@@ -249,6 +274,9 @@ export interface SliceQueue {
   removeItem: (id: string) => void
   /** Slice every ready item (and re-slice stale results) one after another. */
   sliceAll: () => void
+  /** Assign an item to a 1-based filament/extruder slot for plate slicing
+   *  (0 = inherit the config default). No-op for single slicing. */
+  assignExtruder: (id: string, extruderId: number) => void
   /** Arrange all ready items on one plate and slice them together. */
   slicePlate: () => void
   /** Abort the running slice — terminates the worker and restarts the engine. */
@@ -706,6 +734,12 @@ export function useSliceQueue(
     dispatch({ type: 'RUN_QUEUE' })
   }, [state.plate.slicing])
 
+  const assignExtruder = useCallback((id: string, extruderId: number) => {
+    // Store 0 as undefined so it round-trips cleanly and the plate slice below
+    // only builds an extruderIds array when at least one object is assigned.
+    dispatch({ type: 'ASSIGN_EXTRUDER', id, extruderId: extruderId > 0 ? extruderId : undefined })
+  }, [])
+
   // Exports one queue item's current STL + config snapshot as a .3mf.
   // Independent of slicing — works on any item with STL data, sliced or not.
   const export3mf = useCallback((item: QueueItem): Promise<ArrayBuffer> => {
@@ -738,6 +772,9 @@ export function useSliceQueue(
     if (readyItems.length === 0) return
 
     const configSnapshot = configSnapshotRef.current
+    // Per-object filament/extruder-slot assignment, parallel to readyItems;
+    // undefined (omitted from the message) when nothing is assigned.
+    const extruderIds = buildPlateExtruderIds(readyItems)
     dispatch({ type: 'PLATE_STARTED', configEpoch: configSnapshot.epoch })
     const requestGeneration = sliceRequestGeneration.current
     // Recorded synchronously (before the STL-read await below) so a
@@ -749,7 +786,10 @@ export function useSliceQueue(
         const stls = await Promise.all(readyItems.map((i) => i.stlFile.arrayBuffer()))
         if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
-        getWorker().postMessage({ type: 'SLICE_MULTI', stls, config: configSnapshot.config }, stls)
+        getWorker().postMessage(
+          { type: 'SLICE_MULTI', stls, config: configSnapshot.config, ...(extruderIds ? { extruderIds } : {}) },
+          stls,
+        )
       } catch (err) {
         if (requestGeneration !== sliceRequestGeneration.current) return
         logError('[queue] failed to prepare plate slice:', err)
@@ -774,6 +814,7 @@ export function useSliceQueue(
     addFiles,
     removeItem,
     sliceAll,
+    assignExtruder,
     slicePlate,
     cancel,
     export3mf,

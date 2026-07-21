@@ -150,6 +150,14 @@ export interface QueueItem {
   /** Set when the config changed after this item was sliced — its G-code no
    *  longer reflects the current settings and Slice re-runs it. */
   stale?: boolean
+  /** 1-based filament/extruder slot this object is assigned to on a
+   *  multi-material plate (undefined/0 = inherit the config default). Only
+   *  meaningful when the config has more than one filament slot and the item
+   *  is sliced via slicePlate() → orc_slice_multi's per-object `extruder`
+   *  override; single slicing ignores it. See src/lib/profiles.ts's
+   *  isMultiExtruderProfile note — this is the single-nozzle multi-material
+   *  (AMS-style) path, not real multi-nozzle. */
+  extruderId?: number
   error?: string
   /** Latest progress emitted by a progress-capable WASM engine while slicing. */
   progress?: SliceProgress
