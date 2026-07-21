@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseGcode } from './GcodeViewer'
+import { parseGcode } from '../lib/gcode-parse'
 
 const parsedSegments = (gcode: string) => {
   const layer = parseGcode(gcode).layers[0]
@@ -36,5 +36,19 @@ describe('parseGcode extrusion classification', () => {
 
   it('does not treat an E word on a G0 move as deposited material', () => {
     expect(parsedSegments('M82\nG0 X10 Y0 E1')).toEqual({ extrusion: 0, travel: 1 })
+  })
+})
+
+describe('parseGcode line scanning', () => {
+  // The scanner walks the source with indexOf/slice instead of split('\n')
+  // to keep peak memory down in the worker; these cover the two edges that
+  // distinguishes it from split — a final line with no trailing newline, and
+  // CRLF input.
+  it('parses a final line that has no trailing newline', () => {
+    expect(parsedSegments('M82\nG1 X10 Y0 E1')).toEqual({ extrusion: 1, travel: 0 })
+  })
+
+  it('parses CRLF-terminated input', () => {
+    expect(parsedSegments('M82\r\nG1 X10 Y0 E1\r\nG1 X20 Y0 E1\r\n')).toEqual({ extrusion: 1, travel: 1 })
   })
 })

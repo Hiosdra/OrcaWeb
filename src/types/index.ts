@@ -17,7 +17,10 @@ export interface OrcaConfig {
 
   // Process — quality
   layer_height?: number
-  initial_layer_height?: number
+  /** Real OrcaSlicer FFF field is `initial_layer_print_height` — the
+   *  similarly-named `initial_layer_height` is an SLA-only option
+   *  (PrintConfigDef::init_sla_params) with no effect on an FFF slice. */
+  initial_layer_print_height?: number
   top_shell_layers?: number
   bottom_shell_layers?: number
   wall_loops?: number
@@ -39,6 +42,10 @@ export interface OrcaConfig {
 
   // Process — adhesion
   brim_width?: number
+  brim_type?: BrimType
+  skirt_loops?: number
+  skirt_distance?: number
+  raft_layers?: number
 
   // Process — other
   seam_position?: SeamPosition
@@ -80,6 +87,17 @@ export type SupportType = 'normal(auto)' | 'normal(manual)' | 'tree(auto)' | 'tr
 
 export type SeamPosition = 'aligned' | 'nearest' | 'back' | 'random'
 
+// Subset of PrintConfig.cpp's BrimType enum (s_keys_map_BrimType accepts all
+// 7 keys — set_deserialize_strict doesn't reject any of them). 'auto_brim' is
+// included because it's engine-computed (PrintConfig.cpp: "the brim width is
+// analyzed and calculated automatically") and is also the engine's actual
+// default (btAutoBrim) — worth representing even headless. 'brim_ears' and
+// 'painted' are excluded: both require manual per-object markup done in the
+// desktop UI (ear placement / brim painting) that this headless bridge has
+// no equivalent input for, so setting either here would silently produce no
+// brim at all rather than the ears/painted regions the user intended.
+export type BrimType = 'auto_brim' | 'no_brim' | 'outer_only' | 'inner_only' | 'outer_and_inner'
+
 export type FuzzySkin = 'none' | 'external' | 'all'
 
 export interface SlicePreset {
@@ -89,9 +107,25 @@ export interface SlicePreset {
   config: Partial<OrcaConfig>
 }
 
+// A user-named, savable snapshot of a full settings selection (printer +
+// filament + quality preset + manual overrides) — see App.tsx's
+// USER_PRESETS_KEY persistence and SettingsPanel's "My presets" UI.
+export interface UserPreset {
+  id: string
+  name: string
+  printer: string
+  filament: string
+  preset: string
+  overrides: Partial<OrcaConfig>
+  createdAt: string
+}
+
 // --- Slice queue ---
 
 export type QueueItemStatus = 'converting' | 'ready' | 'slicing' | 'done' | 'error'
+
+/** OBJ mesh, CAD B-rep (STEP), or an OrcaSlicer 3MF project. */
+export type ConversionKind = 'obj' | 'cad' | '3mf'
 
 export interface QueueItem {
   id: string
@@ -110,6 +144,13 @@ export interface QueueItem {
   error?: string
   /** Latest progress emitted by a progress-capable WASM engine while slicing. */
   progress?: SliceProgress
+  /** Which engine request turns this item's sourceFile into an STL, decided
+   *  once from the filename when the item is created. Stored rather than
+   *  re-sniffed at each use so adding a new input format means touching one
+   *  classifier, not every place that needs to know — repostConversions()
+   *  silently not handling `.3mf` after a worker restart was exactly that
+   *  bug. `undefined` means the file is already an STL. */
+  conversion?: ConversionKind
 }
 
 export interface SliceProgress {

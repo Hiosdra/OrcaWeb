@@ -2,7 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { logError, logWarn } from '../lib/log'
 import { parseOrcaProfileJson } from '../lib/profiles'
 import { addWorkerListener, getWasmStatus, getWorker, terminateWorker, type WasmStatus } from '../lib/worker-singleton'
-import type { OrcaConfig, QueueItem, SliceProgress, WorkerOutMessage } from '../types'
+import type { ConversionKind, OrcaConfig, QueueItem, SliceProgress, WorkerOutMessage } from '../types'
 
 export interface PlateState {
   slicing: boolean
@@ -67,6 +67,20 @@ const INITIAL_STATE: QueueState = {
 }
 
 class ItemRemovedError extends Error {}
+
+/**
+ * The single place a filename decides which engine conversion an upload
+ * needs. Recorded on the QueueItem at creation (see QueueItem.conversion) so
+ * every later consumer — the initial post, and the re-post after a worker
+ * restart — reads the same answer instead of re-deriving it from the name.
+ * `undefined` means the file is already an STL and needs no conversion.
+ */
+function classifyConversion(filename: string): ConversionKind | undefined {
+  if (/\.3mf$/i.test(filename)) return '3mf'
+  if (/\.obj$/i.test(filename)) return 'obj'
+  if (/\.(step|stp)$/i.test(filename)) return 'cad'
+  return undefined
+}
 
 function toGcodeFilename(name: string): string {
   return `${name.replace(/\.(stl|3mf|obj|step|stp)$/i, '')}.gcode`
@@ -260,6 +274,16 @@ export function useSliceQueue(
   // this generation invalidates the eventual postMessage from that read.
   const sliceRequestGeneration = useRef(0)
 
+  // Item IDs captured by the currently in-flight (preparing or slicing)
+  // "One plate" request — lets removeItem() tell whether the item it's
+  // removing actually needs to abort that plate slice, instead of either
+  // ignoring the removal (the item quietly survives into the resulting
+  // G-code — the WASM call is synchronous, so once posted nothing short of
+  // a worker restart can pull one object back out) or nuking every plate
+  // slice on any unrelated removal. Set at the start of slicePlate() (before
+  // its async STL-read gap) and cleared once that request truly concludes.
+  const platePreparedIdsRef = useRef<Set<string> | null>(null)
+
   const onSettingsImportedRef = useRef(onSettingsImported)
   useEffect(() => {
     onSettingsImportedRef.current = onSettingsImported
@@ -338,6 +362,7 @@ export function useSliceQueue(
           setWasmStatus('error')
           dispatch({ type: 'ENGINE_FAILED', message: `Slicer engine failed: ${msg.message}` })
           rejectAllPendingMf(`Slicer engine failed: ${msg.message}`)
+          platePreparedIdsRef.current = null
           return
         case 'SLICE_PROGRESS':
           dispatch({ type: 'SLICE_PROGRESS', progress: { percent: msg.percent, stage: msg.stage } })
@@ -351,10 +376,12 @@ export function useSliceQueue(
           return
         case 'SLICE_MULTI_COMPLETE':
           dispatch({ type: 'PLATE_DONE', gcode: msg.gcode })
+          platePreparedIdsRef.current = null
           return
         case 'SLICE_MULTI_ERROR':
           logError('[queue] SLICE_MULTI_ERROR (plate):', msg.message)
           dispatch({ type: 'PLATE_FAILED', message: msg.message })
+          platePreparedIdsRef.current = null
           return
         case 'OBJ_STL_COMPLETE':
         case 'CAD_STL_COMPLETE':
@@ -414,7 +441,10 @@ export function useSliceQueue(
           msg satisfies never
       }
     })
-  }, [])
+    // rejectAllPendingMf is a useCallback with an empty dependency list, so
+    // its reference is stable for the hook's lifetime — listing it keeps the
+    // linter honest without ever re-registering the worker listener.
+  }, [rejectAllPendingMf])
 
   // ── Queue auto-advance ────────────────────────────────────────────────────
   // Single side-effect driving the engine: whenever the queue is running and
@@ -425,7 +455,9 @@ export function useSliceQueue(
   useEffect(() => {
     if (!running || currentId || plate.slicing) return
 
-    const next = items.find((i) => i.status === 'ready' && i.stlFile)
+    // Narrowed via the predicate so `next.stlFile` stays non-null inside the
+    // async closure below, where a property narrowing wouldn't survive.
+    const next = items.find((i): i is QueueItem & { stlFile: File } => i.status === 'ready' && i.stlFile != null)
     if (!next) {
       // Items still converting will re-trigger this effect when they finish.
       if (!items.some((i) => i.status === 'converting')) dispatch({ type: 'QUEUE_IDLE' })
@@ -437,7 +469,7 @@ export function useSliceQueue(
     const requestGeneration = sliceRequestGeneration.current
     void (async () => {
       try {
-        const stl = await next.stlFile!.arrayBuffer()
+        const stl = await next.stlFile.arrayBuffer()
         if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
         getWorker().postMessage({ type: 'SLICE', stl, config: configSnapshot.config }, [stl])
@@ -454,9 +486,10 @@ export function useSliceQueue(
   const postConversion = useCallback(async (item: QueueItem) => {
     try {
       const buf = await item.sourceFile.arrayBuffer()
-      const msg = /\.obj$/i.test(item.sourceFile.name)
-        ? { type: 'OBJ_TO_STL' as const, obj: buf, requestId: item.id }
-        : { type: 'CAD_TO_STL' as const, cad: buf, requestId: item.id }
+      const msg =
+        item.conversion === 'obj'
+          ? { type: 'OBJ_TO_STL' as const, obj: buf, requestId: item.id }
+          : { type: 'CAD_TO_STL' as const, cad: buf, requestId: item.id }
       if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
       getWorker().postMessage(msg, [buf])
     } catch (err) {
@@ -524,27 +557,34 @@ export function useSliceQueue(
 
   const addFiles = useCallback(
     (files: File[]) => {
-      const newItems: QueueItem[] = files.map((f) => ({
-        id: crypto.randomUUID(),
-        name: f.name,
-        originalSize: f.size,
-        sourceFile: f,
-        stlFile: null,
-        status: 'converting',
-      }))
+      const newItems: QueueItem[] = files.map((f) => {
+        const conversion = classifyConversion(f.name)
+        return {
+          id: crypto.randomUUID(),
+          name: f.name,
+          originalSize: f.size,
+          sourceFile: f,
+          stlFile: null,
+          // Stays 'converting' even for a plain STL: the loop below flips it
+          // to 'ready' together with stlFile in one patch, and no consumer
+          // should ever see 'ready' with a null stlFile.
+          status: 'converting',
+          conversion,
+        }
+      })
       dispatch({ type: 'ADD_ITEMS', items: newItems })
 
       void (async () => {
         for (const item of newItems) {
           const f = item.sourceFile
           try {
-            if (/\.3mf$/i.test(f.name)) {
+            if (item.conversion === '3mf') {
               // Fire-and-forget, like the OBJ/STEP branch below — importMf3
               // resolves its own success/fallback/error internally, so one
               // slow (or WASM-load-blocked) .3mf doesn't hold up every other
               // file dropped in the same batch behind it in this loop.
               void importMf3(item)
-            } else if (/\.(step|stp|obj)$/i.test(f.name)) {
+            } else if (item.conversion) {
               await postConversion(item)
             } else {
               dispatch({ type: 'PATCH_ITEM', id: item.id, patch: { stlFile: f, status: 'ready' } })
@@ -564,14 +604,49 @@ export function useSliceQueue(
   )
 
   // Terminating the worker also kills any conversions queued inside it —
-  // re-post them (from the retained source files) to the fresh worker.
-  const repostConversions = useCallback(() => {
+  // re-post them (from the retained source files) to the fresh worker. This
+  // includes in-flight .3mf reads (READ_3MF), not just OBJ/STEP: without the
+  // 3mf branch, an unrelated .3mf import running when the user cancels a
+  // *different* item's slice (or removes the item currently slicing) would
+  // get caught by the blanket rejectAllPendingMf() that follows and flip to
+  // a permanent error — even though nothing about that import itself failed.
+  //
+  // Split into two phases, and it has to stay that way. Discarding the stale
+  // request must happen *before* the caller's rejectAllPendingMf() (it uses
+  // ItemRemovedError, which importMf3()'s catch treats as a silent no-op,
+  // whereas rejectAllPendingMf's plain Error would dispatch a spurious item
+  // error); posting the replacement must happen *after* it, or that blanket
+  // reject cancels the retry it was never meant to see. Returning the second
+  // phase as a thunk makes both orderings structural. Previously this posted
+  // immediately and survived only because importMf3() happens to await
+  // arrayBuffer() before registering its resolver — correct, but silently
+  // broken by anyone hoisting that registration.
+  const prepareConversionReposts = useCallback((): (() => void) => {
+    const reposts: (() => void)[] = []
     for (const item of state.items) {
-      if (item.status === 'converting' && /\.(obj|step|stp)$/i.test(item.sourceFile.name)) {
-        void postConversion(item)
+      if (item.status !== 'converting') continue
+      switch (item.conversion) {
+        case 'obj':
+        case 'cad':
+          // No resolver of its own — the engine replies by requestId, so
+          // there is nothing stale to discard first.
+          reposts.push(() => void postConversion(item))
+          break
+        case '3mf':
+          rejectPendingForItem(item.id, 'Engine restarted — retrying import')
+          reposts.push(() => void importMf3(item))
+          break
+        default:
+          // No conversion request was ever posted for this item (it was
+          // already an STL), so there's nothing to re-post. Exhaustive by
+          // construction: a new ConversionKind fails to compile here.
+          item.conversion satisfies undefined
       }
     }
-  }, [state.items, postConversion])
+    return () => {
+      for (const repost of reposts) repost()
+    }
+  }, [state.items, postConversion, importMf3, rejectPendingForItem])
 
   const cancel = useCallback(() => {
     if (!state.currentId && !state.plate.slicing) return
@@ -582,22 +657,39 @@ export function useSliceQueue(
     terminateWorker()
     setWasmStatus('idle')
     dispatch({ type: 'CANCELLED' })
-    repostConversions()
+    const postReplacements = prepareConversionReposts()
     rejectAllPendingMf('Slice cancelled — engine restarted')
-  }, [state.currentId, state.plate.slicing, repostConversions, rejectAllPendingMf])
+    postReplacements()
+    platePreparedIdsRef.current = null
+  }, [state.currentId, state.plate.slicing, prepareConversionReposts, rejectAllPendingMf])
 
   const removeItem = useCallback(
     (id: string) => {
-      if (state.currentId === id) {
+      // Whether `id` is actually part of the plate request currently being
+      // prepared/sliced — not just "is *any* plate slice running" (that
+      // would abort an unrelated plate slice over an item that was never
+      // part of it, e.g. one added afterward).
+      const isPlateTarget = platePreparedIdsRef.current?.has(id) ?? false
+      if (state.currentId === id || isPlateTarget) {
         // Removing the item being sliced: only a worker restart can abort the
-        // synchronous WASM call. The queue keeps running — the next ready item
-        // is posted to the fresh worker automatically.
+        // synchronous WASM call. For the single-item case the queue keeps
+        // running — the next ready item is posted to the fresh worker
+        // automatically. For the plate case there's no "next item" to fall
+        // back to (arrangement covers the whole set), so the CANCELLED
+        // dispatch below also resets plate.slicing — same as the explicit
+        // Cancel button — rather than leaving the UI stuck on "Slicing
+        // plate…" waiting for a response the terminated worker will never send.
         logWarn(`[queue] removing in-flight item ${id} — restarting engine to abort its slice`)
         sliceRequestGeneration.current += 1
         terminateWorker()
         setWasmStatus('idle')
-        repostConversions()
+        const postReplacements = prepareConversionReposts()
         rejectAllPendingMf('Engine restarted — export cancelled')
+        postReplacements()
+        if (isPlateTarget) {
+          platePreparedIdsRef.current = null
+          dispatch({ type: 'CANCELLED' })
+        }
       }
       // Independent of the above: this item may have its own in-flight
       // export3mf()/engine 3MF-read request (keyed by a UUID unrelated to
@@ -606,7 +698,7 @@ export function useSliceQueue(
       rejectPendingForItem(id, 'Item removed from queue')
       dispatch({ type: 'REMOVE_ITEM', id })
     },
-    [state.currentId, repostConversions, rejectAllPendingMf, rejectPendingForItem],
+    [state.currentId, prepareConversionReposts, rejectAllPendingMf, rejectPendingForItem],
   )
 
   const sliceAll = useCallback(() => {
@@ -617,14 +709,16 @@ export function useSliceQueue(
   // Exports one queue item's current STL + config snapshot as a .3mf.
   // Independent of slicing — works on any item with STL data, sliced or not.
   const export3mf = useCallback((item: QueueItem): Promise<ArrayBuffer> => {
-    if (!item.stlFile) return Promise.reject(new Error('No model data for this item'))
+    // Bound to a local so the guard still holds inside the async closure.
+    const stlFile = item.stlFile
+    if (!stlFile) return Promise.reject(new Error('No model data for this item'))
     const configSnapshot = configSnapshotRef.current
     return new Promise<ArrayBuffer>((resolve, reject) => {
       const requestId = crypto.randomUUID()
       export3mfResolvers.current.set(requestId, { itemId: item.id, resolve, reject })
       void (async () => {
         try {
-          const stl = await item.stlFile!.arrayBuffer()
+          const stl = await stlFile.arrayBuffer()
           if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
           getWorker().postMessage({ type: 'WRITE_3MF', stl, config: configSnapshot.config, requestId }, [stl])
         } catch (err) {
@@ -638,15 +732,21 @@ export function useSliceQueue(
 
   const slicePlate = useCallback(() => {
     if (state.plate.slicing || state.currentId !== null || state.running) return
-    const readyItems = state.items.filter((i) => i.status === 'ready' && i.stlFile != null)
+    const readyItems = state.items.filter(
+      (i): i is QueueItem & { stlFile: File } => i.status === 'ready' && i.stlFile != null,
+    )
     if (readyItems.length === 0) return
 
     const configSnapshot = configSnapshotRef.current
     dispatch({ type: 'PLATE_STARTED', configEpoch: configSnapshot.epoch })
     const requestGeneration = sliceRequestGeneration.current
+    // Recorded synchronously (before the STL-read await below) so a
+    // removeItem() call racing this request can tell whether the item it's
+    // removing is actually part of it — see platePreparedIdsRef's own comment.
+    platePreparedIdsRef.current = new Set(readyItems.map((i) => i.id))
     void (async () => {
       try {
-        const stls = await Promise.all(readyItems.map((i) => i.stlFile!.arrayBuffer()))
+        const stls = await Promise.all(readyItems.map((i) => i.stlFile.arrayBuffer()))
         if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
         getWorker().postMessage({ type: 'SLICE_MULTI', stls, config: configSnapshot.config }, stls)
@@ -654,6 +754,13 @@ export function useSliceQueue(
         if (requestGeneration !== sliceRequestGeneration.current) return
         logError('[queue] failed to prepare plate slice:', err)
         dispatch({ type: 'PLATE_FAILED', message: err instanceof Error ? err.message : String(err) })
+        // Otherwise this request's ids linger in platePreparedIdsRef forever
+        // (PLATE_DONE/SLICE_MULTI_ERROR/WASM_ERROR/cancel all clear it, but
+        // this early-failure path — e.g. a queued item's file changed on
+        // disk and arrayBuffer() rejects — didn't). A later removeItem() for
+        // any of those now-stale ids would then wrongly think it's aborting
+        // a live plate slice and restart the engine over nothing.
+        platePreparedIdsRef.current = null
       }
     })()
   }, [state.plate.slicing, state.currentId, state.running, state.items])

@@ -5,7 +5,11 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import { isWebGLAvailable } from '../lib/webgl'
 
 interface Props {
-  file: File
+  /** One or more STL files to preview together, laid out on a simple grid —
+   *  NOT the engine's real "One plate" arrangement (only orc_slice_multi's
+   *  arrange_objects() computes that); this is just enough to see every
+   *  loaded model at once instead of only the first. */
+  files: File[]
   /** Bed width (X axis) in mm — default 256 */
   bedX?: number
   /** Bed depth (Y axis) in mm — default 256 */
@@ -75,9 +79,22 @@ function buildBed(scene: THREE.Scene, bedX: number, bedY: number, bedShape: 'rec
   return disposables
 }
 
-export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangle' }: Props) {
+/**
+ * Upper bound on how many models the preview will parse and draw at once.
+ * Every file here is decoded by STLLoader on the main thread, so an unbounded
+ * queue of large STLs would lock up the UI just to render a thumbnail-grade
+ * preview; beyond a dozen or so objects the grid isn't legible anyway. The
+ * excess is reported through the notice banner rather than dropped silently.
+ */
+const MAX_PREVIEW_MODELS = 12
+
+export function ModelViewer({ files, bedX = 256, bedY = 256, bedShape = 'rectangle' }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
+  // Blocking: nothing could be drawn, so the overlay covering the canvas is
+  // the whole content. Distinct from `notice` below, which annotates a
+  // preview that did render and so must not hide it.
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
     const el = mountRef.current
@@ -88,6 +105,7 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
       return
     }
     setLoadError(null)
+    setNotice(null)
 
     const w = el.clientWidth
     const h = el.clientHeight
@@ -123,49 +141,89 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
     controls.target.set(0, 0, 0)
 
     const loader = new STLLoader()
-    let mesh: THREE.Mesh | null = null
+    const meshes: THREE.Mesh[] = []
+    const material = new THREE.MeshPhongMaterial({
+      color: 0x0a84ff,
+      specular: 0x222222,
+      shininess: 30,
+      side: THREE.DoubleSide,
+    })
     let cancelled = false
 
-    file
-      .arrayBuffer()
-      .then((buffer) => {
-        if (cancelled) return
+    const shown = files.slice(0, MAX_PREVIEW_MODELS)
+    const skippedCount = files.length - shown.length
 
-        let geometry: THREE.BufferGeometry
+    void Promise.all(
+      shown.map(async (file) => {
         try {
-          geometry = loader.parse(buffer)
+          const buffer = await file.arrayBuffer()
+          const geometry = loader.parse(buffer)
+          geometry.computeBoundingBox()
+          const box = geometry.boundingBox
+          if (!box) return null
+          return { geometry, box }
         } catch {
-          setLoadError('Could not read this model file')
-          return
+          return null
         }
-        geometry.computeBoundingBox()
-        const box = geometry.boundingBox!
-        const size = box.getSize(new THREE.Vector3())
+      }),
+    ).then((results) => {
+      const loaded = results.filter((r): r is { geometry: THREE.BufferGeometry; box: THREE.Box3 } => r !== null)
+      if (cancelled) {
+        // Unmounted (or the file set changed) while these were decoding —
+        // none of them ever reached the scene, so nothing else will free them.
+        for (const { geometry } of loaded) geometry.dispose()
+        return
+      }
+      const failedCount = results.length - loaded.length
+      if (loaded.length === 0) {
+        setLoadError(failedCount > 0 ? 'Could not read this model file' : null)
+        return
+      }
+      // Everything below this point renders, so any complaint has to be a
+      // non-blocking notice — an overlay here would hide the models that did
+      // load behind a message about the ones that didn't.
+      const notices = [
+        failedCount > 0 ? `${failedCount} of ${results.length} files could not be read` : null,
+        skippedCount > 0 ? `showing the first ${shown.length} of ${files.length} models` : null,
+      ].filter((n): n is string => n !== null)
+      if (notices.length > 0) setNotice(notices.join(' · '))
+
+      // Naive preview grid, not the engine's real "One plate" arrangement:
+      // equal-sized cells sized to the largest loaded object's footprint
+      // plus a fixed gap, filled row-major and centred on the bed origin.
+      const sizes = loaded.map(({ box }) => box.getSize(new THREE.Vector3()))
+      const gap = 10
+      const cellX = Math.max(...sizes.map((s) => s.x)) + gap
+      const cellY = Math.max(...sizes.map((s) => s.y)) + gap
+      const cols = Math.ceil(Math.sqrt(loaded.length))
+      const gridW = cols * cellX
+      const gridH = Math.ceil(loaded.length / cols) * cellY
+
+      let maxZ = 0
+      loaded.forEach(({ geometry, box }, i) => {
+        const col = i % cols
+        const row = Math.floor(i / cols)
+        const cellCenterX = -gridW / 2 + cellX * (col + 0.5)
+        const cellCenterY = gridH / 2 - cellY * (row + 0.5)
+
         const center = box.getCenter(new THREE.Vector3())
+        // Centre this object within its cell; bottom at Z=0 (engine: X/Y flat, Z = height)
+        geometry.translate(cellCenterX - center.x, cellCenterY - center.y, -box.min.z)
 
-        // Centre X/Y on bed origin; place bottom at Z=0 (engine: X/Y flat, Z = height)
-        geometry.translate(-center.x, -center.y, -box.min.z)
-
-        const material = new THREE.MeshPhongMaterial({
-          color: 0x0a84ff,
-          specular: 0x222222,
-          shininess: 30,
-          side: THREE.DoubleSide,
-        })
-        mesh = new THREE.Mesh(geometry, material)
+        const mesh = new THREE.Mesh(geometry, material)
         mesh.castShadow = true
         scene.add(mesh)
+        meshes.push(mesh)
+        maxZ = Math.max(maxZ, box.max.z - box.min.z)
+      })
 
-        // Fit camera to model — Z-up: position camera above and to the side
-        const maxDim = Math.max(size.x, size.y, size.z, 50)
-        const dist = maxDim * 2.5
-        camera.position.set(dist * 0.6, -dist, dist * 0.7)
-        controls.target.set(0, 0, size.z / 2)
-        controls.update()
-      })
-      .catch(() => {
-        if (!cancelled) setLoadError('Could not read this model file')
-      })
+      // Fit camera to the whole grid — Z-up: position camera above and to the side
+      const maxDim = Math.max(gridW, gridH, maxZ, 50)
+      const dist = maxDim * 2
+      camera.position.set(dist * 0.6, -dist, dist * 0.7)
+      controls.target.set(0, 0, maxZ / 2)
+      controls.update()
+    })
 
     let animId: number
     const animate = () => {
@@ -190,8 +248,8 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
       resizeObs.disconnect()
       controls.dispose()
       renderer.dispose()
-      mesh?.geometry.dispose()
-      ;(mesh?.material as THREE.Material | undefined)?.dispose()
+      for (const mesh of meshes) mesh.geometry.dispose()
+      material.dispose()
       for (const obj of bedObjects) {
         if (obj instanceof THREE.Mesh || obj instanceof THREE.Line || obj instanceof THREE.LineSegments) {
           obj.geometry.dispose()
@@ -206,7 +264,7 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
       }
       el.removeChild(renderer.domElement)
     }
-  }, [file, bedX, bedY, bedShape])
+  }, [files, bedX, bedY, bedShape])
 
   return (
     <div className="relative w-full h-full min-h-48">
@@ -214,6 +272,11 @@ export function ModelViewer({ file, bedX = 256, bedY = 256, bedShape = 'rectangl
       {loadError && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-50/80 text-sm text-slate-500">
           {loadError}
+        </div>
+      )}
+      {!loadError && notice && (
+        <div className="absolute inset-x-0 bottom-0 px-3 py-1.5 bg-amber-50/90 border-t border-amber-200 text-xs text-amber-700 text-center">
+          {notice}
         </div>
       )}
     </div>

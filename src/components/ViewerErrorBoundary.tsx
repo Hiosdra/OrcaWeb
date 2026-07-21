@@ -4,10 +4,18 @@ import { logError } from '../lib/log'
 interface Props {
   children: ReactNode
   message: string
+  /** Clears a previous crash when this value changes. Prefer it over a
+   *  `key` on the boundary: `key` throws away the whole subtree, so the
+   *  viewer below tears down and recreates its WebGL context every time the
+   *  value changes — and the viewers already rebuild their own scene from
+   *  their effect dependencies, making that a redundant second teardown (and
+   *  a way to churn through the browser's active-context limit). */
+  resetKey?: string
 }
 
 interface State {
   hasError: boolean
+  resetKey?: string
 }
 
 /**
@@ -20,8 +28,13 @@ interface State {
 export class ViewerErrorBoundary extends Component<Props, State> {
   state: State = { hasError: false }
 
-  static getDerivedStateFromError(): State {
+  static getDerivedStateFromError(): Partial<State> {
     return { hasError: true }
+  }
+
+  static getDerivedStateFromProps(props: Props, state: State): Partial<State> | null {
+    if (props.resetKey === state.resetKey) return null
+    return { hasError: false, resetKey: props.resetKey }
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {

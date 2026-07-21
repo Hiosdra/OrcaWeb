@@ -2,8 +2,9 @@ import clsx from 'clsx'
 import { strToU8, zipSync } from 'fflate'
 import { useEffect, useMemo, useState } from 'react'
 import type { PlateState } from '../hooks/useSliceQueue'
+import { downloadBlob } from '../lib/download'
 import { extractGcodeStats, gcodeStatsLabel } from '../lib/gcode-stats'
-import { DISPLAY_DEFAULTS } from '../lib/profiles'
+import { DISPLAY_DEFAULTS, filamentSlots } from '../lib/profiles'
 import type { WasmStatus } from '../lib/worker-singleton'
 import type { OrcaConfig, QueueItem } from '../types'
 import { GcodeViewer } from './GcodeViewer'
@@ -28,17 +29,6 @@ interface BedProps {
 }
 
 // ── Download helpers ──────────────────────────────────────────────────────────
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  setTimeout(() => URL.revokeObjectURL(url), 0)
-}
 
 function downloadGcode(gcode: string, filename: string) {
   downloadBlob(new Blob([gcode], { type: 'text/plain' }), filename)
@@ -90,7 +80,12 @@ export function SliceHeader({
   const readyForPlate = queue.filter((i) => i.status === 'ready' && i.stlFile != null).length
   const allDone = totalCount > 0 && doneCount + errorCount === totalCount && staleCount === 0
   const canSlice = sliceableCount > 0 && !isSlicing && !plate.slicing
-  const canPlate = readyForPlate >= 2 && !isSlicing && !plate.slicing && wasmStatus === 'ready'
+  // No wasmStatus gate here, matching canSlice: doSliceMulti() buffers the
+  // request in pendingPlate exactly like doSlice() buffers pendingSlice while
+  // the engine is still loading (slicer.worker.ts), so there's no need to
+  // block the click — it would just needlessly make users wait for the
+  // engine before they can even queue a plate slice.
+  const canPlate = readyForPlate >= 2 && !isSlicing && !plate.slicing
 
   const sliceLabel = isSlicing
     ? `Slicing… (${doneCount + busyCount}/${totalCount})`
@@ -186,11 +181,18 @@ export function QueueItemCard({
   bedY,
   bedShape,
   onExport3mf,
-}: { item: QueueItem; onExport3mf: (item: QueueItem) => Promise<ArrayBuffer> } & BedProps) {
+}: {
+  item: QueueItem
+  onExport3mf: (item: QueueItem) => Promise<ArrayBuffer>
+} & BedProps) {
   const [expanded, setExpanded] = useState(false)
   const [exporting3mf, setExporting3mf] = useState(false)
   const [export3mfError, setExport3mfError] = useState<string | null>(null)
   const statsLabel = useMemo(() => (item.gcode ? gcodeStatsLabel(extractGcodeStats(item.gcode)) : ''), [item.gcode])
+  const { gcode, gcodeFilename } = item
+  // Stable array reference so ModelViewer's effect doesn't recreate the
+  // WebGL scene on every unrelated re-render while the card is expanded.
+  const previewFiles = useMemo(() => (item.stlFile ? [item.stlFile] : []), [item.stlFile])
 
   const handleExport3mf = async () => {
     setExporting3mf(true)
@@ -255,7 +257,10 @@ export function QueueItemCard({
           </p>
         </div>
 
-        {item.status === 'done' && item.gcode && item.gcodeFilename && (
+        {/* Destructured so the narrowing survives into the click handlers —
+            TypeScript can't keep a mutable property's narrowing inside a
+            closure, which is what the non-null assertions here were hiding. */}
+        {item.status === 'done' && gcode && gcodeFilename && (
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -267,7 +272,7 @@ export function QueueItemCard({
             </button>
             <button
               type="button"
-              onClick={() => downloadGcode(item.gcode!, item.gcodeFilename!)}
+              onClick={() => downloadGcode(gcode, gcodeFilename)}
               data-testid="download-gcode-button"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors"
             >
@@ -331,7 +336,7 @@ export function QueueItemCard({
               <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Model</div>
               <div style={{ height: 270 }}>
                 <ViewerErrorBoundary key={item.id} message="3D preview unavailable">
-                  <ModelViewer file={item.stlFile} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+                  <ModelViewer files={previewFiles} bedX={bedX} bedY={bedY} bedShape={bedShape} />
                 </ViewerErrorBoundary>
               </div>
             </div>
@@ -355,6 +360,9 @@ export function QueueItemCard({
 // ── Plate result card ─────────────────────────────────────────────────────────
 
 export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateState } & BedProps) {
+  // See QueueItemCard: narrowing a property doesn't reach the click handler,
+  // so bind it once here instead of asserting non-null at each use.
+  const plateGcode = plate.gcode
   const [expanded, setExpanded] = useState(false)
   const statsLabel = useMemo(() => (plate.gcode ? gcodeStatsLabel(extractGcodeStats(plate.gcode)) : ''), [plate.gcode])
 
@@ -400,7 +408,7 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
                   : 'Done')}
           </p>
         </div>
-        {plate.gcode && (
+        {plateGcode && (
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -412,7 +420,7 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
             </button>
             <button
               type="button"
-              onClick={() => downloadGcode(plate.gcode!, 'plate.gcode')}
+              onClick={() => downloadGcode(plateGcode, 'plate.gcode')}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold transition-colors"
             >
               <DownloadIcon className="w-3.5 h-3.5" />
@@ -452,10 +460,7 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
 // ── Config summary ────────────────────────────────────────────────────────────
 
 export function ConfigSummary({ config, fileCount }: { config: OrcaConfig; fileCount: number }) {
-  const filamentEntries = String(config.filament_type ?? DISPLAY_DEFAULTS.filament_type)
-    .split(/[;,]/)
-    .map((entry) => entry.trim())
-    .filter(Boolean)
+  const filamentEntries = filamentSlots(config)
   const filamentTypes = [...new Set(filamentEntries)]
   const material =
     filamentEntries.length > 1
@@ -464,6 +469,7 @@ export function ConfigSummary({ config, fileCount }: { config: OrcaConfig; fileC
   const rows: [string, string][] = [
     ['Files', `${fileCount} file${fileCount !== 1 ? 's' : ''}`],
     ['Printer', config.printer_model ?? DISPLAY_DEFAULTS.printer_model],
+    ['Nozzle', `${config.nozzle_diameter ?? DISPLAY_DEFAULTS.nozzle_diameter} mm`],
     ['Material', material],
     ['Layer height', `${config.layer_height ?? DISPLAY_DEFAULTS.layer_height} mm`],
     [

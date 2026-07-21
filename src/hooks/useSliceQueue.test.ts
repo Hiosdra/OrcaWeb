@@ -22,4 +22,12 @@ describe('slice queue mutual exclusion', () => {
     const plate = { ...state.plate, slicing: true }
     expect(sliceQueueReducer({ ...state, plate }, { type: 'RUN_QUEUE' })).toEqual({ ...state, plate })
   })
+
+  it('CANCELLED resets plate.slicing even with no currentId set — the path removeItem() relies on to abort an in-flight plate slice', () => {
+    const plate = { ...state.plate, slicing: true }
+    expect(sliceQueueReducer({ ...state, plate }, { type: 'CANCELLED' })).toEqual({
+      ...state,
+      plate: { ...plate, slicing: false, progress: undefined },
+    })
+  })
 })

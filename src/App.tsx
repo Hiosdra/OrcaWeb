@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FileUpload } from './components/FileUpload'
 import { ErrorDotIcon, GithubIcon, ModelIconSm, OrcaLogo, SpinnerIcon, XIcon } from './components/icons'
 import { ModelViewer } from './components/ModelViewer'
@@ -11,7 +11,7 @@ import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
 import { buildConfig, DISPLAY_DEFAULTS, FILAMENT_PRESETS, PRESETS, PRINTER_PRESETS } from './lib/profiles'
 import type { WasmStatus } from './lib/worker-singleton'
-import type { OrcaConfig } from './types'
+import type { OrcaConfig, UserPreset } from './types'
 
 // ── Persisted settings ────────────────────────────────────────────────────────
 
@@ -87,6 +87,57 @@ function loadSavedSettings(): SavedSettings | null {
   }
 }
 
+// ── User presets ──────────────────────────────────────────────────────────────
+// Named, savable snapshots of a full settings selection — separate from the
+// single auto-persisted "current selection" above (SETTINGS_KEY), so a user
+// can keep e.g. "PETG structural" and "PLA fast draft" side by side instead
+// of overwriting one working set every time they switch printer/preset.
+
+const USER_PRESETS_KEY = 'orcaweb.userPresets.v1'
+
+function isUserPreset(value: unknown): value is UserPreset {
+  if (!value || typeof value !== 'object') return false
+  const p = value as Partial<UserPreset>
+  return (
+    typeof p.id === 'string' &&
+    typeof p.name === 'string' &&
+    typeof p.printer === 'string' &&
+    // Own keys only, not `in`: the preset tables are plain objects, so `in`
+    // also answers yes for "constructor"/"toString"/… — inherited names that
+    // name no preset. Harmless downstream today (buildConfig spreads a
+    // function to nothing), but a validator that accepts values it is meant
+    // to reject is the wrong thing to leave in place. Matches how the quality
+    // preset is checked against PRESETS just below; both tables are tiny.
+    Object.keys(PRINTER_PRESETS).includes(p.printer) &&
+    typeof p.filament === 'string' &&
+    Object.keys(FILAMENT_PRESETS).includes(p.filament) &&
+    typeof p.preset === 'string' &&
+    PRESETS.some((preset) => preset.name === p.preset) &&
+    !!p.overrides &&
+    typeof p.overrides === 'object'
+  )
+}
+
+function loadUserPresets(): UserPreset[] {
+  try {
+    const raw = localStorage.getItem(USER_PRESETS_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    // A preset referencing a printer/filament/preset removed in a later app
+    // version is dropped rather than crashing the whole list.
+    const valid = parsed.filter(isUserPreset)
+    const droppedCount = parsed.length - valid.length
+    if (droppedCount > 0) {
+      logWarn(`Dropped ${droppedCount} saved preset(s) referencing a printer/filament/preset that no longer exists`)
+    }
+    return valid
+  } catch (err) {
+    logWarn('Failed to load saved presets — starting with an empty list', err)
+    return []
+  }
+}
+
 // Reverse-lookup a preset key (e.g. "Bambu Lab X1C") from a raw engine field
 // value (e.g. printer_model: "Bambu Lab X1 Carbon") — the two differ because
 // preset keys are UI labels while the field values are the literal OrcaSlicer
@@ -98,6 +149,33 @@ function findPresetKeyByField(
   value: unknown,
 ): string | undefined {
   return Object.keys(presets).find((key) => presets[key][field] === value)
+}
+
+// Returns an array with the same File objects, in the same order, as `next`
+// — but reuses the *previous* array reference whenever the actual set of
+// files hasn't changed. `queue` (from useSliceQueue) gets a brand-new array
+// reference on every SLICE_PROGRESS/CONFIG_CHANGED dispatch even though the
+// underlying File objects didn't change, so deriving previewFiles with a
+// plain `useMemo(..., [queue])` gave ModelViewer a "new" `files` prop on
+// every progress tick — tearing down and rebuilding the whole WebGL scene
+// (re-parsing every STL, resetting camera framing, visible flicker) while
+// slicing. Comparing by File identity here instead of by wrapper-array
+// identity keeps the prop stable across those unrelated re-renders.
+//
+// The ref write below happens during render, which is safe here specifically
+// because this is a pure cache: the write is idempotent, derives only from
+// `next`, and the comparison re-runs on every render — so a render that
+// concurrent React throws away can't leave a wrong value behind, only a
+// harmlessly-primed one. (A `useMemo` keyed on a derived identity string
+// would avoid the write, but then the memo's real dependency — `queue` — is
+// absent from its dependency list, which trades a documented ref cache for a
+// lint suppression.)
+function useStableFileList(next: File[]): File[] {
+  const ref = useRef<File[]>([])
+  const prev = ref.current
+  const same = prev.length === next.length && prev.every((f, i) => f === next[i])
+  if (!same) ref.current = next
+  return ref.current
 }
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -122,6 +200,7 @@ export default function App() {
   const [manualOverrides, setManualOverrides] = useState<Partial<OrcaConfig>>(saved?.manualOverrides ?? {})
   const [importedProfile, setImportedProfile] = useState<ImportedProfile | null>(saved?.importedProfile ?? null)
   const [importNotice, setImportNotice] = useState<string | null>(null)
+  const [userPresets, setUserPresets] = useState<UserPreset[]>(loadUserPresets)
 
   const baseConfig = useMemo(
     () => buildConfig(selectedPrinter, selectedFilament, selectedPreset),
@@ -148,6 +227,91 @@ export default function App() {
       logWarn('Failed to persist settings — storage full or unavailable', err)
     }
   }, [selectedPrinter, selectedFilament, selectedPreset, manualOverrides, importedProfile])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(USER_PRESETS_KEY, JSON.stringify(userPresets))
+    } catch (err) {
+      logWarn('Failed to persist saved presets — storage full or unavailable', err)
+    }
+  }, [userPresets])
+
+  // Captures the full current selection (printer/filament/quality + manual
+  // overrides) under a name. Deliberately excludes any active imported
+  // profile — a saved preset is meant to be a self-contained, portable
+  // selection built from the app's own presets, not a pointer to a specific
+  // imported file the user may not still have.
+  const saveUserPreset = useCallback(
+    (name: string) => {
+      const preset: UserPreset = {
+        id: crypto.randomUUID(),
+        name,
+        printer: selectedPrinter,
+        filament: selectedFilament,
+        preset: selectedPreset,
+        overrides: manualOverrides,
+        createdAt: new Date().toISOString(),
+      }
+      // Two presets with the same name are indistinguishable in the list, so
+      // reusing a name means "update that one" — with a confirm, since it
+      // discards whatever was stored under it.
+      const clash = userPresets.find((p) => p.name.trim().toLowerCase() === name.trim().toLowerCase())
+      if (clash) {
+        if (!window.confirm(`A preset named "${clash.name}" already exists. Replace it?`)) return
+        setUserPresets((prev) => prev.map((p) => (p.id === clash.id ? { ...preset, id: clash.id } : p)))
+        return
+      }
+      setUserPresets((prev) => [...prev, preset])
+    },
+    [selectedPrinter, selectedFilament, selectedPreset, manualOverrides, userPresets],
+  )
+
+  // Applies a saved preset's full selection in one go. The four setState
+  // calls below are batched into a single re-render (called from a plain
+  // event handler), so `config` recomputes exactly once and useSliceQueue's
+  // configEpoch bumps once — not once per field — matching how
+  // handlePresetChange/handlePrinterChange/handleProfileImported already
+  // apply their own multi-field updates atomically.
+  const loadUserPreset = useCallback(
+    (id: string) => {
+      const p = userPresets.find((preset) => preset.id === id)
+      if (!p) return
+      // A saved preset is a complete selection, so it has to replace the
+      // imported-profile layer rather than sit under it — otherwise the
+      // import's fields would keep winning and the preset would only
+      // partially apply. That drops settings the user can't get back from
+      // here (the source file isn't retained), so it's confirmed rather than
+      // done silently, and only when there's actually something to lose.
+      if (importedProfile) {
+        const ok = window.confirm(
+          `Loading "${p.name}" will discard the settings imported from ${importedProfile.name}.\n\n` +
+            `You'll need the original file to get them back. Continue?`,
+        )
+        if (!ok) return
+      }
+      setSelectedPrinter(p.printer)
+      setSelectedFilament(p.filament)
+      setSelectedPreset(p.preset)
+      setManualOverrides(p.overrides)
+      setImportedProfile(null)
+    },
+    [userPresets, importedProfile],
+  )
+
+  // Confirmed because it's immediate and unrecoverable — the preset only
+  // exists in localStorage and the list offers no undo. The prompt sits
+  // outside the state updater deliberately: updaters must be pure, and
+  // StrictMode double-invokes them, so prompting from inside would show the
+  // dialog twice in development.
+  const deleteUserPreset = useCallback(
+    (id: string) => {
+      const target = userPresets.find((p) => p.id === id)
+      if (!target) return
+      if (!window.confirm(`Delete the preset "${target.name}"? This can't be undone.`)) return
+      setUserPresets((prev) => prev.filter((p) => p.id !== id))
+    },
+    [userPresets],
+  )
 
   // Settings embedded in an imported file (3MF) form their own layer so later
   // dropdown changes cannot silently erase them.
@@ -228,7 +392,20 @@ export default function App() {
 
   // ── Derived state ─────────────────────────────────────────────────────────
 
-  const previewFile = useMemo(() => queue.find((i) => i.stlFile != null)?.stlFile ?? null, [queue])
+  // Every ready/done model, not just the first — the preview shows the whole
+  // set laid out on a grid (see ModelViewer's doc comment) instead of only
+  // ever showing one object when multiple files are queued. Passed through
+  // useStableFileList so a queue update that doesn't actually add/remove/
+  // replace a model (e.g. a SLICE_PROGRESS tick) doesn't hand ModelViewer a
+  // "new" files array and force it to rebuild the WebGL scene.
+  const rawPreviewFiles = useMemo(() => queue.map((i) => i.stlFile).filter((f): f is File => f != null), [queue])
+  const previewFiles = useStableFileList(rawPreviewFiles)
+  // Clears a previous ViewerErrorBoundary crash when the file set actually
+  // changes (passed as resetKey, not key — see the boundary's own doc
+  // comment for why remounting the viewer here would be the wrong tool).
+  // Includes size/lastModified so two same-named files still read as a
+  // change.
+  const previewFilesKey = previewFiles.map((f) => `${f.name}:${f.size}:${f.lastModified}`).join('|')
   const hasAnyReady = queue.some((i) => i.stlFile != null)
   const isConverting = queue.some((i) => i.status === 'converting')
 
@@ -338,10 +515,10 @@ export default function App() {
               </div>
             )}
 
-            {previewFile && (
+            {previewFiles.length > 0 && (
               <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white" style={{ height: 300 }}>
-                <ViewerErrorBoundary key={previewFile.name} message="3D preview unavailable">
-                  <ModelViewer file={previewFile} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+                <ViewerErrorBoundary resetKey={previewFilesKey} message="3D preview unavailable">
+                  <ModelViewer files={previewFiles} bedX={bedX} bedY={bedY} bedShape={bedShape} />
                 </ViewerErrorBoundary>
               </div>
             )}
@@ -363,13 +540,13 @@ export default function App() {
         {/* ── Settings tab ── */}
         {activeTab === 'settings' && hasAnyReady && (
           <div className="grid sm:grid-cols-[1fr_1.4fr] gap-6">
-            {previewFile && (
+            {previewFiles.length > 0 && (
               <div
                 className="rounded-2xl overflow-hidden border border-slate-200 bg-white order-last sm:order-first"
                 style={{ height: 320 }}
               >
-                <ViewerErrorBoundary key={previewFile.name} message="3D preview unavailable">
-                  <ModelViewer file={previewFile} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+                <ViewerErrorBoundary resetKey={previewFilesKey} message="3D preview unavailable">
+                  <ModelViewer files={previewFiles} bedX={bedX} bedY={bedY} bedShape={bedShape} />
                 </ViewerErrorBoundary>
               </div>
             )}
@@ -395,6 +572,10 @@ export default function App() {
                 onPrinterChange={handlePrinterChange}
                 selectedFilament={selectedFilament}
                 onFilamentChange={handleFilamentChange}
+                userPresets={userPresets}
+                onSaveUserPreset={saveUserPreset}
+                onLoadUserPreset={loadUserPreset}
+                onDeleteUserPreset={deleteUserPreset}
               />
               <button
                 type="button"

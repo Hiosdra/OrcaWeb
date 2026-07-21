@@ -25,8 +25,18 @@ export const PRINTER_PRESETS: Record<string, Partial<OrcaConfig>> = orcaProfiles
 // keep falling back to the engine's own default, which may differ). Having
 // one table keeps every surface (settings inputs, config summary, 3D bed
 // viewers) quoting the same number instead of each hardcoding its own.
+//
+// For every field the engine also has, the value here MUST equal that
+// engine default (PrintConfig.cpp's set_default_value), and new entries
+// should be checked against it. Not cosmetic: because these are display-only,
+// a field left unset is absent from exportOrcaProfileJson()'s output too —
+// desktop OrcaSlicer then resolves it from the same engine default, so an
+// entry that disagrees means the panel shows one number while both the local
+// slice and the exported preset silently use another. wall_loops sat at 3
+// against the engine's 2 for exactly that reason.
 export const DISPLAY_DEFAULTS = {
   printer_model: 'Generic',
+  nozzle_diameter: 0.4,
   bed_size_x: 256,
   bed_size_y: 256,
   bed_shape: 'rectangle',
@@ -34,7 +44,10 @@ export const DISPLAY_DEFAULTS = {
   nozzle_temperature: 220,
   bed_temperature: 60,
   layer_height: 0.2,
-  wall_loops: 3,
+  initial_layer_print_height: 0.2,
+  top_shell_layers: 4,
+  bottom_shell_layers: 3,
+  wall_loops: 2,
   wall_generator: 'arachne',
   sparse_infill_density: 15,
   sparse_infill_pattern: 'grid',
@@ -49,7 +62,32 @@ export const DISPLAY_DEFAULTS = {
   enable_support: false,
   support_type: 'normal(auto)',
   brim_width: 0,
+  brim_type: 'auto_brim',
+  skirt_loops: 1,
+  skirt_distance: 2,
+  raft_layers: 0,
 } as const satisfies OrcaConfig
+
+/**
+ * Split the config's filament_type into the individual material names it
+ * mentions, for display only (ConfigSummary's "Material" row) — an imported
+ * profile can carry something like "PLA;PETG" and listing both reads better
+ * than printing the raw string.
+ *
+ * Explicitly NOT a slot count. It's tempting to read one entry here as one
+ * AMS slot, and an earlier revision of this file claimed exactly that, but
+ * it is false: measured against OrcaSlicer 2.4.2, "PLA;PETG" resolves to a
+ * single filament (`['PLA']`), "PLA,PETG" to `['PLA,PETG']`, and even a JSON
+ * array `["PLA","PETG"]` to `['PLA']`. The engine's filament count is the
+ * number of separate filament *presets* it was given, which this app does
+ * not model — see issue #155 before using this for anything but text.
+ */
+export function filamentSlots(config: OrcaConfig): string[] {
+  return String(config.filament_type ?? DISPLAY_DEFAULTS.filament_type)
+    .split(/[;,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+}
 
 export function buildConfig(
   printer: string,
@@ -80,6 +118,47 @@ export function buildConfig(
 }
 
 /**
+ * The four corners of a rectangular bed, in the "XxY" vertex format
+ * OrcaSlicer's `printable_area` uses and parsePrintableArea() reads back.
+ * Shared by toEngineConfig() (which joins them into the flat comma-separated
+ * string the engine's set_deserialize_strict expects) and
+ * exportOrcaProfileJson() (which writes the JSON array form real profiles
+ * use), so the two can't disagree about the winding or the origin corner.
+ */
+function bedCorners(x: number, y: number): string[] {
+  return ['0x0', `${x}x0`, `${x}x${y}`, `0x${y}`]
+}
+
+/**
+ * Nozzle diameters OrcaSlicer ships machine presets for. printerPresetName()
+ * below builds "<model> <diameter> nozzle" from the configured diameter, so a
+ * diameter outside this set names a preset that does not exist.
+ */
+const STOCK_NOZZLE_DIAMETERS: readonly number[] = [0.2, 0.25, 0.4, 0.6, 0.8]
+
+/**
+ * The name of the desktop OrcaSlicer printer preset this config corresponds
+ * to, following OrcaSlicer's own machine-preset naming convention
+ * "<printer model> <nozzle diameter> nozzle" (e.g. "Bambu Lab P1S 0.4
+ * nozzle" — verified against the profiles shipped inside OrcaSlicer 2.4.2).
+ *
+ * Needed because a process/filament preset OrcaSlicer will actually accept
+ * must name the printers it applies to in `compatible_printers`: without it
+ * the preset is rejected outright ("process not compatible with printer",
+ * CLI exit -17), and an empty list does not mean "any printer". Verified by
+ * slicing with the exported files against a stock OrcaSlicer install.
+ *
+ * A guess, necessarily — this app never sees the user's actual preset list,
+ * and a vendor whose presets don't follow the convention won't match. That
+ * only costs the user editing one field in a plain-text JSON, whereas
+ * omitting the key makes the export unusable for everyone.
+ */
+function printerPresetName(config: OrcaConfig): string | undefined {
+  if (config.printer_model === undefined || config.nozzle_diameter === undefined) return undefined
+  return `${config.printer_model} ${config.nozzle_diameter} nozzle`
+}
+
+/**
  * Translate OrcaConfig field names to the literal OrcaSlicer config option
  * names the WASM bridge expects, for the fields where they differ.
  *
@@ -98,9 +177,7 @@ export function toEngineConfig(config: OrcaConfig): Record<string, unknown> {
   const { default_speed, enable_ironing, bed_temperature, ...rest } = config as OrcaConfig & Record<string, unknown>
   const out: Record<string, unknown> = { ...rest }
   if (config.bed_size_x !== undefined && config.bed_size_y !== undefined) {
-    const x = config.bed_size_x
-    const y = config.bed_size_y
-    out.printable_area = `0x0,${x}x0,${x}x${y},0x${y}`
+    out.printable_area = bedCorners(config.bed_size_x, config.bed_size_y).join(',')
   }
   if (bed_temperature !== undefined) {
     // OrcaSlicer/BambuStudio's real option names — "bed_temperature" isn't
@@ -123,49 +200,140 @@ export function toEngineConfig(config: OrcaConfig): Record<string, unknown> {
   return out
 }
 
+/**
+ * Why an exported bundle won't load in desktop OrcaSlicer, or null when
+ * nothing is known to be wrong with it. For the export button to say so
+ * instead of reporting a plain success.
+ *
+ * Both cases end in the same place: everything hangs off the stock preset
+ * name printerPresetName() derives. The process/filament files are matched
+ * against the printer's `inherits` and nothing else, and the machine file has
+ * to inherit from a printer OrcaSlicer already has — so if that name is
+ * missing or names nothing, the bundle is rejected outright (exit -17).
+ * Measured against OrcaSlicer 2.4.2: an export with neither key fails exactly
+ * like one naming the wrong printer.
+ *
+ * Slicing in this app is unaffected either way — the engine takes any nozzle
+ * diameter and needs no preset names — which is why this is a note attached
+ * to the download rather than a blocked button or a restricted input.
+ */
+export function describeExportCompatibility(config: OrcaConfig): string | null {
+  if (printerPresetName(config) === undefined) {
+    return (
+      'Exported — but this profile does not say which printer model and nozzle it is for, so ' +
+      'OrcaSlicer cannot tell what the presets belong to and will reject them. Set "inherits" in ' +
+      'machine.json (and "compatible_printers" in the other two) to a printer you have.'
+    )
+  }
+  const nozzle = config.nozzle_diameter
+  if (nozzle !== undefined && !STOCK_NOZZLE_DIAMETERS.includes(nozzle)) {
+    return (
+      `Exported — but OrcaSlicer ships no preset for a ${nozzle} mm nozzle, so it will reject ` +
+      'machine.json until you point its "inherits" at a printer you have.'
+    )
+  }
+  return null
+}
+
+// Which real OrcaSlicer profile file a field belongs to — desktop OrcaSlicer
+// profiles are split into separate print/filament/printer presets, each only
+// populated with its own option set (see exportOrcaProfileBundle below).
+type FieldCategory = 'process' | 'filament' | 'machine'
+
 // OrcaSlicer profile field → OrcaConfig key mapping.
-// OrcaSlicer often encodes numbers as strings (e.g. "0.2") and percentages as "15%".
-const ORCA_FIELD_MAP: Record<string, { key: keyof OrcaConfig; type: 'num' | 'pct' | 'bool' | 'str' }> = {
-  layer_height: { key: 'layer_height', type: 'num' },
-  initial_layer_height: { key: 'initial_layer_height', type: 'num' },
-  wall_loops: { key: 'wall_loops', type: 'num' },
-  perimeters: { key: 'wall_loops', type: 'num' }, // alias
-  wall_generator: { key: 'wall_generator', type: 'str' },
-  top_shell_layers: { key: 'top_shell_layers', type: 'num' },
-  bottom_shell_layers: { key: 'bottom_shell_layers', type: 'num' },
-  sparse_infill_density: { key: 'sparse_infill_density', type: 'pct' },
-  fill_density: { key: 'sparse_infill_density', type: 'pct' }, // alias
-  sparse_infill_pattern: { key: 'sparse_infill_pattern', type: 'str' },
-  fill_pattern: { key: 'sparse_infill_pattern', type: 'str' },
-  outer_wall_speed: { key: 'outer_wall_speed', type: 'num' },
-  external_perimeter_speed: { key: 'outer_wall_speed', type: 'num' },
-  default_speed: { key: 'default_speed', type: 'num' },
-  inner_wall_speed: { key: 'default_speed', type: 'num' },
-  travel_speed: { key: 'travel_speed', type: 'num' },
-  initial_layer_speed: { key: 'initial_layer_speed', type: 'num' },
-  first_layer_speed: { key: 'initial_layer_speed', type: 'num' },
-  brim_width: { key: 'brim_width', type: 'num' },
-  seam_position: { key: 'seam_position', type: 'str' },
-  enable_support: { key: 'enable_support', type: 'bool' },
-  support_type: { key: 'support_type', type: 'str' },
-  enable_ironing: { key: 'enable_ironing', type: 'bool' },
-  ironing: { key: 'enable_ironing', type: 'bool' },
-  fuzzy_skin: { key: 'fuzzy_skin', type: 'str' },
-  fuzzy_skin_thickness: { key: 'fuzzy_skin_thickness', type: 'num' },
-  fuzzy_skin_point_dist: { key: 'fuzzy_skin_point_dist', type: 'num' },
+// OrcaSlicer often encodes numbers as strings (e.g. "0.2") and percentages as
+// "15%". 'ironing' is its own type (see enable_ironing/ironing_type below):
+// unlike bool, its true/false <-> string mapping isn't "1"/"0", it's the
+// IroningType enum (s_keys_map_IroningType in PrintConfig.cpp).
+//
+// `importOnly` marks a field name that must never be written back out by
+// exportOrcaProfileJson(). Two kinds qualify, and both have already shipped
+// as export bugs once:
+//   - Aliases: an alternative real OrcaSlicer/PrusaSlicer spelling of a field
+//     whose canonical name is another entry here (e.g. `perimeters` for
+//     `wall_loops`). Accepted on import, but exporting the alias instead of
+//     the canonical name is at best noise.
+//   - Synthetic OrcaConfig-only names with no matching real PrintConfig
+//     option at all (`default_speed`, `bed_temperature`, `bed_shape`). These
+//     are the dangerous ones: desktop OrcaSlicer silently drops unrecognized
+//     keys, so exporting one loses the user's setting with no error.
+// Flagging them explicitly (rather than relying on declaration order, which
+// is how `default_speed`/`enable_ironing`/`bed_temperature` each leaked into
+// exports in the first place) makes REVERSE_FIELD_MAP below order-independent.
+const ORCA_FIELD_MAP: Record<
+  string,
+  {
+    key: keyof OrcaConfig
+    type: 'num' | 'pct' | 'bool' | 'str' | 'ironing'
+    category: FieldCategory
+    importOnly?: true
+  }
+> = {
+  layer_height: { key: 'layer_height', type: 'num', category: 'process' },
+  // The real FFF field is initial_layer_print_height — initial_layer_height
+  // (no "print_") is a distinct SLA-only option (PrintConfigDef::init_sla_params)
+  // that set_deserialize_strict on our FFF-only build silently ignores. See
+  // OrcaConfig.initial_layer_print_height's own doc comment.
+  initial_layer_print_height: { key: 'initial_layer_print_height', type: 'num', category: 'process' },
+  wall_loops: { key: 'wall_loops', type: 'num', category: 'process' },
+  perimeters: { key: 'wall_loops', type: 'num', category: 'process', importOnly: true }, // alias
+  wall_generator: { key: 'wall_generator', type: 'str', category: 'process' },
+  top_shell_layers: { key: 'top_shell_layers', type: 'num', category: 'process' },
+  bottom_shell_layers: { key: 'bottom_shell_layers', type: 'num', category: 'process' },
+  sparse_infill_density: { key: 'sparse_infill_density', type: 'pct', category: 'process' },
+  fill_density: { key: 'sparse_infill_density', type: 'pct', category: 'process', importOnly: true }, // alias
+  sparse_infill_pattern: { key: 'sparse_infill_pattern', type: 'str', category: 'process' },
+  fill_pattern: { key: 'sparse_infill_pattern', type: 'str', category: 'process', importOnly: true }, // alias
+  outer_wall_speed: { key: 'outer_wall_speed', type: 'num', category: 'process' },
+  external_perimeter_speed: { key: 'outer_wall_speed', type: 'num', category: 'process', importOnly: true }, // alias
+  // inner_wall_speed is the real OrcaSlicer field; `default_speed` is an
+  // OrcaConfig-only synthetic name (see toEngineConfig's doc comment) kept
+  // readable on import so profiles this app exported before the fix still
+  // load, but never written back out.
+  inner_wall_speed: { key: 'default_speed', type: 'num', category: 'process' },
+  default_speed: { key: 'default_speed', type: 'num', category: 'process', importOnly: true },
+  travel_speed: { key: 'travel_speed', type: 'num', category: 'process' },
+  initial_layer_speed: { key: 'initial_layer_speed', type: 'num', category: 'process' },
+  first_layer_speed: { key: 'initial_layer_speed', type: 'num', category: 'process', importOnly: true }, // alias
+  brim_width: { key: 'brim_width', type: 'num', category: 'process' },
+  brim_type: { key: 'brim_type', type: 'str', category: 'process' },
+  skirt_loops: { key: 'skirt_loops', type: 'num', category: 'process' },
+  skirt_distance: { key: 'skirt_distance', type: 'num', category: 'process' },
+  raft_layers: { key: 'raft_layers', type: 'num', category: 'process' },
+  seam_position: { key: 'seam_position', type: 'str', category: 'process' },
+  enable_support: { key: 'enable_support', type: 'bool', category: 'process' },
+  support_type: { key: 'support_type', type: 'str', category: 'process' },
+  // ironing_type is the real OrcaSlicer field (s_keys_map_IroningType: "no
+  // ironing"/"top"/"topmost"/"solid") — there is no real "ironing" or
+  // "enable_ironing" option (verified against PrintConfig.cpp). enable_ironing
+  // is an OrcaConfig-only simplified boolean toggle for the UI; the 'ironing'
+  // type below is what translates it to/from the real enum string, mirroring
+  // toEngineConfig's own enable_ironing -> ironing_type conversion.
+  ironing_type: { key: 'enable_ironing', type: 'ironing', category: 'process' },
+  fuzzy_skin: { key: 'fuzzy_skin', type: 'str', category: 'process' },
+  fuzzy_skin_thickness: { key: 'fuzzy_skin_thickness', type: 'num', category: 'process' },
+  fuzzy_skin_point_dist: { key: 'fuzzy_skin_point_dist', type: 'num', category: 'process' },
   // filament fields
-  filament_type: { key: 'filament_type', type: 'str' },
-  nozzle_temperature: { key: 'nozzle_temperature', type: 'num' },
-  temperature: { key: 'nozzle_temperature', type: 'num' },
-  bed_temperature: { key: 'bed_temperature', type: 'num' },
-  hot_plate_temp: { key: 'bed_temperature', type: 'num' },
-  fan_min_speed: { key: 'fan_min_speed', type: 'num' },
+  filament_type: { key: 'filament_type', type: 'str', category: 'filament' },
+  nozzle_temperature: { key: 'nozzle_temperature', type: 'num', category: 'filament' },
+  temperature: { key: 'nozzle_temperature', type: 'num', category: 'filament', importOnly: true }, // alias
+  // hot_plate_temp is the real OrcaSlicer field — "bed_temperature" is not in
+  // its PrintConfig schema at all, so exporting it silently loses the user's
+  // bed temperature on import into desktop OrcaSlicer (the same failure mode
+  // toEngineConfig documents for the engine side).
+  hot_plate_temp: { key: 'bed_temperature', type: 'num', category: 'filament' },
+  bed_temperature: { key: 'bed_temperature', type: 'num', category: 'filament', importOnly: true },
+  fan_min_speed: { key: 'fan_min_speed', type: 'num', category: 'filament' },
   // machine fields
-  printer_model: { key: 'printer_model', type: 'str' },
-  nozzle_diameter: { key: 'nozzle_diameter', type: 'num' },
-  printable_height: { key: 'printable_height', type: 'num' },
-  max_print_height: { key: 'printable_height', type: 'num' }, // alias
-  bed_shape: { key: 'bed_shape', type: 'str' },
+  printer_model: { key: 'printer_model', type: 'str', category: 'machine' },
+  nozzle_diameter: { key: 'nozzle_diameter', type: 'num', category: 'machine' },
+  printable_height: { key: 'printable_height', type: 'num', category: 'machine' },
+  max_print_height: { key: 'printable_height', type: 'num', category: 'machine', importOnly: true }, // alias
+  // OrcaConfig-only: real OrcaSlicer machine profiles describe bed geometry
+  // solely through printable_area (parseOrcaProfileJson derives circle-ness
+  // from its vertex count), and "rectangle"/"circle" aren't valid values for
+  // any polygon field — so this is never written back out.
+  bed_shape: { key: 'bed_shape', type: 'str', category: 'machine', importOnly: true },
   // bed size — handled separately via parsePrintableArea() below
 }
 
@@ -294,6 +462,11 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
       } else if (meta.type === 'bool') {
         const s = String(raw_val).toLowerCase()
         out[meta.key] = s === '1' || s === 'true' || s === 'yes'
+      } else if (meta.type === 'ironing') {
+        // s_keys_map_IroningType: "no ironing"/"top"/"topmost"/"solid" — any
+        // non-empty value other than "no ironing" means ironing is enabled.
+        const s = String(raw_val).trim().toLowerCase()
+        out[meta.key] = s !== '' && s !== 'no ironing'
       } else {
         out[meta.key] = String(raw_val)
       }
@@ -372,4 +545,187 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
   } catch {
     return {}
   }
+}
+
+// Reverse of ORCA_FIELD_MAP: for each internal OrcaConfig key, the real
+// OrcaSlicer field name to write on export. Built by skipping every
+// `importOnly` entry rather than by taking the first field seen for a key —
+// declaration order is not a safe signal here, and relying on it is exactly
+// how default_speed, enable_ironing and bed_temperature each shipped as the
+// exported name for a field OrcaSlicer doesn't have. A key whose only entry
+// is importOnly (e.g. bed_shape) is deliberately absent, and so never
+// exported at all.
+const REVERSE_FIELD_MAP: Partial<Record<keyof OrcaConfig, string>> = {}
+for (const [field, meta] of Object.entries(ORCA_FIELD_MAP)) {
+  if (meta.importOnly) continue
+  if (meta.key in REVERSE_FIELD_MAP) {
+    throw new Error(
+      `ORCA_FIELD_MAP: "${field}" and "${REVERSE_FIELD_MAP[meta.key]}" both claim to be the exported name for ` +
+        `"${meta.key}" — exactly one entry per key may omit importOnly.`,
+    )
+  }
+  REVERSE_FIELD_MAP[meta.key] = field
+}
+
+/**
+ * `_passthrough` fields that must never reach an exported file, however they
+ * were spelled in the profile they came from.
+ *
+ * Both of these name (or test for) the printer the *imported* profile was
+ * written for, which is not necessarily the printer being exported here — a
+ * process preset imported from a Creality profile carries
+ * `compatible_printers: ["Creality Ender-3 0.4 nozzle"]`, and passing it
+ * through means the exported bundle claims compatibility with a printer its
+ * own machine.json isn't. OrcaSlicer then rejects the whole combination
+ * ("process not compatible with printer", CLI exit -17) — the exact failure
+ * the derived `compatible_printers` below exists to prevent. Dropping them
+ * lets the derived value stand.
+ */
+const PASSTHROUGH_EXPORT_DENYLIST = new Set(['compatible_printers', 'compatible_printers_condition'])
+
+/**
+ * Serialize the current in-app config back into a single OrcaSlicer-
+ * compatible profile JSON of one type (`process`/`filament`/`machine`) — the
+ * mirror of parseOrcaProfileJson(). Only fields belonging to `category` are
+ * written (canonical OrcaSlicer field names via REVERSE_FIELD_MAP), matching
+ * how real OrcaSlicer print/filament/printer presets are three genuinely
+ * separate option sets, not one flat file — a "process" preset with e.g.
+ * nozzle_diameter (a machine-only option) mixed in isn't a shape desktop
+ * OrcaSlicer's preset bundles ever produce themselves. Percentages are
+ * written as "NN%" and printable_area as bed-corner strings, so each file is
+ * also loadable by desktop OrcaSlicer as a user preset of that type.
+ *
+ * `_passthrough` fields can't be reliably attributed to a single category —
+ * they arrive pre-merged from potentially multiple sources (buildConfig
+ * merges every preset layer's _passthrough together; parseOrcaProfileJson
+ * dumps every unmapped field from whichever single file was imported into
+ * one bag) — so they're written to every category's file rather than
+ * risking silently dropping one. A passthrough field that doesn't belong to
+ * a given file's category is simply an unrecognized key there, same as any
+ * other key set_deserialize_strict doesn't know.
+ *
+ * A field this config leaves unset is deliberately absent from the output
+ * rather than filled in from DISPLAY_DEFAULTS: unset means "whatever the
+ * engine defaults to", and desktop OrcaSlicer resolves an absent key from
+ * that same default, so omitting it is what keeps the exported preset
+ * slicing the way this app sliced. That only holds while DISPLAY_DEFAULTS
+ * agrees with the engine — see its own comment.
+ *
+ * Exported by exportOrcaProfileBundle() below for actual use; kept as its
+ * own function (rather than inlined) so tests can assert one category's
+ * output directly.
+ */
+export function exportOrcaProfileJson(config: OrcaConfig, name: string, category: FieldCategory): string {
+  const { _passthrough, bed_size_x, bed_size_y, ...rest } = config
+  const out: Record<string, unknown> = {
+    type: category,
+    name,
+    from: 'User',
+  }
+  for (const [orcaKey, value] of Object.entries(rest)) {
+    if (value === undefined || value === null) continue
+    const field = REVERSE_FIELD_MAP[orcaKey as keyof OrcaConfig]
+    if (!field) continue
+    const meta = ORCA_FIELD_MAP[field]
+    if (meta.category !== category) continue
+    out[field] =
+      meta.type === 'pct'
+        ? `${value}%`
+        : meta.type === 'ironing'
+          ? value
+            ? 'top'
+            : 'no ironing'
+          : typeof value === 'boolean'
+            ? value
+              ? '1'
+              : '0'
+            : String(value)
+  }
+  if (category === 'filament' && config.bed_temperature !== undefined) {
+    // OrcaSlicer splits bed temperature into the steady-state and first-layer
+    // options; the UI has one knob, so both get it — mirroring exactly what
+    // toEngineConfig() sends to the engine, so an exported profile slices the
+    // same way in desktop OrcaSlicer as it did here.
+    out.hot_plate_temp_initial_layer = String(config.bed_temperature)
+  }
+
+  // Passthrough goes on *before* the derived keys below, not after. A
+  // passthrough value describes the profile it was imported from; the derived
+  // keys describe the selection actually being exported, so where the two
+  // collide the derived one has to win. (Applying it last is how an imported
+  // profile's foreign `compatible_printers` used to silently replace the
+  // derived one and make the bundle unloadable.) printable_area is the one
+  // deliberate exception, re-applied further down.
+  if (_passthrough) {
+    for (const [field, value] of Object.entries(_passthrough)) {
+      if (PASSTHROUGH_EXPORT_DENYLIST.has(field)) continue
+      out[field] = value
+    }
+  }
+
+  const printer = printerPresetName(config)
+  if (printer && (category === 'process' || category === 'filament')) {
+    // Exactly one entry, and it has to be the *stock* preset name, because
+    // that is the only string this list is ever compared against.
+    //
+    // Measured against OrcaSlicer 2.4.2's CLI (the path this bundle is for):
+    // the gate is OrcaSlicer.cpp's own `process_compatible` loop, not
+    // Preset.cpp's is_compatible_with_printer(), and it tests each entry
+    // against `new_printer_system_name` — the printer preset's `inherits`
+    // value, never the preset's own name. Adding the exported machine file's
+    // name here is therefore inert: verified, a list containing only that
+    // name is rejected (exit -17) even though that file *is* the printer
+    // being loaded. Its `inherits` (set below) is what makes the match.
+    //
+    // An absent or empty list is not "compatible with anything" either — the
+    // loop simply never matches. Verified: dropping the key fails the same
+    // -17. (Preset.cpp's separate GUI-side check does treat an empty list as
+    // compatible-with-all, which is what makes this easy to get wrong.)
+    out.compatible_printers = [printer]
+  }
+  if (printer && category === 'machine') {
+    // A machine preset has to derive from a printer OrcaSlicer already knows;
+    // a standalone one is rejected the same way an uncompatible process is.
+    // Inheriting from the stock preset of the same model makes this a normal
+    // user printer preset — verified end to end: the exported file slices,
+    // and printer_model/nozzle_diameter/printable_height come from here.
+    out.inherits = printer
+  }
+  if (category === 'machine') {
+    // An imported profile's own printable_area wins over the rectangle
+    // derived from bed_size_x/y, so non-rectangular and offset beds survive
+    // import -> export (see parseOrcaProfileJson's SKIP_BED comment). It
+    // arrives flattened to a comma-joined string; real machine profiles use
+    // the array form, so restore that here rather than shipping a shape
+    // OrcaSlicer's own exports never produce.
+    const imported = _passthrough?.printable_area
+    if (imported !== undefined) {
+      out.printable_area = imported
+        .split(',')
+        .map((vertex) => vertex.trim())
+        .filter(Boolean)
+    } else if (bed_size_x !== undefined && bed_size_y !== undefined) {
+      out.printable_area = bedCorners(bed_size_x, bed_size_y)
+    }
+  }
+  return JSON.stringify(out, null, 2)
+}
+
+/**
+ * Export the current settings as a full OrcaSlicer preset bundle — one file
+ * per real preset type (process/filament/machine), matching how desktop
+ * OrcaSlicer itself stores and imports presets (see exportOrcaProfileJson's
+ * own doc comment for why a single flat file can't represent this). Used by
+ * SettingsPanel's "Export" button, which zips the three files together so
+ * the whole bundle downloads as one action.
+ */
+export function exportOrcaProfileBundle(
+  config: OrcaConfig,
+  baseName: string,
+): { filename: string; category: FieldCategory; json: string }[] {
+  return (['process', 'filament', 'machine'] as const).map((category) => ({
+    filename: `${category}.json`,
+    category,
+    json: exportOrcaProfileJson(config, `${baseName} (${category})`, category),
+  }))
 }
