@@ -79,9 +79,22 @@ function buildBed(scene: THREE.Scene, bedX: number, bedY: number, bedShape: 'rec
   return disposables
 }
 
+/**
+ * Upper bound on how many models the preview will parse and draw at once.
+ * Every file here is decoded by STLLoader on the main thread, so an unbounded
+ * queue of large STLs would lock up the UI just to render a thumbnail-grade
+ * preview; beyond a dozen or so objects the grid isn't legible anyway. The
+ * excess is reported through the notice banner rather than dropped silently.
+ */
+const MAX_PREVIEW_MODELS = 12
+
 export function ModelViewer({ files, bedX = 256, bedY = 256, bedShape = 'rectangle' }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
+  // Blocking: nothing could be drawn, so the overlay covering the canvas is
+  // the whole content. Distinct from `notice` below, which annotates a
+  // preview that did render and so must not hide it.
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
     const el = mountRef.current
@@ -92,6 +105,7 @@ export function ModelViewer({ files, bedX = 256, bedY = 256, bedShape = 'rectang
       return
     }
     setLoadError(null)
+    setNotice(null)
 
     const w = el.clientWidth
     const h = el.clientHeight
@@ -136,8 +150,11 @@ export function ModelViewer({ files, bedX = 256, bedY = 256, bedShape = 'rectang
     })
     let cancelled = false
 
+    const shown = files.slice(0, MAX_PREVIEW_MODELS)
+    const skippedCount = files.length - shown.length
+
     void Promise.all(
-      files.map(async (file) => {
+      shown.map(async (file) => {
         try {
           const buffer = await file.arrayBuffer()
           const geometry = loader.parse(buffer)
@@ -150,17 +167,26 @@ export function ModelViewer({ files, bedX = 256, bedY = 256, bedShape = 'rectang
         }
       }),
     ).then((results) => {
-      if (cancelled) return
       const loaded = results.filter((r): r is { geometry: THREE.BufferGeometry; box: THREE.Box3 } => r !== null)
-      const failedCount = results.length - loaded.length
-      if (failedCount > 0) {
-        setLoadError(
-          loaded.length === 0
-            ? 'Could not read this model file'
-            : `Could not read ${failedCount} of ${results.length} model files`,
-        )
+      if (cancelled) {
+        // Unmounted (or the file set changed) while these were decoding —
+        // none of them ever reached the scene, so nothing else will free them.
+        for (const { geometry } of loaded) geometry.dispose()
+        return
       }
-      if (loaded.length === 0) return
+      const failedCount = results.length - loaded.length
+      if (loaded.length === 0) {
+        setLoadError(failedCount > 0 ? 'Could not read this model file' : null)
+        return
+      }
+      // Everything below this point renders, so any complaint has to be a
+      // non-blocking notice — an overlay here would hide the models that did
+      // load behind a message about the ones that didn't.
+      const notices = [
+        failedCount > 0 ? `${failedCount} of ${results.length} files could not be read` : null,
+        skippedCount > 0 ? `showing the first ${shown.length} of ${files.length} models` : null,
+      ].filter((n): n is string => n !== null)
+      if (notices.length > 0) setNotice(notices.join(' · '))
 
       // Naive preview grid, not the engine's real "One plate" arrangement:
       // equal-sized cells sized to the largest loaded object's footprint
@@ -246,6 +272,11 @@ export function ModelViewer({ files, bedX = 256, bedY = 256, bedShape = 'rectang
       {loadError && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-50/80 text-sm text-slate-500">
           {loadError}
+        </div>
+      )}
+      {!loadError && notice && (
+        <div className="absolute inset-x-0 bottom-0 px-3 py-1.5 bg-amber-50/90 border-t border-amber-200 text-xs text-amber-700 text-center">
+          {notice}
         </div>
       )}
     </div>

@@ -160,6 +160,17 @@ export function SliceHeader({
         </button>
       )}
 
+      {/* orc_slice_multi drops the whole per-object extruder mapping unless
+          every file loaded as exactly one object (slicer.cpp's
+          can_map_extruders), and the bridge has no channel to report that
+          back — so surface the condition up front rather than let the
+          assignment silently do nothing. */}
+      {queue.some((i) => i.extruderId) && (
+        <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+          Filament slots apply only if each file contains a single object
+        </span>
+      )}
+
       {wasmStatus === 'loading' && readyCount === 0 && !isSlicing && (
         <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
           Loading slicer engine…
@@ -271,7 +282,11 @@ export function QueueItemCard({
           <select
             value={item.extruderId ?? 0}
             onChange={(e) => onSetExtruderId(item.id, Number(e.target.value) || undefined)}
-            title="Filament slot to use when slicing this file as part of a One-plate multi-material slice"
+            title={
+              'Filament slot to use when slicing this file as part of a One-plate multi-material slice.\n' +
+              'Applies only if the file loads as exactly one object — a file containing several ' +
+              'separate solids falls back to the default slot.'
+            }
             className="shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 focus:outline-none focus:ring-2 focus:ring-orca-400"
           >
             <option value={0}>Default slot</option>

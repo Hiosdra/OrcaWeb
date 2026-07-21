@@ -57,7 +57,6 @@ describe('exportOrcaProfileBundle', () => {
 
     expect(byFile['filament.json'].type).toBe('filament')
     expect(byFile['filament.json'].nozzle_temperature).toBe('230')
-    expect(byFile['filament.json'].bed_temperature).toBe('65')
     expect(byFile['filament.json'].layer_height).toBeUndefined()
     expect(byFile['filament.json'].nozzle_diameter).toBeUndefined()
 
@@ -66,6 +65,25 @@ describe('exportOrcaProfileBundle', () => {
     expect(byFile['machine.json'].printable_area).toEqual(['0x0', '220x0', '220x220', '0x220'])
     expect(byFile['machine.json'].layer_height).toBeUndefined()
     expect(byFile['machine.json'].nozzle_temperature).toBeUndefined()
+  })
+
+  // These assert the raw exported key names, which a round-trip through this
+  // app's own parseOrcaProfileJson cannot catch: it recognizes the synthetic
+  // names too, so a profile that desktop OrcaSlicer would silently strip
+  // still round-trips perfectly here.
+  it('writes bed temperature as the real hot_plate_temp fields, not the synthetic bed_temperature', () => {
+    const filament = JSON.parse(exportOrcaProfileJson(config, 'test', 'filament')) as Record<string, unknown>
+    expect(filament.hot_plate_temp).toBe('65')
+    expect(filament.hot_plate_temp_initial_layer).toBe('65')
+    expect(filament.bed_temperature).toBeUndefined()
+  })
+
+  it('never writes bed_shape — real machine profiles carry bed geometry only in printable_area', () => {
+    const machine = JSON.parse(exportOrcaProfileJson({ bed_shape: 'circle' }, 'p', 'machine')) as Record<
+      string,
+      unknown
+    >
+    expect(machine.bed_shape).toBeUndefined()
   })
 
   it('round-trips every field when the three files are merged back through parseOrcaProfileJson', () => {

@@ -163,7 +163,18 @@ export function parseGcode(gcode: string): ParseResult {
     }
   }
 
-  for (const rawLine of gcode.split('\n')) {
+  // Scanned with indexOf/slice rather than gcode.split('\n'): split would
+  // materialize one string per line up front, which for a multi-MB G-code
+  // file means millions of live strings on top of the source text before a
+  // single segment is parsed. The worker (the path large files actually take)
+  // is the memory-constrained context, so it streams instead.
+  let position = 0
+  while (position < gcode.length) {
+    let nextNewline = gcode.indexOf('\n', position)
+    if (nextNewline === -1) nextNewline = gcode.length
+    const rawLine = gcode.slice(position, nextNewline)
+    position = nextNewline + 1
+
     if (rawLine.charCodeAt(0) === 59 /* ';' */) {
       // The engine emits ";TYPE:<t>" (Marlin/generic flavor) or
       // "; FEATURE: <t>" (Bambu flavor) depending on the printer profile.

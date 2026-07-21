@@ -104,6 +104,18 @@ export function buildConfig(
 }
 
 /**
+ * The four corners of a rectangular bed, in the "XxY" vertex format
+ * OrcaSlicer's `printable_area` uses and parsePrintableArea() reads back.
+ * Shared by toEngineConfig() (which joins them into the flat comma-separated
+ * string the engine's set_deserialize_strict expects) and
+ * exportOrcaProfileJson() (which writes the JSON array form real profiles
+ * use), so the two can't disagree about the winding or the origin corner.
+ */
+function bedCorners(x: number, y: number): string[] {
+  return ['0x0', `${x}x0`, `${x}x${y}`, `0x${y}`]
+}
+
+/**
  * Translate OrcaConfig field names to the literal OrcaSlicer config option
  * names the WASM bridge expects, for the fields where they differ.
  *
@@ -122,9 +134,7 @@ export function toEngineConfig(config: OrcaConfig): Record<string, unknown> {
   const { default_speed, enable_ironing, bed_temperature, ...rest } = config as OrcaConfig & Record<string, unknown>
   const out: Record<string, unknown> = { ...rest }
   if (config.bed_size_x !== undefined && config.bed_size_y !== undefined) {
-    const x = config.bed_size_x
-    const y = config.bed_size_y
-    out.printable_area = `0x0,${x}x0,${x}x${y},0x${y}`
+    out.printable_area = bedCorners(config.bed_size_x, config.bed_size_y).join(',')
   }
   if (bed_temperature !== undefined) {
     // OrcaSlicer/BambuStudio's real option names — "bed_temperature" isn't
@@ -157,9 +167,29 @@ type FieldCategory = 'process' | 'filament' | 'machine'
 // "15%". 'ironing' is its own type (see enable_ironing/ironing_type below):
 // unlike bool, its true/false <-> string mapping isn't "1"/"0", it's the
 // IroningType enum (s_keys_map_IroningType in PrintConfig.cpp).
+//
+// `importOnly` marks a field name that must never be written back out by
+// exportOrcaProfileJson(). Two kinds qualify, and both have already shipped
+// as export bugs once:
+//   - Aliases: an alternative real OrcaSlicer/PrusaSlicer spelling of a field
+//     whose canonical name is another entry here (e.g. `perimeters` for
+//     `wall_loops`). Accepted on import, but exporting the alias instead of
+//     the canonical name is at best noise.
+//   - Synthetic OrcaConfig-only names with no matching real PrintConfig
+//     option at all (`default_speed`, `bed_temperature`, `bed_shape`). These
+//     are the dangerous ones: desktop OrcaSlicer silently drops unrecognized
+//     keys, so exporting one loses the user's setting with no error.
+// Flagging them explicitly (rather than relying on declaration order, which
+// is how `default_speed`/`enable_ironing`/`bed_temperature` each leaked into
+// exports in the first place) makes REVERSE_FIELD_MAP below order-independent.
 const ORCA_FIELD_MAP: Record<
   string,
-  { key: keyof OrcaConfig; type: 'num' | 'pct' | 'bool' | 'str' | 'ironing'; category: FieldCategory }
+  {
+    key: keyof OrcaConfig
+    type: 'num' | 'pct' | 'bool' | 'str' | 'ironing'
+    category: FieldCategory
+    importOnly?: true
+  }
 > = {
   layer_height: { key: 'layer_height', type: 'num', category: 'process' },
   // The real FFF field is initial_layer_print_height — initial_layer_height
@@ -168,24 +198,25 @@ const ORCA_FIELD_MAP: Record<
   // OrcaConfig.initial_layer_print_height's own doc comment.
   initial_layer_print_height: { key: 'initial_layer_print_height', type: 'num', category: 'process' },
   wall_loops: { key: 'wall_loops', type: 'num', category: 'process' },
-  perimeters: { key: 'wall_loops', type: 'num', category: 'process' }, // alias
+  perimeters: { key: 'wall_loops', type: 'num', category: 'process', importOnly: true }, // alias
   wall_generator: { key: 'wall_generator', type: 'str', category: 'process' },
   top_shell_layers: { key: 'top_shell_layers', type: 'num', category: 'process' },
   bottom_shell_layers: { key: 'bottom_shell_layers', type: 'num', category: 'process' },
   sparse_infill_density: { key: 'sparse_infill_density', type: 'pct', category: 'process' },
-  fill_density: { key: 'sparse_infill_density', type: 'pct', category: 'process' }, // alias
+  fill_density: { key: 'sparse_infill_density', type: 'pct', category: 'process', importOnly: true }, // alias
   sparse_infill_pattern: { key: 'sparse_infill_pattern', type: 'str', category: 'process' },
-  fill_pattern: { key: 'sparse_infill_pattern', type: 'str', category: 'process' },
+  fill_pattern: { key: 'sparse_infill_pattern', type: 'str', category: 'process', importOnly: true }, // alias
   outer_wall_speed: { key: 'outer_wall_speed', type: 'num', category: 'process' },
-  external_perimeter_speed: { key: 'outer_wall_speed', type: 'num', category: 'process' },
-  // inner_wall_speed (the real OrcaSlicer field) must come before default_speed
-  // (an OrcaConfig-only synthetic name — see toEngineConfig's doc comment)
-  // so REVERSE_FIELD_MAP's first-seen-wins picks the real name to export.
+  external_perimeter_speed: { key: 'outer_wall_speed', type: 'num', category: 'process', importOnly: true }, // alias
+  // inner_wall_speed is the real OrcaSlicer field; `default_speed` is an
+  // OrcaConfig-only synthetic name (see toEngineConfig's doc comment) kept
+  // readable on import so profiles this app exported before the fix still
+  // load, but never written back out.
   inner_wall_speed: { key: 'default_speed', type: 'num', category: 'process' },
-  default_speed: { key: 'default_speed', type: 'num', category: 'process' },
+  default_speed: { key: 'default_speed', type: 'num', category: 'process', importOnly: true },
   travel_speed: { key: 'travel_speed', type: 'num', category: 'process' },
   initial_layer_speed: { key: 'initial_layer_speed', type: 'num', category: 'process' },
-  first_layer_speed: { key: 'initial_layer_speed', type: 'num', category: 'process' },
+  first_layer_speed: { key: 'initial_layer_speed', type: 'num', category: 'process', importOnly: true }, // alias
   brim_width: { key: 'brim_width', type: 'num', category: 'process' },
   brim_type: { key: 'brim_type', type: 'str', category: 'process' },
   skirt_loops: { key: 'skirt_loops', type: 'num', category: 'process' },
@@ -207,16 +238,24 @@ const ORCA_FIELD_MAP: Record<
   // filament fields
   filament_type: { key: 'filament_type', type: 'str', category: 'filament' },
   nozzle_temperature: { key: 'nozzle_temperature', type: 'num', category: 'filament' },
-  temperature: { key: 'nozzle_temperature', type: 'num', category: 'filament' },
-  bed_temperature: { key: 'bed_temperature', type: 'num', category: 'filament' },
+  temperature: { key: 'nozzle_temperature', type: 'num', category: 'filament', importOnly: true }, // alias
+  // hot_plate_temp is the real OrcaSlicer field — "bed_temperature" is not in
+  // its PrintConfig schema at all, so exporting it silently loses the user's
+  // bed temperature on import into desktop OrcaSlicer (the same failure mode
+  // toEngineConfig documents for the engine side).
   hot_plate_temp: { key: 'bed_temperature', type: 'num', category: 'filament' },
+  bed_temperature: { key: 'bed_temperature', type: 'num', category: 'filament', importOnly: true },
   fan_min_speed: { key: 'fan_min_speed', type: 'num', category: 'filament' },
   // machine fields
   printer_model: { key: 'printer_model', type: 'str', category: 'machine' },
   nozzle_diameter: { key: 'nozzle_diameter', type: 'num', category: 'machine' },
   printable_height: { key: 'printable_height', type: 'num', category: 'machine' },
-  max_print_height: { key: 'printable_height', type: 'num', category: 'machine' }, // alias
-  bed_shape: { key: 'bed_shape', type: 'str', category: 'machine' },
+  max_print_height: { key: 'printable_height', type: 'num', category: 'machine', importOnly: true }, // alias
+  // OrcaConfig-only: real OrcaSlicer machine profiles describe bed geometry
+  // solely through printable_area (parseOrcaProfileJson derives circle-ness
+  // from its vertex count), and "rectangle"/"circle" aren't valid values for
+  // any polygon field — so this is never written back out.
+  bed_shape: { key: 'bed_shape', type: 'str', category: 'machine', importOnly: true },
   // bed size — handled separately via parsePrintableArea() below
 }
 
@@ -430,14 +469,24 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
   }
 }
 
-// Reverse of ORCA_FIELD_MAP: for each internal OrcaConfig key, the canonical
-// (non-alias) OrcaSlicer field name to write on export. ORCA_FIELD_MAP lists
-// the canonical name before its aliases (e.g. `layer_height` before
-// `perimeters`'s alias entry for `wall_loops`), so keeping only the first
-// field seen for a given key picks the canonical one.
+// Reverse of ORCA_FIELD_MAP: for each internal OrcaConfig key, the real
+// OrcaSlicer field name to write on export. Built by skipping every
+// `importOnly` entry rather than by taking the first field seen for a key —
+// declaration order is not a safe signal here, and relying on it is exactly
+// how default_speed, enable_ironing and bed_temperature each shipped as the
+// exported name for a field OrcaSlicer doesn't have. A key whose only entry
+// is importOnly (e.g. bed_shape) is deliberately absent, and so never
+// exported at all.
 const REVERSE_FIELD_MAP: Partial<Record<keyof OrcaConfig, string>> = {}
 for (const [field, meta] of Object.entries(ORCA_FIELD_MAP)) {
-  if (!(meta.key in REVERSE_FIELD_MAP)) REVERSE_FIELD_MAP[meta.key] = field
+  if (meta.importOnly) continue
+  if (meta.key in REVERSE_FIELD_MAP) {
+    throw new Error(
+      `ORCA_FIELD_MAP: "${field}" and "${REVERSE_FIELD_MAP[meta.key]}" both claim to be the exported name for ` +
+        `"${meta.key}" — exactly one entry per key may omit importOnly.`,
+    )
+  }
+  REVERSE_FIELD_MAP[meta.key] = field
 }
 
 /**
@@ -491,9 +540,15 @@ export function exportOrcaProfileJson(config: OrcaConfig, name: string, category
               : '0'
             : String(value)
   }
+  if (category === 'filament' && config.bed_temperature !== undefined) {
+    // OrcaSlicer splits bed temperature into the steady-state and first-layer
+    // options; the UI has one knob, so both get it — mirroring exactly what
+    // toEngineConfig() sends to the engine, so an exported profile slices the
+    // same way in desktop OrcaSlicer as it did here.
+    out.hot_plate_temp_initial_layer = String(config.bed_temperature)
+  }
   if (category === 'machine' && bed_size_x !== undefined && bed_size_y !== undefined) {
-    // Same bed-corner format parsePrintableArea() reads back.
-    out.printable_area = ['0x0', `${bed_size_x}x0`, `${bed_size_x}x${bed_size_y}`, `0x${bed_size_y}`]
+    out.printable_area = bedCorners(bed_size_x, bed_size_y)
   }
   if (_passthrough) Object.assign(out, _passthrough)
   return JSON.stringify(out, null, 2)

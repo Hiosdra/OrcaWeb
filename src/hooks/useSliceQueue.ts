@@ -2,7 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { logError, logWarn } from '../lib/log'
 import { filamentSlots, parseOrcaProfileJson } from '../lib/profiles'
 import { addWorkerListener, getWasmStatus, getWorker, terminateWorker, type WasmStatus } from '../lib/worker-singleton'
-import type { OrcaConfig, QueueItem, SliceProgress, WorkerOutMessage } from '../types'
+import type { ConversionKind, OrcaConfig, QueueItem, SliceProgress, WorkerOutMessage } from '../types'
 
 export interface PlateState {
   slicing: boolean
@@ -71,6 +71,20 @@ const INITIAL_STATE: QueueState = {
 }
 
 class ItemRemovedError extends Error {}
+
+/**
+ * The single place a filename decides which engine conversion an upload
+ * needs. Recorded on the QueueItem at creation (see QueueItem.conversion) so
+ * every later consumer — the initial post, and the re-post after a worker
+ * restart — reads the same answer instead of re-deriving it from the name.
+ * `undefined` means the file is already an STL and needs no conversion.
+ */
+function classifyConversion(filename: string): ConversionKind | undefined {
+  if (/\.3mf$/i.test(filename)) return '3mf'
+  if (/\.obj$/i.test(filename)) return 'obj'
+  if (/\.(step|stp)$/i.test(filename)) return 'cad'
+  return undefined
+}
 
 function toGcodeFilename(name: string): string {
   return `${name.replace(/\.(stl|3mf|obj|step|stp)$/i, '')}.gcode`
@@ -479,9 +493,10 @@ export function useSliceQueue(
   const postConversion = useCallback(async (item: QueueItem) => {
     try {
       const buf = await item.sourceFile.arrayBuffer()
-      const msg = /\.obj$/i.test(item.sourceFile.name)
-        ? { type: 'OBJ_TO_STL' as const, obj: buf, requestId: item.id }
-        : { type: 'CAD_TO_STL' as const, cad: buf, requestId: item.id }
+      const msg =
+        item.conversion === 'obj'
+          ? { type: 'OBJ_TO_STL' as const, obj: buf, requestId: item.id }
+          : { type: 'CAD_TO_STL' as const, cad: buf, requestId: item.id }
       if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
       getWorker().postMessage(msg, [buf])
     } catch (err) {
@@ -549,27 +564,34 @@ export function useSliceQueue(
 
   const addFiles = useCallback(
     (files: File[]) => {
-      const newItems: QueueItem[] = files.map((f) => ({
-        id: crypto.randomUUID(),
-        name: f.name,
-        originalSize: f.size,
-        sourceFile: f,
-        stlFile: null,
-        status: 'converting',
-      }))
+      const newItems: QueueItem[] = files.map((f) => {
+        const conversion = classifyConversion(f.name)
+        return {
+          id: crypto.randomUUID(),
+          name: f.name,
+          originalSize: f.size,
+          sourceFile: f,
+          stlFile: null,
+          // Stays 'converting' even for a plain STL: the loop below flips it
+          // to 'ready' together with stlFile in one patch, and no consumer
+          // should ever see 'ready' with a null stlFile.
+          status: 'converting',
+          conversion,
+        }
+      })
       dispatch({ type: 'ADD_ITEMS', items: newItems })
 
       void (async () => {
         for (const item of newItems) {
           const f = item.sourceFile
           try {
-            if (/\.3mf$/i.test(f.name)) {
+            if (item.conversion === '3mf') {
               // Fire-and-forget, like the OBJ/STEP branch below — importMf3
               // resolves its own success/fallback/error internally, so one
               // slow (or WASM-load-blocked) .3mf doesn't hold up every other
               // file dropped in the same batch behind it in this loop.
               void importMf3(item)
-            } else if (/\.(step|stp|obj)$/i.test(f.name)) {
+            } else if (item.conversion) {
               await postConversion(item)
             } else {
               dispatch({ type: 'PATCH_ITEM', id: item.id, patch: { stlFile: f, status: 'ready' } })
@@ -603,11 +625,20 @@ export function useSliceQueue(
   const repostConversions = useCallback(() => {
     for (const item of state.items) {
       if (item.status !== 'converting') continue
-      if (/\.(obj|step|stp)$/i.test(item.sourceFile.name)) {
-        void postConversion(item)
-      } else if (/\.3mf$/i.test(item.sourceFile.name)) {
-        rejectPendingForItem(item.id, 'Engine restarted — retrying import')
-        void importMf3(item)
+      switch (item.conversion) {
+        case 'obj':
+        case 'cad':
+          void postConversion(item)
+          break
+        case '3mf':
+          rejectPendingForItem(item.id, 'Engine restarted — retrying import')
+          void importMf3(item)
+          break
+        default:
+          // No conversion request was ever posted for this item (it was
+          // already an STL), so there's nothing to re-post. Exhaustive by
+          // construction: a new ConversionKind fails to compile here.
+          item.conversion satisfies undefined
       }
     }
   }, [state.items, postConversion, importMf3, rejectPendingForItem])

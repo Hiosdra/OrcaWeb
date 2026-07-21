@@ -124,6 +124,9 @@ export interface UserPreset {
 
 export type QueueItemStatus = 'converting' | 'ready' | 'slicing' | 'done' | 'error'
 
+/** OBJ mesh, CAD B-rep (STEP), or an OrcaSlicer 3MF project. */
+export type ConversionKind = 'obj' | 'cad' | '3mf'
+
 export interface QueueItem {
   id: string
   name: string
@@ -141,6 +144,13 @@ export interface QueueItem {
   error?: string
   /** Latest progress emitted by a progress-capable WASM engine while slicing. */
   progress?: SliceProgress
+  /** Which engine request turns this item's sourceFile into an STL, decided
+   *  once from the filename when the item is created. Stored rather than
+   *  re-sniffed at each use so adding a new input format means touching one
+   *  classifier, not every place that needs to know — repostConversions()
+   *  silently not handling `.3mf` after a worker restart was exactly that
+   *  bug. `undefined` means the file is already an STL. */
+  conversion?: ConversionKind
   /** 1-based filament slot override for "One plate" (AMS-style multi-material
    *  via orc_slice_multi's extruder_ids) — 0/undefined inherits the default
    *  slot. Has no effect on a single-item Slice; only slicePlate() reads it. */

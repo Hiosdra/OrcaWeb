@@ -162,6 +162,15 @@ function findPresetKeyByField(
 // (re-parsing every STL, resetting camera framing, visible flicker) while
 // slicing. Comparing by File identity here instead of by wrapper-array
 // identity keeps the prop stable across those unrelated re-renders.
+//
+// The ref write below happens during render, which is safe here specifically
+// because this is a pure cache: the write is idempotent, derives only from
+// `next`, and the comparison re-runs on every render — so a render that
+// concurrent React throws away can't leave a wrong value behind, only a
+// harmlessly-primed one. (A `useMemo` keyed on a derived identity string
+// would avoid the write, but then the memo's real dependency — `queue` — is
+// absent from its dependency list, which trades a documented ref cache for a
+// lint suppression.)
 function useStableFileList(next: File[]): File[] {
   const ref = useRef<File[]>([])
   const prev = ref.current
@@ -244,9 +253,18 @@ export default function App() {
         overrides: manualOverrides,
         createdAt: new Date().toISOString(),
       }
+      // Two presets with the same name are indistinguishable in the list, so
+      // reusing a name means "update that one" — with a confirm, since it
+      // discards whatever was stored under it.
+      const clash = userPresets.find((p) => p.name.trim().toLowerCase() === name.trim().toLowerCase())
+      if (clash) {
+        if (!window.confirm(`A preset named "${clash.name}" already exists. Replace it?`)) return
+        setUserPresets((prev) => prev.map((p) => (p.id === clash.id ? { ...preset, id: clash.id } : p)))
+        return
+      }
       setUserPresets((prev) => [...prev, preset])
     },
-    [selectedPrinter, selectedFilament, selectedPreset, manualOverrides],
+    [selectedPrinter, selectedFilament, selectedPreset, manualOverrides, userPresets],
   )
 
   // Applies a saved preset's full selection in one go. The four setState
@@ -259,18 +277,42 @@ export default function App() {
     (id: string) => {
       const p = userPresets.find((preset) => preset.id === id)
       if (!p) return
+      // A saved preset is a complete selection, so it has to replace the
+      // imported-profile layer rather than sit under it — otherwise the
+      // import's fields would keep winning and the preset would only
+      // partially apply. That drops settings the user can't get back from
+      // here (the source file isn't retained), so it's confirmed rather than
+      // done silently, and only when there's actually something to lose.
+      if (importedProfile) {
+        const ok = window.confirm(
+          `Loading "${p.name}" will discard the settings imported from ${importedProfile.name}.\n\n` +
+            `You'll need the original file to get them back. Continue?`,
+        )
+        if (!ok) return
+      }
       setSelectedPrinter(p.printer)
       setSelectedFilament(p.filament)
       setSelectedPreset(p.preset)
       setManualOverrides(p.overrides)
       setImportedProfile(null)
     },
-    [userPresets],
+    [userPresets, importedProfile],
   )
 
-  const deleteUserPreset = useCallback((id: string) => {
-    setUserPresets((prev) => prev.filter((p) => p.id !== id))
-  }, [])
+  // Confirmed because it's immediate and unrecoverable — the preset only
+  // exists in localStorage and the list offers no undo. The prompt sits
+  // outside the state updater deliberately: updaters must be pure, and
+  // StrictMode double-invokes them, so prompting from inside would show the
+  // dialog twice in development.
+  const deleteUserPreset = useCallback(
+    (id: string) => {
+      const target = userPresets.find((p) => p.id === id)
+      if (!target) return
+      if (!window.confirm(`Delete the preset "${target.name}"? This can't be undone.`)) return
+      setUserPresets((prev) => prev.filter((p) => p.id !== id))
+    },
+    [userPresets],
+  )
 
   // Settings embedded in an imported file (3MF) form their own layer so later
   // dropdown changes cannot silently erase them.
@@ -360,10 +402,12 @@ export default function App() {
   // "new" files array and force it to rebuild the WebGL scene.
   const rawPreviewFiles = useMemo(() => queue.map((i) => i.stlFile).filter((f): f is File => f != null), [queue])
   const previewFiles = useStableFileList(rawPreviewFiles)
-  // Remounts the ViewerErrorBoundary (clearing any previous crash) whenever
-  // the actual file set changes, without remounting on every unrelated
-  // re-render — mirrors the single-file `key={previewFile.name}` pattern.
-  const previewFilesKey = previewFiles.map((f) => f.name).join('|')
+  // Clears a previous ViewerErrorBoundary crash when the file set actually
+  // changes (passed as resetKey, not key — see the boundary's own doc
+  // comment for why remounting the viewer here would be the wrong tool).
+  // Includes size/lastModified so two same-named files still read as a
+  // change.
+  const previewFilesKey = previewFiles.map((f) => `${f.name}:${f.size}:${f.lastModified}`).join('|')
   const hasAnyReady = queue.some((i) => i.stlFile != null)
   const isConverting = queue.some((i) => i.status === 'converting')
   const filamentSlotCount = filamentSlots(config).length
@@ -476,7 +520,7 @@ export default function App() {
 
             {previewFiles.length > 0 && (
               <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white" style={{ height: 300 }}>
-                <ViewerErrorBoundary key={previewFilesKey} message="3D preview unavailable">
+                <ViewerErrorBoundary resetKey={previewFilesKey} message="3D preview unavailable">
                   <ModelViewer files={previewFiles} bedX={bedX} bedY={bedY} bedShape={bedShape} />
                 </ViewerErrorBoundary>
               </div>
@@ -504,7 +548,7 @@ export default function App() {
                 className="rounded-2xl overflow-hidden border border-slate-200 bg-white order-last sm:order-first"
                 style={{ height: 320 }}
               >
-                <ViewerErrorBoundary key={previewFilesKey} message="3D preview unavailable">
+                <ViewerErrorBoundary resetKey={previewFilesKey} message="3D preview unavailable">
                   <ModelViewer files={previewFiles} bedX={bedX} bedY={bedY} bedShape={bedShape} />
                 </ViewerErrorBoundary>
               </div>
