@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { PlateState } from '../hooks/useSliceQueue'
 import { downloadBlob } from '../lib/download'
 import { extractGcodeStats, gcodeStatsLabel } from '../lib/gcode-stats'
-import { DISPLAY_DEFAULTS, filamentSlots } from '../lib/profiles'
+import { DISPLAY_DEFAULTS, filamentSlotLabels } from '../lib/profiles'
 import type { WasmStatus } from '../lib/worker-singleton'
 import type { OrcaConfig, QueueItem } from '../types'
 import { GcodeViewer } from './GcodeViewer'
@@ -186,8 +186,10 @@ export function QueueItemCard({
 }: {
   item: QueueItem
   onExport3mf: (item: QueueItem) => Promise<ArrayBuffer>
-  /** Per-slot filament-type labels (from filamentSlots()); only >1 entry
-   *  enables the picker. Named to avoid shadowing that module-level import. */
+  /** One label per real filament slot, from filamentSlotLabels() — the same
+   *  count useSliceQueue drops out-of-range assignments against. Only >1 entry
+   *  enables the picker. Deliberately shares the helper's name: inside this
+   *  component the prop shadows that import, which is what should be read. */
   filamentSlotLabels?: string[]
   onAssignExtruder?: (id: string, extruderId: number) => void
 } & BedProps) {
@@ -493,7 +495,14 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
 // ── Config summary ────────────────────────────────────────────────────────────
 
 export function ConfigSummary({ config, fileCount }: { config: OrcaConfig; fileCount: number }) {
-  const filamentEntries = filamentSlots(config)
+  // The real slot list, not filamentSlots()'s split of the display scalar.
+  // For slots defined in the settings panel that scalar is slot 0's material
+  // alone (buildConfig() merges FILAMENT_PRESETS[slots[0]]; the rest live in
+  // _passthrough), so this row said "PLA" while the per-object picker right
+  // below it offered three — and the "(N slots)" branch below only ever fired
+  // for an imported profile whose flattened scalar happened to contain a
+  // separator.
+  const filamentEntries = filamentSlotLabels(config)
   const filamentTypes = [...new Set(filamentEntries)]
   const material =
     filamentEntries.length > 1

@@ -109,6 +109,7 @@ test('adds a filament slot and offers it as a per-object assignment', async ({ p
   // offers a choice — the picker only earns its space above one slot.
   await page.getByTestId('tab-slice').click()
   await expect(page.getByTestId('extruder-select')).toBeHidden()
+  await expect(page.getByText(/\(\d+ slots\)/)).toBeHidden()
 
   await page.getByTestId('tab-settings').click()
   await page.getByTestId('add-filament-slot').click()
@@ -121,6 +122,10 @@ test('adds a filament slot and offers it as a per-object assignment', async ({ p
   const picker = page.getByTestId('extruder-select')
   await expect(picker).toBeVisible()
   await expect(picker.locator('option')).toHaveCount(3) // Auto + one per slot
+  // The summary counts the same slots the picker does. It used to split the
+  // display scalar instead, which for panel-defined slots is slot 1's material
+  // alone — so it read a single material beside a picker offering two.
+  await expect(page.getByText(/\(2 slots\)/)).toBeVisible()
   await picker.selectOption('2')
   await expect(picker).toHaveValue('2')
 
@@ -132,6 +137,7 @@ test('adds a filament slot and offers it as a per-object assignment', async ({ p
   await page.getByLabel('Remove filament slot 2').click()
   await page.getByTestId('tab-slice').click()
   await expect(page.getByTestId('extruder-select')).toBeHidden()
+  await expect(page.getByText(/\(\d+ slots\)/)).toBeHidden()
 
   await page.getByTestId('tab-settings').click()
   await page.getByTestId('add-filament-slot').click()

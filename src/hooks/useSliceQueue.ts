@@ -121,16 +121,27 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
       // Slice button offers to re-run it. Both slice paths honour the
       // assignment (the single one via a one-object plate), so re-slicing
       // genuinely produces different output rather than the same bytes.
+      //
+      // A slice already *in flight* counts too: its request went out carrying
+      // the old assignment, so its result is outdated the moment this lands.
+      // A config edit gets this for free from the epoch comparison in
+      // SLICE_DONE/PLATE_DONE, but an assignment has no epoch of its own —
+      // it never touches configSnapshotRef, and bumping configEpoch here
+      // would leave that ref one behind forever and mark *every* later result
+      // stale. So flag the run directly and have both DONE cases OR this in
+      // rather than overwrite it.
       const item = state.items.find((i) => i.id === action.id)
-      const wasSliced = item?.status === 'done'
+      const outdated = item?.status === 'done' || item?.status === 'slicing'
       return {
         ...state,
         items: patchItem(state.items, action.id, {
           extruderId: action.extruderId,
-          ...(wasSliced ? { stale: true } : {}),
+          ...(outdated ? { stale: true } : {}),
         }),
-        // The plate mixes every object, so it goes stale on any reassignment.
-        plate: state.plate.gcode ? { ...state.plate, stale: true } : state.plate,
+        // The plate mixes every object, so it goes stale on any reassignment
+        // — including one made while it is still slicing, where PLATE_STARTED
+        // has cleared gcode and there is nothing yet to test for.
+        plate: state.plate.gcode || state.plate.slicing ? { ...state.plate, stale: true } : state.plate,
       }
     }
 
@@ -193,7 +204,12 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
               status: 'done',
               gcode: action.gcode,
               gcodeFilename: toGcodeFilename(item.name),
-              stale: state.configEpoch !== state.sliceStartEpoch || undefined,
+              // OR, not overwrite: RUN_QUEUE clears `stale` before re-slicing,
+              // so anything set here arrived *during* the run — a slot
+              // reassignment, which ASSIGN_EXTRUDER flags directly because it
+              // has no epoch of its own. The epoch comparison covers a config
+              // edit made in the same window.
+              stale: item.stale || state.configEpoch !== state.sliceStartEpoch || undefined,
               progress: undefined,
             })
           : state.items,
@@ -223,7 +239,9 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
           slicing: false,
           gcode: action.gcode,
           error: null,
-          stale: state.configEpoch !== state.plateStartEpoch,
+          // Same OR as SLICE_DONE: PLATE_STARTED sets stale false for the
+          // duration, so a true here is a reassignment made mid-slice.
+          stale: state.plate.stale || state.configEpoch !== state.plateStartEpoch,
           progress: undefined,
         },
       }

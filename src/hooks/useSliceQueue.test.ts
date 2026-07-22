@@ -67,6 +67,55 @@ describe('per-object filament-slot assignment', () => {
   })
 })
 
+describe('reassigning a slot while the slice is still running', () => {
+  // The request already went out carrying the old assignment, so the result
+  // that comes back is outdated the moment the picker changes. A config edit
+  // gets this from the configEpoch/sliceStartEpoch comparison, but an
+  // assignment never touches configSnapshotRef and so has no epoch — the
+  // picker stays enabled throughout (SliceCards hides it only for
+  // converting/error), and a plate slice is exactly the multi-second window
+  // where this happens.
+
+  it('marks the in-flight single slice stale, so the result is not shown as current', () => {
+    const items = [{ id: 'a', name: 'cube.stl', status: 'slicing' }] as unknown as typeof state.items
+    let next = sliceQueueReducer(
+      { ...state, items, currentId: 'a' },
+      { type: 'ASSIGN_EXTRUDER', id: 'a', extruderId: 2 },
+    )
+    next = sliceQueueReducer(next, { type: 'SLICE_DONE', gcode: 'G1 X0' })
+    expect(next.items[0]).toMatchObject({ status: 'done', extruderId: 2, stale: true })
+  })
+
+  it('marks the in-flight plate stale, where PLATE_STARTED has already cleared the gcode', () => {
+    let next = sliceQueueReducer(state, { type: 'PLATE_STARTED', configEpoch: 0 })
+    next = sliceQueueReducer(next, { type: 'ASSIGN_EXTRUDER', id: 'a', extruderId: 2 })
+    next = sliceQueueReducer(next, { type: 'PLATE_DONE', gcode: 'G1 X0' })
+    expect(next.plate).toMatchObject({ gcode: 'G1 X0', stale: true })
+  })
+
+  it('still reports an undisturbed slice as current — the OR must not make everything stale', () => {
+    // RUN_QUEUE clears `stale` before re-slicing, so a flag surviving into
+    // SLICE_DONE can only have arrived during the run. Without this control a
+    // fix that simply always sets stale would pass the two tests above.
+    const items = [{ id: 'a', name: 'cube.stl', status: 'slicing' }] as unknown as typeof state.items
+    const single = sliceQueueReducer({ ...state, items, currentId: 'a' }, { type: 'SLICE_DONE', gcode: 'G1 X0' })
+    expect((single.items[0] as { stale?: boolean }).stale).toBeUndefined()
+
+    let plate = sliceQueueReducer(state, { type: 'PLATE_STARTED', configEpoch: 0 })
+    plate = sliceQueueReducer(plate, { type: 'PLATE_DONE', gcode: 'G1 X0' })
+    expect(plate.plate.stale).toBe(false)
+  })
+
+  it('clears the flag again when the item is re-queued', () => {
+    const items = [
+      { id: 'a', name: 'cube.stl', status: 'done', gcode: 'G1', stale: true },
+    ] as unknown as typeof state.items
+    const next = sliceQueueReducer({ ...state, items }, { type: 'RUN_QUEUE' })
+    expect(next.items[0]).toMatchObject({ status: 'ready' })
+    expect((next.items[0] as { stale?: boolean }).stale).toBeUndefined()
+  })
+})
+
 describe('filament slots removed from the config', () => {
   const assigned = [
     { id: 'a', status: 'ready', extruderId: 3 },

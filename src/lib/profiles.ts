@@ -390,15 +390,25 @@ function multiFilamentPassthrough(config: OrcaConfig, ui: string[], n: number, n
  *
  * Reads the same count the engine does (`filament_colour`, else the
  * multi-value `filament_type` an imported multi-material profile arrives in),
- * so it cannot disagree with what withFilamentSlots() actually sized. Falls
- * back to filamentSlots() for a single-slot config, which is display text
- * rather than a count — see its doc and #155.
+ * so it cannot disagree with what withFilamentSlots() actually sized —
+ * declaredSlotCount() is the one place either of them asks.
+ *
+ * That includes the single-slot case, which is why it is *clamped* to one
+ * label rather than handed straight to filamentSlots(). filamentSlots() splits
+ * the scalar `filament_type` on [;,], and a profile can arrive carrying a
+ * plain "PLA;PETG" there with no per-slot array behind it (a hand-written
+ * profile, or an older persisted setting — real OrcaSlicer JSON uses arrays,
+ * which land in `_passthrough` and are counted above). Passing that through
+ * would offer a Slot 2 the engine has no filament for: withFilamentSlots()
+ * reads the same declaredSlotCount(), returns early at `n < 2` and sizes
+ * nothing, so the assignment's extruderId would index a one-filament config.
+ * Display text is display text — see filamentSlots()'s doc and #155.
  */
 export function filamentSlotLabels(config: OrcaConfig): string[] {
   const types = config._passthrough?.filament_type
   const perSlot = Array.isArray(types) ? types : undefined
   const count = declaredSlotCount(config)
-  if (count < 2) return filamentSlots(config)
+  if (count < 2) return filamentSlots(config).slice(0, 1)
   const fallback = String(config.filament_type ?? DISPLAY_DEFAULTS.filament_type)
   return Array.from({ length: count }, (_, i) => perSlot?.[i] || fallback)
 }
@@ -702,6 +712,31 @@ function parsePrintableArea(raw: unknown): { dims: [number, number]; circle: boo
   return { dims: [sizeX, sizeY], circle: pointCount > 8 }
 }
 
+/**
+ * Whether a lone value still means the same thing after being collapsed from
+ * `["…"]` to a plain string on its way into `_passthrough`.
+ *
+ * For every option the engine joins with a plain separator the two forms are
+ * interchangeable — a one-element join is the element. `coStrings` is the
+ * exception, and it is not one this file can detect by key: the bridge routes
+ * *arrays* through `escape_strings_cstyle()`, which quotes any element
+ * containing ';' or opening with whitespace, while a *bare* string reaches
+ * `ConfigOptionStrings::deserialize()` unquoted — and its
+ * `unescape_strings_cstyle()` splits on ';' and strips leading whitespace. So
+ * a `filament_start_gcode` of `["M900 K0.02 ; set K"]` survives as one value
+ * when forwarded as an array and arrives chopped in two when collapsed.
+ *
+ * Knowing the option's type here is exactly what moving the join into the
+ * bridge avoided (see json_array_to_config_string() and #140), so key off the
+ * value instead: anything the quoting pass would have had to touch stays an
+ * array and lets the bridge escape it. Keeping the array form is never *less*
+ * correct — it only costs the tidier shape — and it is the shape the source
+ * profile used anyway, so an import -> export round trip is unaffected.
+ */
+function collapsesCleanly(value: string): boolean {
+  return !value.includes(';') && !/^["\s]/.test(value)
+}
+
 export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
   try {
     const raw = JSON.parse(json) as Record<string, unknown>
@@ -818,18 +853,18 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
           const items = val
             .filter((x) => x !== null && x !== undefined)
             .map((x) => (typeof x === 'boolean' ? (x ? '1' : '0') : String(x)))
-          // Single-entry arrays collapse to a plain string exactly as before —
-          // the two are equivalent once the bridge joins them, and keeping the
-          // old shape avoids churning every ordinary single-extruder field.
-          // An empty one is dropped rather than stored as "", also as before:
-          // real leaf profiles carry [""] for every option they inherit rather
-          // than override, and buildConfig() merges _passthrough field by field
+          // A single-entry array collapses to a plain string when that is
+          // lossless (collapsesCleanly), keeping the old shape for every
+          // ordinary single-extruder field rather than churning it. An empty
+          // one is dropped rather than stored as "", also as before: real leaf
+          // profiles carry [""] for every option they inherit rather than
+          // override, and buildConfig() merges _passthrough field by field
           // with later layers winning — so a stored "" blanks out the built-in
           // preset's value for that key instead of leaving it alone. A
           // *multi*-entry array keeps its empties: there the length is load-
           // bearing (filament_start_gcode: ["", ""] is what sizes the vector).
           if (items.length === 1) {
-            if (items[0] !== '') passthrough[field] = items[0]
+            if (items[0] !== '') passthrough[field] = collapsesCleanly(items[0]) ? items[0] : items
           } else if (items.length > 1) passthrough[field] = items
           continue
         }

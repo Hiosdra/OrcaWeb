@@ -328,6 +328,40 @@ describe('parseOrcaProfileJson multi-value options (#140)', () => {
     expect(pt?.filament_start_gcode).toEqual(['', ''])
   })
 
+  it('keeps a lone value the collapse to a plain string would corrupt', () => {
+    // A coStrings option forwarded as an *array* goes through the bridge's
+    // escape_strings_cstyle(), which quotes any element containing ';'.
+    // Collapsed to a bare string it reaches unescape_strings_cstyle() unquoted
+    // and is split on every ';' — so a filament_start_gcode with a "; comment"
+    // line arrives chopped in two, with only the first fragment ever run.
+    // The array form is never less correct, so anything a quoting pass would
+    // have had to touch stays an array. See collapsesCleanly().
+    const pt = parseOrcaProfileJson(
+      JSON.stringify({
+        filament_start_gcode: ['M900 K0.02 ; set pressure advance'],
+        multiline_gcode: ['G28\n; home first'],
+        quoted_field: ['"already quoted"'],
+        leading_space: [' indented'],
+      }),
+    )._passthrough
+    expect(pt?.filament_start_gcode).toEqual(['M900 K0.02 ; set pressure advance'])
+    expect(pt?.multiline_gcode).toEqual(['G28\n; home first'])
+    expect(pt?.quoted_field).toEqual(['"already quoted"'])
+    expect(pt?.leading_space).toEqual([' indented'])
+  })
+
+  it('still collapses a lone value that survives the round trip, spaces and all', () => {
+    // The control for the test above: only the shapes the engine would re-read
+    // differently keep the array form, so ordinary single-extruder fields are
+    // not churned into arrays across every import and export.
+    const pt = parseOrcaProfileJson(
+      JSON.stringify({ plain_field: ['0.8'], spaced_field: ['normal(auto) tree'], gcode_no_comment: ['G28\nG1 Z5'] }),
+    )._passthrough
+    expect(pt?.plain_field).toBe('0.8')
+    expect(pt?.spaced_field).toBe('normal(auto) tree')
+    expect(pt?.gcode_no_comment).toBe('G28\nG1 Z5')
+  })
+
   it('no longer drops a multi-nozzle profile wholesale', () => {
     // This used to return an empty passthrough: multi-extruder profiles were
     // rejected outright because they crashed the engine.
@@ -621,5 +655,25 @@ describe('filamentSlotLabels', () => {
     const config = withFilamentSlots({ _passthrough: { filament_type: ['PLA', 'PETG'] } }, ['PLA'])
     const colours = (config._passthrough as PassthroughConfig).filament_colour
     expect(filamentSlotLabels(config)).toHaveLength(colours.length)
+  })
+
+  it('does not turn a joined display scalar into slots nothing sized', () => {
+    // filamentSlots() splits filament_type on [;,] for display, and a profile
+    // can carry "PLA;PETG" there with no per-slot array behind it. Both this
+    // and withFilamentSlots() read declaredSlotCount(), which sees one slot —
+    // so withFilamentSlots() returns early and sizes no per-filament vectors.
+    // Offering a second label here would put a Slot 2 in the picker whose
+    // extruderId indexes a one-filament config.
+    const joined: OrcaConfig = { filament_type: 'PLA;PETG' }
+    expect(withFilamentSlots(joined, ['PLA'])).toBe(joined) // nothing sized
+    expect(filamentSlotLabels(joined)).toEqual(['PLA'])
+    expect(filamentSlotLabels({ filament_type: 'PLA,PETG' })).toEqual(['PLA'])
+  })
+
+  it('still lists both once the per-slot array is actually there', () => {
+    // The control: a real import carries the array, declaredSlotCount() sees
+    // two, and withFilamentSlots() sizes for two — so both are offered.
+    const imported = withFilamentSlots({ _passthrough: { filament_type: ['PLA', 'PETG'] } }, ['PLA'])
+    expect(filamentSlotLabels(imported)).toEqual(['PLA', 'PETG'])
   })
 })
