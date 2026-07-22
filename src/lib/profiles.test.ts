@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import type { OrcaConfig } from '../types'
+import type { OrcaConfig, PassthroughConfig } from '../types'
 import {
   describeExportCompatibility,
   exportOrcaProfileBundle,
   exportOrcaProfileJson,
+  filamentSlotLabels,
   filamentSlots,
+  MAX_FILAMENT_SLOTS,
   parseOrcaProfileJson,
+  withFilamentSlots,
 } from './profiles'
 
 describe('filamentSlots', () => {
@@ -267,5 +270,410 @@ describe('parseOrcaProfileJson initial_layer_print_height', () => {
     // Falls through to _passthrough instead of being silently dropped or
     // misapplied to the FFF field.
     expect(parsed._passthrough?.initial_layer_height).toBe('0.3')
+  })
+})
+
+describe('parseOrcaProfileJson multi-value options (#140)', () => {
+  // A real Bambu Lab H2D: two nozzles, one printable area per nozzle.
+  const H2D = {
+    nozzle_diameter: ['0.4', '0.4'],
+    extruder_printable_area: ['0x0,325x0,325x320,0x320', '25x0,350x0,350x320,25x320'],
+    filament_type: ['PLA', 'PETG'],
+    single_valued_field: ['0.8'],
+    scalar_field: 'plain',
+  }
+
+  it('keeps multi-value options as arrays so the bridge can pick the right separator', () => {
+    const pt = parseOrcaProfileJson(JSON.stringify(H2D))._passthrough
+    // Joining these in JS is what used to fuse a dual-nozzle machine's two
+    // printable areas into one 8-point group and crash the brim generator.
+    expect(pt?.extruder_printable_area).toEqual(['0x0,325x0,325x320,0x320', '25x0,350x0,350x320,25x320'])
+    expect(pt?.filament_type).toEqual(['PLA', 'PETG'])
+  })
+
+  it('forwards multi-value fields that are also UI-mapped, which the scalar mapping would flatten', () => {
+    const parsed = parseOrcaProfileJson(JSON.stringify(H2D))
+    // The UI keeps a single number...
+    expect(parsed.nozzle_diameter).toBe(0.4)
+    // ...but the engine must still see both nozzles, or it slices a
+    // dual-nozzle machine as if it had one.
+    expect(parsed._passthrough?.nozzle_diameter).toEqual(['0.4', '0.4'])
+  })
+
+  it('does not pass single-valued mapped fields through twice', () => {
+    const pt = parseOrcaProfileJson(JSON.stringify({ nozzle_diameter: ['0.4'] }))._passthrough
+    expect(pt?.nozzle_diameter).toBeUndefined()
+  })
+
+  it('still collapses single-entry arrays and leaves scalars alone', () => {
+    const pt = parseOrcaProfileJson(JSON.stringify(H2D))._passthrough
+    expect(pt?.single_valued_field).toBe('0.8')
+    expect(pt?.scalar_field).toBe('plain')
+  })
+
+  it('drops a single empty entry, exactly as the old comma-join did', () => {
+    // Leaf profiles carry [""] for every option they inherit rather than
+    // override. buildConfig() merges _passthrough field by field with later
+    // layers winning, so storing "" lets an import blank out the built-in
+    // preset's value for that key.
+    const pt = parseOrcaProfileJson(JSON.stringify({ empty_field: [''], kept_field: ['x'] }))._passthrough
+    expect(pt?.empty_field).toBeUndefined()
+    expect(pt?.kept_field).toBe('x')
+  })
+
+  it('keeps the empties in a multi-entry array, where the length is load-bearing', () => {
+    // filament_start_gcode: ["", ""] is what sizes the vector the engine reads
+    // with .at(filament_id) — dropping it is an out-of-range read, not a tidy-up.
+    const pt = parseOrcaProfileJson(JSON.stringify({ filament_start_gcode: ['', ''] }))._passthrough
+    expect(pt?.filament_start_gcode).toEqual(['', ''])
+  })
+
+  it('keeps a lone value the collapse to a plain string would corrupt', () => {
+    // A coStrings option forwarded as an *array* goes through the bridge's
+    // escape_strings_cstyle(), which quotes any element containing ';'.
+    // Collapsed to a bare string it reaches unescape_strings_cstyle() unquoted
+    // and is split on every ';' — so a filament_start_gcode with a "; comment"
+    // line arrives chopped in two, with only the first fragment ever run.
+    // The array form is never less correct, so anything a quoting pass would
+    // have had to touch stays an array. See collapsesCleanly().
+    const pt = parseOrcaProfileJson(
+      JSON.stringify({
+        filament_start_gcode: ['M900 K0.02 ; set pressure advance'],
+        multiline_gcode: ['G28\n; home first'],
+        quoted_field: ['"already quoted"'],
+        leading_space: [' indented'],
+      }),
+    )._passthrough
+    expect(pt?.filament_start_gcode).toEqual(['M900 K0.02 ; set pressure advance'])
+    expect(pt?.multiline_gcode).toEqual(['G28\n; home first'])
+    expect(pt?.quoted_field).toEqual(['"already quoted"'])
+    expect(pt?.leading_space).toEqual([' indented'])
+  })
+
+  it('still collapses a lone value that survives the round trip, spaces and all', () => {
+    // The control for the test above: only the shapes the engine would re-read
+    // differently keep the array form, so ordinary single-extruder fields are
+    // not churned into arrays across every import and export.
+    const pt = parseOrcaProfileJson(
+      JSON.stringify({ plain_field: ['0.8'], spaced_field: ['normal(auto) tree'], gcode_no_comment: ['G28\nG1 Z5'] }),
+    )._passthrough
+    expect(pt?.plain_field).toBe('0.8')
+    expect(pt?.spaced_field).toBe('normal(auto) tree')
+    expect(pt?.gcode_no_comment).toBe('G28\nG1 Z5')
+  })
+
+  it('no longer drops a multi-nozzle profile wholesale', () => {
+    // This used to return an empty passthrough: multi-extruder profiles were
+    // rejected outright because they crashed the engine.
+    const pt = parseOrcaProfileJson(JSON.stringify(H2D))._passthrough
+    expect(pt && Object.keys(pt).length).toBeGreaterThan(0)
+  })
+})
+
+describe('withFilamentSlots (#140)', () => {
+  const singleNozzle: OrcaConfig = {}
+  // A real dual-nozzle machine, as an imported profile leaves it in the config.
+  const dualNozzle: OrcaConfig = { _passthrough: { nozzle_diameter: ['0.4', '0.4'] } }
+
+  it('leaves a one-slot config completely untouched', () => {
+    expect(withFilamentSlots(singleNozzle, ['PLA'])).toBe(singleNozzle)
+  })
+
+  it('ignores slots naming a material that does not exist', () => {
+    expect(withFilamentSlots(singleNozzle, ['PLA', 'Unobtainium'])).toBe(singleNozzle)
+  })
+
+  it('gives the engine one colour per slot — that is what it counts filaments by', () => {
+    const pt = withFilamentSlots(singleNozzle, ['PLA', 'PETG', 'ABS'])._passthrough
+    expect(pt?.filament_colour).toHaveLength(3)
+    expect(new Set(pt?.filament_colour as string[]).size).toBe(3)
+    expect(pt?.filament_type).toEqual(['PLA', 'PETG', 'ABS'])
+  })
+
+  it('keeps every slot on the single nozzle of an AMS-style printer', () => {
+    const pt = withFilamentSlots(singleNozzle, ['PLA', 'PETG', 'ABS', 'TPU'])._passthrough
+    expect(pt?.filament_map).toEqual(['1', '1', '1', '1'])
+    // one nozzle x 4 filaments squared
+    expect(pt?.flush_volumes_matrix).toHaveLength(16)
+    expect(pt?.flush_multiplier).toEqual(['1'])
+  })
+
+  it('alternates slots across the nozzles of a real multi-nozzle machine', () => {
+    const pt = withFilamentSlots(dualNozzle, ['PLA', 'PETG'])._passthrough
+    // this is what produces genuine T0/T1 tool changes
+    expect(pt?.filament_map).toEqual(['1', '2'])
+    // two nozzles x 2 filaments squared, and one multiplier per nozzle —
+    // the engine rejects any other length outright
+    expect(pt?.flush_volumes_matrix).toHaveLength(8)
+    expect(pt?.flush_multiplier).toEqual(['1', '1'])
+  })
+
+  it('purges nothing into the same filament and something into a different one', () => {
+    const m = withFilamentSlots(singleNozzle, ['PLA', 'PETG'])._passthrough?.flush_volumes_matrix as string[]
+    expect(m[0]).toBe('0') // slot 1 -> slot 1
+    expect(Number(m[1])).toBeGreaterThan(0) // slot 1 -> slot 2
+    expect(m[3]).toBe('0') // slot 2 -> slot 2
+  })
+
+  it('sizes the per-filament G-code hooks, so a slot other than the first can print', () => {
+    // The engine reads these with .at(filament_id); leaving them at their
+    // one-entry default made assigning an object to slot 2 throw.
+    const pt = withFilamentSlots(singleNozzle, ['PLA', 'PETG', 'ABS'])._passthrough
+    expect(pt?.filament_start_gcode).toHaveLength(3)
+    expect(pt?.filament_end_gcode).toHaveLength(3)
+  })
+
+  it('preserves passthrough the profile already had', () => {
+    const withGcode: OrcaConfig = { _passthrough: { machine_start_gcode: 'G28' } }
+    const pt = withFilamentSlots(withGcode, ['PLA', 'PETG'])._passthrough
+    expect(pt?.machine_start_gcode).toBe('G28')
+    expect(pt?.filament_colour).toHaveLength(2)
+  })
+
+  it('offers a slot for every colour it can assign', () => {
+    const pt = withFilamentSlots(singleNozzle, Array(MAX_FILAMENT_SLOTS).fill('PLA'))._passthrough
+    expect(new Set(pt?.filament_colour as string[]).size).toBe(MAX_FILAMENT_SLOTS)
+  })
+
+  it('keeps slot 0 on the resolved config, not the stock preset for its material', () => {
+    // These arrays land in _passthrough, which the worker spreads *over* the
+    // resolved config — so reading FILAMENT_PRESETS for slot 0 is a silent way
+    // to revert a manual override the moment a second slot is added.
+    const edited: OrcaConfig = { filament_type: 'PLA', nozzle_temperature: 250, bed_temperature: 80 }
+    const pt = withFilamentSlots(edited, ['PLA', 'PETG'])._passthrough as PassthroughConfig
+    expect(pt.nozzle_temperature[0]).toBe('250')
+    expect(pt.hot_plate_temp[0]).toBe('80')
+    expect(pt.hot_plate_temp_initial_layer[0]).toBe('80')
+    // Slot 1 has no UI of its own, so it still takes PETG's preset values.
+    expect(pt.nozzle_temperature[1]).not.toBe('250')
+  })
+
+  it('pads an existing filament start G-code across the new slots instead of blanking it', () => {
+    const withHook: OrcaConfig = { _passthrough: { filament_start_gcode: 'M900 K0.02' } }
+    const pt = withFilamentSlots(withHook, ['PLA', 'PETG'])._passthrough
+    expect(pt?.filament_start_gcode).toEqual(['M900 K0.02', 'M900 K0.02'])
+  })
+
+  it('sizes the per-filament vectors for slots an imported profile declares on its own', () => {
+    // A multi-material profile arrives with more filaments than the UI has
+    // slots for. The queue's picker offers them, so they need the same
+    // vectors — sizing only the UI's one slot is the .at(filament_id) throw.
+    const imported: OrcaConfig = { _passthrough: { filament_type: ['PLA', 'PETG'] } }
+    const pt = withFilamentSlots(imported, ['PLA'])._passthrough
+    expect(pt?.filament_colour).toHaveLength(2)
+    expect(pt?.filament_start_gcode).toHaveLength(2)
+    expect(pt?.flush_volumes_matrix).toHaveLength(4)
+    expect(pt?.filament_type).toEqual(['PLA', 'PETG'])
+  })
+
+  it('emits exactly the option set orca-wasm/scripts/smoke-test.mjs slices with', () => {
+    // DUAL_NOZZLE_CONFIG in the smoke test is a hand-written copy of what this
+    // function produces — it has to be, since a node script cannot import the
+    // TS module. That makes it the one thing in this PR that can drift: the
+    // smoke test would keep proving T0/T1 for a config the app no longer
+    // builds. Pin the contract between them here, where both are visible.
+    const pt = withFilamentSlots(dualNozzle, ['PLA', 'PETG'])._passthrough as PassthroughConfig
+    expect(Object.keys(pt).sort()).toEqual(
+      [
+        'filament_colour',
+        'filament_diameter',
+        'filament_end_gcode',
+        'filament_map',
+        'filament_map_mode',
+        'filament_start_gcode',
+        'filament_type',
+        'flush_multiplier',
+        'flush_volumes_matrix',
+        'hot_plate_temp',
+        'hot_plate_temp_initial_layer',
+        'nozzle_diameter',
+        'nozzle_temperature',
+        'nozzle_temperature_initial_layer',
+      ].sort(),
+    )
+    // Every filament-indexed vector is N long; the engine reads them by
+    // filament id and a short one is read out of bounds.
+    for (const key of [
+      'filament_type',
+      'filament_colour',
+      'filament_diameter',
+      'nozzle_temperature',
+      'nozzle_temperature_initial_layer',
+      'hot_plate_temp',
+      'hot_plate_temp_initial_layer',
+      'filament_start_gcode',
+      'filament_end_gcode',
+      'filament_map',
+    ]) {
+      expect(pt[key], key).toHaveLength(2)
+    }
+    // The three the engine validates by shape rather than by index: one N x N
+    // sub-matrix per nozzle, one multiplier per nozzle, slots alternating
+    // across the two nozzles (which is what produces T0 and T1).
+    expect(pt.flush_volumes_matrix).toEqual(['0', '280', '280', '0', '0', '280', '280', '0'])
+    expect(pt.flush_multiplier).toEqual(['1', '1'])
+    expect(pt.filament_map).toEqual(['1', '2'])
+    expect(pt.filament_map_mode).toBe('Manual')
+  })
+})
+
+describe('withFilamentSlots on an imported multi-material profile', () => {
+  // How a dual-material profile actually reaches us: every per-filament option
+  // as an array, and the UI-mapped ones (filament_type, nozzle_temperature,
+  // hot_plate_temp) additionally collapsed to a scalar for display.
+  const imported = () =>
+    parseOrcaProfileJson(
+      JSON.stringify({
+        filament_type: ['PLA', 'PETG'],
+        filament_colour: ['#FF0000', '#00FF00'],
+        filament_diameter: ['2.85', '2.85'],
+        nozzle_temperature: ['215', '255'],
+        nozzle_temperature_initial_layer: ['210', '250'],
+        hot_plate_temp: ['55', '80'],
+        flush_volumes_matrix: ['0', '700', '700', '0'],
+      }),
+    ) as OrcaConfig
+
+  it('does not name slot 0 after the flattened scalar', () => {
+    // config.filament_type is ORCA_FIELD_MAP's display collapse of the array —
+    // the joined "PLA,PETG". Reading it verbatim gave the engine that literal
+    // string as slot 1's type, and the queue's picker "Slot 1 · PLA,PETG".
+    const config = imported()
+    expect(config.filament_type).toBe('PLA,PETG')
+    const pt = withFilamentSlots(config, ['PLA'])._passthrough
+    expect(pt?.filament_type).toEqual(['PLA', 'PETG'])
+    expect(filamentSlotLabels(withFilamentSlots(config, ['PLA']))).toEqual(['PLA', 'PETG'])
+  })
+
+  it('keeps the values the profile declared instead of regenerating them', () => {
+    // _passthrough is spread *over* the resolved config, so deriving these
+    // from a stock preset silently replaces what the user imported — the same
+    // bug slot 0 had for temperatures, one slot further down the list.
+    const pt = withFilamentSlots(imported(), ['PLA'])._passthrough
+    expect(pt?.filament_colour).toEqual(['#FF0000', '#00FF00'])
+    expect(pt?.filament_diameter).toEqual(['2.85', '2.85'])
+    expect(pt?.nozzle_temperature).toEqual(['215', '255'])
+    expect(pt?.hot_plate_temp).toEqual(['55', '80'])
+    expect(pt?.flush_volumes_matrix).toEqual(['0', '700', '700', '0'])
+  })
+
+  it('keeps a declared nozzle initial-layer temperature, which has no UI of its own', () => {
+    // toEngineConfig() never writes nozzle_temperature_initial_layer, so no
+    // panel value can contradict the imported one. Its bed counterpart is the
+    // opposite case — see the next test.
+    const pt = withFilamentSlots(imported(), ['PLA'])._passthrough
+    expect(pt?.nozzle_temperature_initial_layer).toEqual(['210', '250'])
+  })
+
+  it('lets the panel drive the first-layer bed temperature, which it edits through the same knob', () => {
+    // toEngineConfig() fans the panel's single "Bed temp" field out to *both*
+    // hot_plate_temp and hot_plate_temp_initial_layer, so a declared
+    // first-layer value must not outrank it for slot 0 — a single-slot config
+    // puts the typed number in both, and adding a slot silently left the first
+    // layer on the import's temperature while the panel showed the new one.
+    const declaresBoth = {
+      ...imported(),
+      _passthrough: { ...imported()._passthrough, hot_plate_temp_initial_layer: ['55', '80'] },
+    } as OrcaConfig
+    const pt = withFilamentSlots({ ...declaresBoth, bed_temperature: 60 }, ['PLA'])._passthrough
+    expect(pt?.hot_plate_temp).toEqual(['60', '80'])
+    expect(pt?.hot_plate_temp_initial_layer).toEqual(['60', '80'])
+  })
+
+  it('still lets a manual override win for slot 0', () => {
+    // The panel edits slot 0, so its resolved value outranks the imported
+    // layer — otherwise adding a slot reverts a hand-typed temperature (#159).
+    const edited: OrcaConfig = { ...imported(), nozzle_temperature: 230, bed_temperature: 90 }
+    const pt = withFilamentSlots(edited, ['PLA'])._passthrough
+    expect(pt?.nozzle_temperature).toEqual(['230', '255'])
+    expect(pt?.hot_plate_temp).toEqual(['90', '80'])
+  })
+
+  it('lets a slot the UI names win over what the profile said about it', () => {
+    // The user picked ABS for slot 2 in the panel; an older import saying
+    // PETG does not get to override that.
+    const pt = withFilamentSlots(imported(), ['PLA', 'ABS'])._passthrough
+    expect(pt?.filament_type).toEqual(['PLA', 'ABS'])
+    expect(pt?.nozzle_temperature?.[1]).not.toBe('255')
+  })
+
+  it('keeps a declared filament diameter for a slot the UI names, which has no diameter to offer', () => {
+    // The "UI slot wins" rule is only sound for options read off the picked
+    // material's preset. No FILAMENT_PRESETS entry carries a diameter, so
+    // routing this through per() could only ever replace an imported 2.85 mm
+    // with the stock 1.75 — silently, and off by (2.85/1.75)^2 in every E value.
+    expect(withFilamentSlots(imported(), ['PLA'])._passthrough?.filament_diameter).toEqual(['2.85', '2.85'])
+    expect(withFilamentSlots(imported(), ['PLA', 'ABS'])._passthrough?.filament_diameter).toEqual(['2.85', '2.85'])
+    // Nothing declared: the engine's own PrintConfig.cpp default, per slot.
+    expect(withFilamentSlots({}, ['PLA', 'ABS'])._passthrough?.filament_diameter).toEqual(['1.75', '1.75'])
+  })
+
+  it('discards a declared flush matrix that is the wrong shape for this machine', () => {
+    // append_full_config() rejects any length but nozzles x N^2 outright, so a
+    // matrix sized for the profile's own filament count cannot be kept.
+    const config: OrcaConfig = {
+      _passthrough: { filament_type: ['PLA', 'PETG'], flush_volumes_matrix: ['0', '700', '700'] },
+    }
+    expect(withFilamentSlots(config, ['PLA'])._passthrough?.flush_volumes_matrix).toEqual(['0', '280', '280', '0'])
+  })
+
+  it('honours a declared filament_map, but only when it names nozzles this machine has', () => {
+    const dual: PassthroughConfig = { nozzle_diameter: ['0.4', '0.4'], filament_type: ['PLA', 'PETG'] }
+    expect(
+      withFilamentSlots({ _passthrough: { ...dual, filament_map: ['2', '1'] } }, ['PLA'])._passthrough?.filament_map,
+    ).toEqual(['2', '1'])
+    // A map carried over from a 3-nozzle machine would have the engine index
+    // an extruder this one does not have — fall back to round-robin.
+    expect(
+      withFilamentSlots({ _passthrough: { ...dual, filament_map: ['1', '3'] } }, ['PLA'])._passthrough?.filament_map,
+    ).toEqual(['1', '2'])
+  })
+
+  it('gives slots past the colour palette distinct colours rather than repeating it', () => {
+    const many = Array.from({ length: MAX_FILAMENT_SLOTS + 3 }, (_, i) => `PLA${i}`)
+    const config: OrcaConfig = { _passthrough: { filament_type: many } }
+    const colours = withFilamentSlots(config, ['PLA'])._passthrough?.filament_colour as string[]
+    expect(colours).toHaveLength(many.length)
+    expect(new Set(colours).size).toBe(many.length)
+    expect(colours.every((c) => /^#[0-9a-f]{6}$/i.test(c))).toBe(true)
+  })
+})
+
+describe('filamentSlotLabels', () => {
+  it('falls back to the display text for a single-slot config', () => {
+    expect(filamentSlotLabels({ filament_type: 'PLA' })).toEqual(['PLA'])
+  })
+
+  it('lists one label per real slot once the config declares several', () => {
+    const config = withFilamentSlots({ filament_type: 'PLA' }, ['PLA', 'PETG', 'ABS'])
+    expect(filamentSlotLabels(config)).toEqual(['PLA', 'PETG', 'ABS'])
+  })
+
+  it('agrees with the count withFilamentSlots actually sized', () => {
+    // The queue drops assignments above this number, so a disagreement here
+    // either strands a valid slot or lets an out-of-range one through.
+    const config = withFilamentSlots({ _passthrough: { filament_type: ['PLA', 'PETG'] } }, ['PLA'])
+    const colours = (config._passthrough as PassthroughConfig).filament_colour
+    expect(filamentSlotLabels(config)).toHaveLength(colours.length)
+  })
+
+  it('does not turn a joined display scalar into slots nothing sized', () => {
+    // filamentSlots() splits filament_type on [;,] for display, and a profile
+    // can carry "PLA;PETG" there with no per-slot array behind it. Both this
+    // and withFilamentSlots() read declaredSlotCount(), which sees one slot —
+    // so withFilamentSlots() returns early and sizes no per-filament vectors.
+    // Offering a second label here would put a Slot 2 in the picker whose
+    // extruderId indexes a one-filament config.
+    const joined: OrcaConfig = { filament_type: 'PLA;PETG' }
+    expect(withFilamentSlots(joined, ['PLA'])).toBe(joined) // nothing sized
+    expect(filamentSlotLabels(joined)).toEqual(['PLA'])
+    expect(filamentSlotLabels({ filament_type: 'PLA,PETG' })).toEqual(['PLA'])
+  })
+
+  it('still lists both once the per-slot array is actually there', () => {
+    // The control: a real import carries the array, declaredSlotCount() sees
+    // two, and withFilamentSlots() sizes for two — so both are offered.
+    const imported = withFilamentSlots({ _passthrough: { filament_type: ['PLA', 'PETG'] } }, ['PLA'])
+    expect(filamentSlotLabels(imported)).toEqual(['PLA', 'PETG'])
   })
 })

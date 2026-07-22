@@ -44,7 +44,7 @@ let loadingWasm = false
 let wasmCrashed = false
 // Slice request that arrived before WASM was ready — last-wins (UI disables
 // the Slice button while loading, so only one request can queue in practice)
-let pendingSlice: { stl: ArrayBuffer; config: OrcaConfig } | null = null
+let pendingSlice: { stl: ArrayBuffer; config: OrcaConfig; extruderId?: number } | null = null
 let pendingPlate: { stls: ArrayBuffer[]; config: OrcaConfig; extruderIds?: number[] } | null = null
 const pendingObjConvertQueue: { obj: ArrayBuffer; requestId: string }[] = []
 const pendingCadConvertQueue: { cad: ArrayBuffer; requestId: string }[] = []
@@ -336,9 +336,9 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       }
       pendingRead3mfQueue.length = 0
       if (pendingSlice) {
-        const { stl, config } = pendingSlice
+        const { stl, config, extruderId } = pendingSlice
         pendingSlice = null
-        doSlice(stl, config)
+        doSlice(stl, config, extruderId)
       }
       if (pendingPlate) {
         const { stls, config, extruderIds } = pendingPlate
@@ -362,10 +362,10 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
   switch (msg.type) {
     case 'SLICE':
       if (!orcaModule) {
-        pendingSlice = { stl: msg.stl, config: msg.config }
+        pendingSlice = { stl: msg.stl, config: msg.config, extruderId: msg.extruderId }
         return
       }
-      doSlice(msg.stl, msg.config)
+      doSlice(msg.stl, msg.config, msg.extruderId)
       return
     case 'SLICE_MULTI':
       if (!orcaModule) {
@@ -540,16 +540,40 @@ function doRead3mf(mf: ArrayBuffer, requestId: string) {
   }
 }
 
-function doSlice(stl: ArrayBuffer, config: OrcaConfig) {
+function doSlice(stl: ArrayBuffer, config: OrcaConfig, extruderId?: number) {
   if (!orcaModule) return
   const startedAt = performance.now()
-  logInfo(`[OrcaWASM] slice start — STL ${(stl.byteLength / 1e6).toFixed(2)} MB, ${summarizeConfig(config)}`)
+  logInfo(
+    `[OrcaWASM] slice start — STL ${(stl.byteLength / 1e6).toFixed(2)} MB, ${summarizeConfig(config)}` +
+      `${extruderId ? `, filament slot ${extruderId}` : ''}`,
+  )
   try {
     const { _passthrough, ...rest } = config
     const engineRest = toEngineConfig(rest)
     const flat = _passthrough ? { ...engineRest, ..._passthrough } : engineRest
     const configJson = JSON.stringify(flat)
-    const gcode = sliceStl(orcaModule, session, new Uint8Array(stl), configJson)
+    // Only orc_slice_multi takes a per-object filament assignment, so an item
+    // that has one goes through it as a single-object plate. orc_slice would
+    // silently print it with the default filament instead — the picker would
+    // appear to do nothing outside a plate slice.
+    //
+    // This also changes how the object is placed: orc_slice centres it
+    // (center_object_xy_only), while orc_slice_multi runs arrange_objects()
+    // even for a single object. So the same item can land elsewhere on the bed
+    // purely because a slot was picked — expected, but it is why re-slicing
+    // after an assignment differs by more than the tool changes.
+    const bytes = new Uint8Array(stl)
+    const gcode = extruderId
+      ? sliceMultiStl(
+          orcaModule,
+          session,
+          bytes,
+          Int32Array.from([0, bytes.length]),
+          1,
+          configJson,
+          Int32Array.from([extruderId]),
+        )
+      : sliceStl(orcaModule, session, bytes, configJson)
     logInfo(
       `[OrcaWASM] slice done in ${Math.round(performance.now() - startedAt)}ms ` +
         `— G-code ${(gcode.length / 1e6).toFixed(2)} MB`,

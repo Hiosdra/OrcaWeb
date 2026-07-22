@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { PlateState } from '../hooks/useSliceQueue'
 import { downloadBlob } from '../lib/download'
 import { extractGcodeStats, gcodeStatsLabel } from '../lib/gcode-stats'
-import { DISPLAY_DEFAULTS, filamentSlots } from '../lib/profiles'
+import { DISPLAY_DEFAULTS, filamentSlotLabels } from '../lib/profiles'
 import type { WasmStatus } from '../lib/worker-singleton'
 import type { OrcaConfig, QueueItem } from '../types'
 import { GcodeViewer } from './GcodeViewer'
@@ -181,9 +181,17 @@ export function QueueItemCard({
   bedY,
   bedShape,
   onExport3mf,
+  filamentSlotLabels,
+  onAssignExtruder,
 }: {
   item: QueueItem
   onExport3mf: (item: QueueItem) => Promise<ArrayBuffer>
+  /** One label per real filament slot, from filamentSlotLabels() — the same
+   *  count useSliceQueue drops out-of-range assignments against. Only >1 entry
+   *  enables the picker. Deliberately shares the helper's name: inside this
+   *  component the prop shadows that import, which is what should be read. */
+  filamentSlotLabels?: string[]
+  onAssignExtruder?: (id: string, extruderId: number) => void
 } & BedProps) {
   const [expanded, setExpanded] = useState(false)
   const [exporting3mf, setExporting3mf] = useState(false)
@@ -256,6 +264,33 @@ export function QueueItemCard({
             {item.status === 'error' && (item.error ?? 'Error')}
           </p>
         </div>
+
+        {filamentSlotLabels &&
+          filamentSlotLabels.length > 1 &&
+          onAssignExtruder &&
+          item.status !== 'converting' &&
+          item.status !== 'error' && (
+            <label className="flex items-center gap-1.5 shrink-0 text-xs text-slate-500">
+              <span className="hidden sm:inline">Filament</span>
+              <select
+                aria-label={`Filament slot for ${item.name}`}
+                data-testid="extruder-select"
+                value={item.extruderId ?? 0}
+                onChange={(e) => onAssignExtruder(item.id, Number(e.target.value))}
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:border-orca-300 focus:border-orca-400 focus:outline-none"
+              >
+                <option value={0}>Auto</option>
+                {filamentSlotLabels.map((type, i) => (
+                  // Slots are a fixed positional list (index = 1-based slot), so
+                  // the index IS the stable identity here — not a list-reorder key.
+                  // biome-ignore lint/suspicious/noArrayIndexKey: slot index is the identity
+                  <option key={i} value={i + 1}>
+                    {`Slot ${i + 1} · ${type}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
         {/* Destructured so the narrowing survives into the click handlers —
             TypeScript can't keep a mutable property's narrowing inside a
@@ -460,7 +495,14 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
 // ── Config summary ────────────────────────────────────────────────────────────
 
 export function ConfigSummary({ config, fileCount }: { config: OrcaConfig; fileCount: number }) {
-  const filamentEntries = filamentSlots(config)
+  // The real slot list, not filamentSlots()'s split of the display scalar.
+  // For slots defined in the settings panel that scalar is slot 0's material
+  // alone (buildConfig() merges FILAMENT_PRESETS[slots[0]]; the rest live in
+  // _passthrough), so this row said "PLA" while the per-object picker right
+  // below it offered three — and the "(N slots)" branch below only ever fired
+  // for an imported profile whose flattened scalar happened to contain a
+  // separator.
+  const filamentEntries = filamentSlotLabels(config)
   const filamentTypes = [...new Set(filamentEntries)]
   const material =
     filamentEntries.length > 1

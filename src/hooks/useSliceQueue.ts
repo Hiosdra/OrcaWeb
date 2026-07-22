@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { logError, logWarn } from '../lib/log'
-import { parseOrcaProfileJson } from '../lib/profiles'
+import { filamentSlotLabels, parseOrcaProfileJson } from '../lib/profiles'
 import { addWorkerListener, getWasmStatus, getWorker, terminateWorker, type WasmStatus } from '../lib/worker-singleton'
 import type { ConversionKind, OrcaConfig, QueueItem, SliceProgress, WorkerOutMessage } from '../types'
 
@@ -34,11 +34,16 @@ interface QueueState {
   configEpoch: number
   sliceStartEpoch: number
   plateStartEpoch: number
+  /** The filament slots the last CONFIG_CHANGED reported, in engine order.
+   *  Kept so the next one can tell a slot that *vanished* from a slot that was
+   *  merely re-picked — see the CONFIG_CHANGED case. */
+  slotLabels: string[]
 }
 
 type QueueAction =
   | { type: 'ADD_ITEMS'; items: QueueItem[] }
   | { type: 'PATCH_ITEM'; id: string; patch: Partial<QueueItem> }
+  | { type: 'ASSIGN_EXTRUDER'; id: string; extruderId?: number }
   | { type: 'CONVERSION_DONE'; id: string; stl: ArrayBuffer }
   | { type: 'REMOVE_ITEM'; id: string }
   | { type: 'RUN_QUEUE' }
@@ -50,7 +55,11 @@ type QueueAction =
   | { type: 'PLATE_STARTED'; configEpoch: number }
   | { type: 'PLATE_DONE'; gcode: string }
   | { type: 'PLATE_FAILED'; message: string }
-  | { type: 'CONFIG_CHANGED'; epoch: number }
+  // slotLabels: the new config's filament slots in engine order. The length
+  // drops assignments naming a slot it no longer has; the labels catch the
+  // ones that stayed in range but now mean a different material (see the
+  // reducer).
+  | { type: 'CONFIG_CHANGED'; epoch: number; slotLabels: string[] }
   | { type: 'CANCELLED' }
   | { type: 'ENGINE_FAILED'; message: string }
 
@@ -64,6 +73,7 @@ const INITIAL_STATE: QueueState = {
   configEpoch: 0,
   sliceStartEpoch: 0,
   plateStartEpoch: 0,
+  slotLabels: [],
 }
 
 class ItemRemovedError extends Error {}
@@ -82,6 +92,19 @@ function classifyConversion(filename: string): ConversionKind | undefined {
   return undefined
 }
 
+/**
+ * Build the per-object `extruderIds` array for a plate slice from the ready
+ * items' filament-slot assignments (parallel to `items`). Returns undefined
+ * when no object is assigned a slot, so a single-material plate omits the
+ * field entirely and hits the exact same orc_slice_multi path as before an
+ * assignment ever existed. Unassigned objects on an otherwise-assigned plate
+ * are sent as 0 (inherit the config's default extruder). Exported for tests.
+ */
+export function buildPlateExtruderIds(items: Pick<QueueItem, 'extruderId'>[]): number[] | undefined {
+  const ids = items.map((i) => i.extruderId ?? 0)
+  return ids.some((id) => id > 0) ? ids : undefined
+}
+
 function toGcodeFilename(name: string): string {
   return `${name.replace(/\.(stl|3mf|obj|step|stp)$/i, '')}.gcode`
 }
@@ -97,6 +120,37 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
 
     case 'PATCH_ITEM':
       return { ...state, items: patchItem(state.items, action.id, action.patch) }
+
+    case 'ASSIGN_EXTRUDER': {
+      // Picking a different filament changes what this object would print
+      // with, so any G-code already produced for it no longer matches — mark
+      // it stale exactly like CONFIG_CHANGED does for a settings edit, so the
+      // Slice button offers to re-run it. Both slice paths honour the
+      // assignment (the single one via a one-object plate), so re-slicing
+      // genuinely produces different output rather than the same bytes.
+      //
+      // A slice already *in flight* counts too: its request went out carrying
+      // the old assignment, so its result is outdated the moment this lands.
+      // A config edit gets this for free from the epoch comparison in
+      // SLICE_DONE/PLATE_DONE, but an assignment has no epoch of its own —
+      // it never touches configSnapshotRef, and bumping configEpoch here
+      // would leave that ref one behind forever and mark *every* later result
+      // stale. So flag the run directly and have both DONE cases OR this in
+      // rather than overwrite it.
+      const item = state.items.find((i) => i.id === action.id)
+      const outdated = item?.status === 'done' || item?.status === 'slicing'
+      return {
+        ...state,
+        items: patchItem(state.items, action.id, {
+          extruderId: action.extruderId,
+          ...(outdated ? { stale: true } : {}),
+        }),
+        // The plate mixes every object, so it goes stale on any reassignment
+        // — including one made while it is still slicing, where PLATE_STARTED
+        // has cleared gcode and there is nothing yet to test for.
+        plate: state.plate.gcode || state.plate.slicing ? { ...state.plate, stale: true } : state.plate,
+      }
+    }
 
     case 'CONVERSION_DONE': {
       const item = state.items.find((i) => i.id === action.id)
@@ -157,7 +211,12 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
               status: 'done',
               gcode: action.gcode,
               gcodeFilename: toGcodeFilename(item.name),
-              stale: state.configEpoch !== state.sliceStartEpoch || undefined,
+              // OR, not overwrite: RUN_QUEUE clears `stale` before re-slicing,
+              // so anything set here arrived *during* the run — a slot
+              // reassignment, which ASSIGN_EXTRUDER flags directly because it
+              // has no epoch of its own. The epoch comparison covers a config
+              // edit made in the same window.
+              stale: item.stale || state.configEpoch !== state.sliceStartEpoch || undefined,
               progress: undefined,
             })
           : state.items,
@@ -187,7 +246,9 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
           slicing: false,
           gcode: action.gcode,
           error: null,
-          stale: state.configEpoch !== state.plateStartEpoch,
+          // Same OR as SLICE_DONE: PLATE_STARTED sets stale false for the
+          // duration, so a true here is a reassignment made mid-slice.
+          stale: state.plate.stale || state.configEpoch !== state.plateStartEpoch,
           progress: undefined,
         },
       }
@@ -199,10 +260,49 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
       }
 
     case 'CONFIG_CHANGED': {
+      // Removing a filament slot leaves assignments pointing at a slot that no
+      // longer exists. Nothing in the UI shows them any more — the picker
+      // disappears entirely below two slots — but buildPlateExtruderIds would
+      // still send them, and the engine would index its per-filament vectors
+      // by an out-of-range filament id. Drop them here, where the slot list
+      // can actually change.
+      //
+      // Slots are positional: index IS the identity, for the engine's
+      // per-filament vectors and therefore for extruderId too. So removing one
+      // from the *middle* renumbers every slot after it while leaving every id
+      // in range, and an object assigned to "slot 2" silently becomes an object
+      // assigned to whatever moved into position 2. That prints the wrong
+      // material rather than indexing out of bounds, so nothing catches it
+      // downstream.
+      //
+      // Comparing the labels catches it — but only together with the length
+      // test. A label changing on its own is the user re-picking that slot's
+      // material in the panel, which is deliberate and must leave the
+      // assignment alone; it is a label changing *because the list got shorter*
+      // that means this position now describes a different filament. Dropping
+      // to "Auto" rather than following the material to its new index is the
+      // conservative half: the picker is right there, and a wrong slot is worse
+      // than an unset one.
+      const previous = state.slotLabels
+      const slots = action.slotLabels
+      const shrank = slots.length < previous.length
+      const staleSlot = (id: number | undefined) =>
+        id !== undefined &&
+        // A config back down to one slot drops *every* assignment, not just the
+        // out-of-range ones: "slot 1" of one slot is what the config already
+        // does, and keeping it would leave the plate on the assigned code path
+        // (a non-empty extruderIds array) with no picker to clear it from.
+        (slots.length < 2 ||
+          // Removed from the end.
+          id > slots.length ||
+          // Still in range, but renumbered onto a different material.
+          (shrank && slots[id - 1] !== previous[id - 1]))
+      const dropStaleSlot = (i: QueueItem): QueueItem => (staleSlot(i.extruderId) ? { ...i, extruderId: undefined } : i)
       return {
         ...state,
         configEpoch: action.epoch,
-        items: state.items.map((i) => (i.status === 'done' ? { ...i, stale: true } : i)),
+        slotLabels: slots,
+        items: state.items.map((i) => dropStaleSlot(i.status === 'done' ? { ...i, stale: true } : i)),
         plate: state.plate.gcode ? { ...state.plate, stale: true } : state.plate,
       }
     }
@@ -249,6 +349,9 @@ export interface SliceQueue {
   removeItem: (id: string) => void
   /** Slice every ready item (and re-slice stale results) one after another. */
   sliceAll: () => void
+  /** Assign an item to a 1-based filament/extruder slot for plate slicing
+   *  (0 = inherit the config default). No-op for single slicing. */
+  assignExtruder: (id: string, extruderId: number) => void
   /** Arrange all ready items on one plate and slice them together. */
   slicePlate: () => void
   /** Abort the running slice — terminates the worker and restarts the engine. */
@@ -344,7 +447,7 @@ export function useSliceQueue(
       epoch: configSnapshotRef.current.epoch + 1,
     }
     configSnapshotRef.current = snapshot
-    dispatch({ type: 'CONFIG_CHANGED', epoch: snapshot.epoch })
+    dispatch({ type: 'CONFIG_CHANGED', epoch: snapshot.epoch, slotLabels: filamentSlotLabels(config) })
   }, [config])
 
   // ── Worker messages → reducer ─────────────────────────────────────────────
@@ -472,7 +575,15 @@ export function useSliceQueue(
         const stl = await next.stlFile.arrayBuffer()
         if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
-        getWorker().postMessage({ type: 'SLICE', stl, config: configSnapshot.config }, [stl])
+        getWorker().postMessage(
+          {
+            type: 'SLICE',
+            stl,
+            config: configSnapshot.config,
+            ...(next.extruderId ? { extruderId: next.extruderId } : {}),
+          },
+          [stl],
+        )
       } catch (err) {
         if (requestGeneration !== sliceRequestGeneration.current) return
         logError(`[queue] failed to read "${next.name}" for slicing:`, err)
@@ -706,6 +817,12 @@ export function useSliceQueue(
     dispatch({ type: 'RUN_QUEUE' })
   }, [state.plate.slicing])
 
+  const assignExtruder = useCallback((id: string, extruderId: number) => {
+    // Store 0 as undefined so it round-trips cleanly and the plate slice below
+    // only builds an extruderIds array when at least one object is assigned.
+    dispatch({ type: 'ASSIGN_EXTRUDER', id, extruderId: extruderId > 0 ? extruderId : undefined })
+  }, [])
+
   // Exports one queue item's current STL + config snapshot as a .3mf.
   // Independent of slicing — works on any item with STL data, sliced or not.
   const export3mf = useCallback((item: QueueItem): Promise<ArrayBuffer> => {
@@ -738,6 +855,9 @@ export function useSliceQueue(
     if (readyItems.length === 0) return
 
     const configSnapshot = configSnapshotRef.current
+    // Per-object filament/extruder-slot assignment, parallel to readyItems;
+    // undefined (omitted from the message) when nothing is assigned.
+    const extruderIds = buildPlateExtruderIds(readyItems)
     dispatch({ type: 'PLATE_STARTED', configEpoch: configSnapshot.epoch })
     const requestGeneration = sliceRequestGeneration.current
     // Recorded synchronously (before the STL-read await below) so a
@@ -749,7 +869,10 @@ export function useSliceQueue(
         const stls = await Promise.all(readyItems.map((i) => i.stlFile.arrayBuffer()))
         if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
-        getWorker().postMessage({ type: 'SLICE_MULTI', stls, config: configSnapshot.config }, stls)
+        getWorker().postMessage(
+          { type: 'SLICE_MULTI', stls, config: configSnapshot.config, ...(extruderIds ? { extruderIds } : {}) },
+          stls,
+        )
       } catch (err) {
         if (requestGeneration !== sliceRequestGeneration.current) return
         logError('[queue] failed to prepare plate slice:', err)
@@ -774,6 +897,7 @@ export function useSliceQueue(
     addFiles,
     removeItem,
     sliceAll,
+    assignExtruder,
     slicePlate,
     cancel,
     export3mf,

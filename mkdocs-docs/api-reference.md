@@ -125,8 +125,12 @@ Requires `orc_init` to have been called first on the same session.
   `"extruder"` config override per object (`0` = inherit the config's
   default). Forwarded to OrcaSlicer's per-object `extruder` config key
   (`coInt`, `min 0` = inherit; `normalize_fdm()` resolves it to the
-  per-region `*_filament_id` fields) — the classic single-nozzle
-  multi-material path, not a multi-nozzle machine. Pass `0`/null to leave
+  per-region `*_filament_id` fields). Names a *filament* slot, not a nozzle:
+  whether two slots share one nozzle (AMS-style) or drive genuine T0/T1 tool
+  changes on a real multi-nozzle machine is decided by `filament_map` in the
+  config, which the frontend builds in `withFilamentSlots()`
+  (`src/lib/profiles.ts`). Both cases are supported as of
+  [#160](https://github.com/Hiosdra/OrcaWeb/pull/160). Pass `0`/null to leave
   every object on the default extruder (unchanged behaviour from before this
   parameter existed).
 - `out_gcode` — on success, written with the address of the output G-code buffer

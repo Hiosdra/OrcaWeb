@@ -99,7 +99,7 @@ const FILAMENTS: { name: string; vendor: string; filament: string }[] = [
 // _passthrough, so a user-imported profile can drive settings the UI
 // doesn't model. Tried enabling the same thing for these *bundled* profiles
 // and reverted it after two confirmed problems (see scripts/repro-passthrough.mjs,
-// a local debug harness):
+// a local debug harness). Only the first still stands:
 //   1. libslic3r/PlaceholderParser.cpp IS already compiled into the WASM
 //      build (non-GUI source, part of libslic3r's normal CMake sources) and
 //      IS invoked by the real GCode::do_export path our bridge already
@@ -107,18 +107,23 @@ const FILAMENTS: { name: string; vendor: string; filament: string }[] = [
 //      unresolved in tests, left as literal text in the G-code (invalid
 //      G-code for a real printer to execute). Needs further investigation
 //      before it can be trusted.
-//   2. Passing the full set of unmapped machine fields (extruder_offset,
+//   2. RESOLVED in #160 — kept here only so the reasoning isn't rediscovered.
+//      The full set of unmapped machine fields (extruder_offset,
 //      physical_extruder_map, retraction_distances_when_cut, etc. — meant
-//      for OrcaSlicer's multi-extruder/AMS support) crashes the engine:
-//      "memory access out of bounds" in
+//      for OrcaSlicer's multi-extruder/AMS support) used to crash the engine
+//      with "memory access out of bounds" in
 //      DynamicPrintConfig::update_values_to_printer_extruders_for_multiple_filaments,
-//      called from Print::apply(), because our single-extruder headless
-//      config doesn't have the per-extruder array lengths these options
-//      expect.
-// Keep only the fields explicitly modeled in OrcaConfig (dimensions,
-// speeds, temps, quality settings — the values that actually drive a
-// correct slice) until placeholder resolution and multi-extruder-field
-// filtering are solved properly.
+//      called from Print::apply(). That was diagnosed as the engine rejecting
+//      our single-extruder config; it was actually our own serialization
+//      joining every multi-value option with ',' regardless of the separator
+//      the option's *type* requires, which fused each per-extruder value into
+//      one entry and left companions of the wrong length. The join now happens
+//      in the bridge against the engine's own option registry — see
+//      json_array_to_config_string() in orca-wasm/bridge/slicer.cpp.
+// So passthrough stays stripped for problem 1 alone: keep only the fields
+// explicitly modeled in OrcaConfig (dimensions, speeds, temps, quality
+// settings — the values that actually drive a correct slice) until
+// placeholder resolution is solved properly.
 function stripPassthrough(config: Partial<OrcaConfig>): Partial<OrcaConfig> {
   const { _passthrough, ...rest } = config
   void _passthrough

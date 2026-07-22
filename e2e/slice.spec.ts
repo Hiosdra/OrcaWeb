@@ -100,6 +100,51 @@ test('keeps a manual setting when presets underneath it change', async ({ page }
   await expect(page.getByTestId('revert-skirt_loops')).toBeVisible()
 })
 
+test('adds a filament slot and offers it as a per-object assignment', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('model-file-input').setInputFiles(VORON_CUBE_STL)
+  await page.getByTestId('tab-settings').click()
+
+  // A single slot is the old "Material" dropdown, and nothing on the Slice tab
+  // offers a choice — the picker only earns its space above one slot.
+  await page.getByTestId('tab-slice').click()
+  await expect(page.getByTestId('extruder-select')).toBeHidden()
+  await expect(page.getByText(/\(\d+ slots\)/)).toBeHidden()
+
+  await page.getByTestId('tab-settings').click()
+  await page.getByTestId('add-filament-slot').click()
+  const filamentSelects = page.locator('select')
+  // A new slot takes the first unused material rather than duplicating slot 1,
+  // which would give the engine two slots to purge 280 mm³ between for nothing.
+  await expect(filamentSelects.nth(1)).not.toHaveValue(await filamentSelects.nth(2).inputValue())
+
+  await page.getByTestId('tab-slice').click()
+  const picker = page.getByTestId('extruder-select')
+  await expect(picker).toBeVisible()
+  await expect(picker.locator('option')).toHaveCount(3) // Auto + one per slot
+  // The summary counts the same slots the picker does. It used to split the
+  // display scalar instead, which for panel-defined slots is slot 1's material
+  // alone — so it read a single material beside a picker offering two.
+  await expect(page.getByText(/\(2 slots\)/)).toBeVisible()
+  await picker.selectOption('2')
+  await expect(picker).toHaveValue('2')
+
+  // Removing the slot again leaves nothing naming it: the picker disappears,
+  // and the assignment behind it is dropped rather than left pointing at a
+  // filament the engine no longer has (buildPlateExtruderIds would still send
+  // it, and the engine would index its per-filament vectors out of range).
+  await page.getByTestId('tab-settings').click()
+  await page.getByLabel('Remove filament slot 2').click()
+  await page.getByTestId('tab-slice').click()
+  await expect(page.getByTestId('extruder-select')).toBeHidden()
+  await expect(page.getByText(/\(\d+ slots\)/)).toBeHidden()
+
+  await page.getByTestId('tab-settings').click()
+  await page.getByTestId('add-filament-slot').click()
+  await page.getByTestId('tab-slice').click()
+  await expect(page.getByTestId('extruder-select')).toHaveValue('0')
+})
+
 test('offers a reset for a manual setting hidden by its parent option', async ({ page }) => {
   await page.goto('/')
   await page.getByTestId('model-file-input').setInputFiles(VORON_CUBE_STL)

@@ -10,7 +10,15 @@ import { useSliceQueue } from './hooks/useSliceQueue'
 import { type ConfigField, mergeConfigLayers, resolveConfig, revertField } from './lib/config-layers'
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
-import { buildConfig, DISPLAY_DEFAULTS, FILAMENT_PRESETS, PRESETS, PRINTER_PRESETS } from './lib/profiles'
+import {
+  buildConfig,
+  DISPLAY_DEFAULTS,
+  FILAMENT_PRESETS,
+  filamentSlotLabels,
+  PRESETS,
+  PRINTER_PRESETS,
+  withFilamentSlots,
+} from './lib/profiles'
 import type { WasmStatus } from './lib/worker-singleton'
 import type { OrcaConfig, UserPreset } from './types'
 
@@ -21,6 +29,9 @@ const SETTINGS_KEY = 'orcaweb.settings.v1'
 interface SavedSettings {
   printer: string
   filament: string
+  /** One entry per filament slot. `filament` above is the legacy single-slot
+   *  field, kept so settings saved by an older build still load. */
+  filaments?: string[]
   preset: string
   manualOverrides: Partial<OrcaConfig>
   importedProfile?: ImportedProfile
@@ -57,6 +68,9 @@ function loadSavedSettings(): SavedSettings | null {
       printer:
         typeof s.printer === 'string' && s.printer in PRINTER_PRESETS ? s.printer : Object.keys(PRINTER_PRESETS)[0],
       filament: typeof s.filament === 'string' && s.filament in FILAMENT_PRESETS ? s.filament : 'PLA',
+      filaments: Array.isArray(s.filaments)
+        ? s.filaments.filter((f): f is string => typeof f === 'string' && f in FILAMENT_PRESETS)
+        : undefined,
       preset: typeof s.preset === 'string' && PRESETS.some((p) => p.name === s.preset) ? s.preset : 'standard',
       manualOverrides:
         s.manualOverrides && typeof s.manualOverrides === 'object'
@@ -104,6 +118,13 @@ function isUserPreset(value: unknown): value is UserPreset {
     Object.keys(PRINTER_PRESETS).includes(p.printer) &&
     typeof p.filament === 'string' &&
     Object.keys(FILAMENT_PRESETS).includes(p.filament) &&
+    // Optional — presets saved before multi-slot existed have only `filament`.
+    // Present but naming a filament this build no longer ships is rejected the
+    // same way `filament` itself is, rather than loading a partial slot list.
+    (p.filaments === undefined ||
+      (Array.isArray(p.filaments) &&
+        p.filaments.length > 0 &&
+        p.filaments.every((f) => typeof f === 'string' && Object.keys(FILAMENT_PRESETS).includes(f)))) &&
     typeof p.preset === 'string' &&
     PRESETS.some((preset) => preset.name === p.preset) &&
     !!p.overrides &&
@@ -189,21 +210,33 @@ export default function App() {
   const [saved] = useState(loadSavedSettings)
   const [selectedPreset, setSelectedPreset] = useState(saved?.preset ?? 'standard')
   const [selectedPrinter, setSelectedPrinter] = useState(saved?.printer ?? Object.keys(PRINTER_PRESETS)[0])
-  const [selectedFilament, setSelectedFilament] = useState(saved?.filament ?? 'PLA')
+  // One entry per filament slot; slot 0 is what the settings panel's scalar
+  // fields show. Falls back to the legacy single-slot setting.
+  const [selectedFilaments, setSelectedFilaments] = useState<string[]>(() =>
+    saved?.filaments?.length ? saved.filaments : [saved?.filament ?? 'PLA'],
+  )
+  const selectedFilament = selectedFilaments[0]
+  const setSelectedFilament = useCallback((name: string) => {
+    setSelectedFilaments((prev) => (prev.length <= 1 ? [name] : prev.map((s, i) => (i === 0 ? name : s))))
+  }, [])
   const [manualOverrides, setManualOverrides] = useState<Partial<OrcaConfig>>(saved?.manualOverrides ?? {})
   const [importedProfile, setImportedProfile] = useState<ImportedProfile | null>(saved?.importedProfile ?? null)
   const [importNotice, setImportNotice] = useState<string | null>(null)
   const [userPresets, setUserPresets] = useState<UserPreset[]>(loadUserPresets)
 
   const baseConfig = useMemo(
-    () => buildConfig(selectedPrinter, selectedFilament, selectedPreset),
-    [selectedPrinter, selectedFilament, selectedPreset],
+    () => buildConfig(selectedPrinter, selectedFilaments, selectedPreset),
+    [selectedPrinter, selectedFilaments, selectedPreset],
   )
   // preset < imported file < manual edits — see config-layers.ts for what
   // each layer is and why the manual one must outlive changes to the others.
   const config: OrcaConfig = useMemo(
-    () => resolveConfig({ preset: baseConfig, imported: importedProfile?.settings, manual: manualOverrides }),
-    [baseConfig, importedProfile, manualOverrides],
+    () =>
+      withFilamentSlots(
+        resolveConfig({ preset: baseConfig, imported: importedProfile?.settings, manual: manualOverrides }),
+        selectedFilaments,
+      ),
+    [baseConfig, importedProfile, manualOverrides, selectedFilaments],
   )
 
   useEffect(() => {
@@ -213,6 +246,7 @@ export default function App() {
         JSON.stringify({
           printer: selectedPrinter,
           filament: selectedFilament,
+          filaments: selectedFilaments,
           preset: selectedPreset,
           manualOverrides,
           ...(importedProfile ? { importedProfile } : {}),
@@ -221,7 +255,7 @@ export default function App() {
     } catch (err) {
       logWarn('Failed to persist settings — storage full or unavailable', err)
     }
-  }, [selectedPrinter, selectedFilament, selectedPreset, manualOverrides, importedProfile])
+  }, [selectedPrinter, selectedFilament, selectedFilaments, selectedPreset, manualOverrides, importedProfile])
 
   useEffect(() => {
     try {
@@ -243,6 +277,7 @@ export default function App() {
         name,
         printer: selectedPrinter,
         filament: selectedFilament,
+        filaments: selectedFilaments,
         preset: selectedPreset,
         overrides: manualOverrides,
         createdAt: new Date().toISOString(),
@@ -258,7 +293,7 @@ export default function App() {
       }
       setUserPresets((prev) => [...prev, preset])
     },
-    [selectedPrinter, selectedFilament, selectedPreset, manualOverrides, userPresets],
+    [selectedPrinter, selectedFilament, selectedFilaments, selectedPreset, manualOverrides, userPresets],
   )
 
   // Applies a saved preset's full selection in one go. The four setState
@@ -285,7 +320,12 @@ export default function App() {
         if (!ok) return
       }
       setSelectedPrinter(p.printer)
-      setSelectedFilament(p.filament)
+      // The whole slot list, not just slot 0 — a preset is a complete
+      // selection, so loading one has to replace however many slots are
+      // currently defined rather than leave the extra ones standing. `filament`
+      // is the legacy single-slot field, kept for presets saved by an older
+      // build.
+      setSelectedFilaments(p.filaments?.length ? p.filaments : [p.filament])
       setSelectedPreset(p.preset)
       setManualOverrides(p.overrides)
       setImportedProfile(null)
@@ -310,23 +350,26 @@ export default function App() {
 
   // Settings embedded in an imported file (3MF) form their own layer so later
   // dropdown changes cannot silently erase them.
-  const handleSettingsImported = useCallback((patch: Partial<OrcaConfig>, filename: string) => {
-    setImportedProfile({ name: filename, type: 'print', settings: patch })
-    // Sync the dropdowns too — without this, config.printer_model/filament_type
-    // get overridden correctly (visible on the Slice tab) but the Settings tab
-    // dropdowns keep showing whatever was selected before import, and touching
-    // either one afterwards wipes every imported override via
-    // onPrinterChange/onFilamentChange's setConfigOverrides({}) reset.
-    if (patch.printer_model !== undefined) {
-      const matched = findPresetKeyByField(PRINTER_PRESETS, 'printer_model', patch.printer_model)
-      if (matched) setSelectedPrinter(matched)
-    }
-    if (patch.filament_type !== undefined) {
-      const matched = findPresetKeyByField(FILAMENT_PRESETS, 'filament_type', patch.filament_type)
-      if (matched) setSelectedFilament(matched)
-    }
-    setImportNotice(`Imported print settings from ${filename}`)
-  }, [])
+  const handleSettingsImported = useCallback(
+    (patch: Partial<OrcaConfig>, filename: string) => {
+      setImportedProfile({ name: filename, type: 'print', settings: patch })
+      // Sync the dropdowns too — without this, config.printer_model/filament_type
+      // get overridden correctly (visible on the Slice tab) but the Settings tab
+      // dropdowns keep showing whatever was selected before import, and touching
+      // either one afterwards wipes every imported override via
+      // onPrinterChange/onFilamentChange's setConfigOverrides({}) reset.
+      if (patch.printer_model !== undefined) {
+        const matched = findPresetKeyByField(PRINTER_PRESETS, 'printer_model', patch.printer_model)
+        if (matched) setSelectedPrinter(matched)
+      }
+      if (patch.filament_type !== undefined) {
+        const matched = findPresetKeyByField(FILAMENT_PRESETS, 'filament_type', patch.filament_type)
+        if (matched) setSelectedFilament(matched)
+      }
+      setImportNotice(`Imported print settings from ${filename}`)
+    },
+    [setSelectedFilament],
+  )
 
   useEffect(() => {
     if (!importNotice) return
@@ -342,6 +385,7 @@ export default function App() {
     addFiles,
     removeItem,
     sliceAll,
+    assignExtruder,
     slicePlate,
     cancel,
     export3mf,
@@ -350,6 +394,11 @@ export default function App() {
   const bedX = config.bed_size_x ?? DISPLAY_DEFAULTS.bed_size_x
   const bedY = config.bed_size_y ?? DISPLAY_DEFAULTS.bed_size_y
   const bedShape = config.bed_shape ?? DISPLAY_DEFAULTS.bed_shape
+
+  // Labels for the queue's per-object filament picker, one per real slot.
+  // Shared with useSliceQueue, which uses the same count to drop assignments
+  // that no longer name a slot — the two must not disagree.
+  const slotLabels = useMemo(() => filamentSlotLabels(config), [config])
 
   // None of these three touch manualOverrides: they swap a layer *below* the
   // user's own edits, which outrank them and stay put (config-layers.ts).
@@ -390,10 +439,22 @@ export default function App() {
     setImportedProfile((profile) => (profile?.type === 'machine' ? null : profile))
   }
 
-  const handleFilamentChange = (name: string) => {
-    if (name === selectedFilament && importedProfile?.type !== 'filament') return
-    setSelectedFilament(name)
-    setImportedProfile((profile) => (profile?.type === 'filament' ? null : profile))
+  const handleFilamentsChange = (names: string[]) => {
+    const next = names.length > 0 ? names : ['PLA']
+    // Same "does this click change anything?" guard the printer/preset
+    // handlers use — re-picking the current material is also how you shed a
+    // filament import, so an unchanged list still has to drop that layer.
+    const unchanged = next.length === selectedFilaments.length && next.every((n, i) => n === selectedFilaments[i])
+    if (unchanged && importedProfile?.type !== 'filament') return
+    setSelectedFilaments(next)
+    // An imported filament profile describes slot 0 — that is the only slot
+    // whose scalars it feeds — so only a change there sheds it. Adding or
+    // removing a *slot*, or repicking a material further down the list, leaves
+    // the import standing rather than silently discarding a file the user
+    // still has selected.
+    if (next[0] !== selectedFilament || unchanged) {
+      setImportedProfile((profile) => (profile?.type === 'filament' ? null : profile))
+    }
   }
 
   const handleRevertField = useCallback((key: ConfigField) => {
@@ -585,8 +646,8 @@ export default function App() {
                   importedProfile?.type === 'machine' ? `Imported: ${importedProfile.name}` : undefined
                 }
                 onPrinterChange={handlePrinterChange}
-                selectedFilament={selectedFilament}
-                onFilamentChange={handleFilamentChange}
+                selectedFilaments={selectedFilaments}
+                onFilamentsChange={handleFilamentsChange}
                 userPresets={userPresets}
                 onSaveUserPreset={saveUserPreset}
                 onLoadUserPreset={loadUserPreset}
@@ -628,6 +689,8 @@ export default function App() {
                   bedY={bedY}
                   bedShape={bedShape}
                   onExport3mf={export3mf}
+                  filamentSlotLabels={slotLabels}
+                  onAssignExtruder={assignExtruder}
                 />
               ))}
             </div>
