@@ -136,6 +136,12 @@ function nozzleCount(config: Partial<OrcaConfig> | undefined): number {
  * spread round-robin over the available nozzles, so a single-nozzle AMS-style
  * printer maps every slot to extruder 1, while a dual-nozzle machine alternates
  * — which is what produces genuine T0/T1 tool changes.
+ *
+ * Everything here only *fills in* what the config does not already say. An
+ * imported multi-material profile brings its own colours, diameters, per-slot
+ * temperatures and flush matrix, and those are the user's values: `_passthrough`
+ * is spread over the resolved config, so regenerating them from a stock preset
+ * would silently replace what was imported. See `per()` for the priority order.
  */
 export function withFilamentSlots(config: OrcaConfig, filaments: string[]): OrcaConfig {
   const ui = filaments.filter((name) => name in FILAMENT_PRESETS)
@@ -178,20 +184,83 @@ function declaredSlotCount(config: OrcaConfig): number {
  *
  * Slots the UI knows about take their stock preset. Slots beyond it exist only
  * because an imported profile declared them, so they take whatever it named.
+ *
+ * `filament_type` is the one field slot 0 cannot read straight off the resolved
+ * config: ORCA_FIELD_MAP collapses a multi-value option to a single scalar for
+ * display, so an imported multi-material profile leaves `config.filament_type`
+ * as the joined "PLA,PETG" rather than this slot's own type. The unflattened
+ * array is still in the passthrough, so take slot 0's entry from there.
  */
 function slotSource(config: OrcaConfig, ui: string[], i: number): Partial<OrcaConfig> {
-  if (i === 0) return config
-  if (i < ui.length) return FILAMENT_PRESETS[ui[i]] ?? {}
   const declared = config._passthrough?.filament_type
-  const type = Array.isArray(declared) ? declared[i] : undefined
+  const perSlot = Array.isArray(declared) ? declared : undefined
+  if (i === 0) return perSlot?.[0] ? { ...config, filament_type: perSlot[0] } : config
+  if (i < ui.length) return FILAMENT_PRESETS[ui[i]] ?? {}
+  const type = perSlot?.[i]
   if (!type) return {}
   return FILAMENT_PRESETS[type] ?? { filament_type: type }
 }
 
+/**
+ * Options the settings panel edits, and therefore the ones whose slot 0 has to
+ * come from the *resolved* config rather than from whatever the imported layer
+ * declared — a manual override lives in the resolved config, and `_passthrough`
+ * is spread over it, so preferring the declared value here would silently
+ * revert the user's edit (the #159 interaction). Every other per-filament
+ * option has no UI of its own, so a declared value is the best answer for any
+ * slot including the first.
+ */
+const PANEL_EDITED_SLOT_OPTIONS = new Set(['filament_type', 'nozzle_temperature', 'hot_plate_temp'])
+
+/**
+ * Colour for a slot the config did not name one for. Past the hand-picked
+ * palette (only reachable when an imported profile declares more slots than
+ * the UI offers) walk the hue circle by the golden angle instead of repeating
+ * it, so the extra slots stay visually distinct from each other.
+ */
+function slotColour(i: number): string {
+  if (i < SLOT_COLOURS.length) return SLOT_COLOURS[i]
+  const hue = ((i * 137.508) % 360) / 360
+  const channel = (offset: number): string => {
+    const t = (hue + offset) % 1
+    // Standard HSL -> RGB at S=0.62, L=0.55, expanded for the two constants.
+    const v = t < 1 / 6 ? 0.238 + 1.932 * t : t < 1 / 2 ? 0.872 : t < 2 / 3 ? 0.872 - 1.932 * (t - 1 / 2) : 0.238
+    return Math.round(v * 255)
+      .toString(16)
+      .padStart(2, '0')
+  }
+  return `#${channel(1 / 3)}${channel(0)}${channel(2 / 3)}`
+}
+
 function multiFilamentPassthrough(config: OrcaConfig, ui: string[], n: number, nozzles: number): PassthroughConfig {
   const sources = Array.from({ length: n }, (_, i) => slotSource(config, ui, i))
-  const per = (pick: (src: Partial<OrcaConfig>) => unknown, fallback: string | number): string[] =>
-    sources.map((src) => String(pick(src) ?? fallback))
+
+  /** Whatever the config already carries for `key`, one entry per slot. */
+  const declared = (key: string): (string | undefined)[] => {
+    const raw = config._passthrough?.[key]
+    if (raw === undefined) return []
+    return Array.isArray(raw) ? raw : [raw]
+  }
+
+  /**
+   * One value per slot, preferring what the config already declared for that
+   * slot over anything derived. An imported multi-material profile is the only
+   * thing that can declare these, and its values are the user's — regenerating
+   * them from a stock preset is the same silent-revert bug PANEL_EDITED_SLOT_
+   * OPTIONS exists to avoid, one slot further down the list.
+   *
+   * A slot the UI names is the exception: the user picked that material in the
+   * panel, so it outranks whatever an older import happened to say.
+   */
+  const per = (key: string, pick: (src: Partial<OrcaConfig>) => unknown, fallback: string | number): string[] => {
+    const own = declared(key)
+    const derived = (i: number) => String(pick(sources[i]) ?? fallback)
+    return Array.from({ length: n }, (_, i) => {
+      if (i === 0) return PANEL_EDITED_SLOT_OPTIONS.has(key) ? derived(0) : (own[0] ?? derived(0))
+      if (i < ui.length) return derived(i)
+      return own[i] ?? derived(i)
+    })
+  }
 
   // Per-filament G-code hooks. The engine reads these with .at(filament_id)
   // (GCode.cpp's filament_start_gcode lookup), so a vector left at its
@@ -207,6 +276,20 @@ function multiFilamentPassthrough(config: OrcaConfig, ui: string[], n: number, n
     return Array.from({ length: n }, (_, i) => existing[i] ?? existing[0] ?? '')
   }
 
+  /**
+   * A declared vector, but only when it is already exactly the shape this slot
+   * count and nozzle count require. Unlike the per-slot options above these
+   * cannot be honoured entry by entry: the engine validates their whole length
+   * and rejects anything else outright ("Flush volumes matrix do not match to
+   * the correct size!"), so one sized for the profile's own filament or nozzle
+   * count has to be regenerated rather than padded.
+   */
+  const declaredIfSized = (key: string, length: number, ok: (v: string) => boolean = () => true) => {
+    const own = declared(key)
+    if (own.length !== length) return undefined
+    return own.every((v) => v !== undefined && ok(v)) ? (own as string[]) : undefined
+  }
+
   // One N×N matrix per nozzle: 0 to purge a filament into itself, FLUSH_VOLUME
   // between two different ones.
   const matrix: string[] = []
@@ -214,20 +297,36 @@ function multiFilamentPassthrough(config: OrcaConfig, ui: string[], n: number, n
     for (let from = 0; from < n; from++)
       for (let to = 0; to < n; to++) matrix.push(String(from === to ? 0 : FLUSH_VOLUME))
 
+  // A profile that already assigns its slots to nozzles knows better than
+  // round-robin — but only if it names nozzles this machine has. Anything else
+  // (a map carried over from a printer with more extruders) would have the
+  // engine index one that does not exist.
+  const namesANozzle = (v: string) => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= nozzles
+
   return {
-    filament_type: per((p) => p.filament_type, DISPLAY_DEFAULTS.filament_type),
-    filament_colour: Array.from({ length: n }, (_, i) => SLOT_COLOURS[i % SLOT_COLOURS.length]),
-    filament_diameter: Array.from({ length: n }, () => '1.75'),
-    nozzle_temperature: per((p) => p.nozzle_temperature, DISPLAY_DEFAULTS.nozzle_temperature),
-    nozzle_temperature_initial_layer: per((p) => p.nozzle_temperature, DISPLAY_DEFAULTS.nozzle_temperature),
-    hot_plate_temp: per((p) => p.bed_temperature, DISPLAY_DEFAULTS.bed_temperature),
-    hot_plate_temp_initial_layer: per((p) => p.bed_temperature, DISPLAY_DEFAULTS.bed_temperature),
+    filament_type: per('filament_type', (p) => p.filament_type, DISPLAY_DEFAULTS.filament_type),
+    filament_colour: Array.from({ length: n }, (_, i) => declared('filament_colour')[i] ?? slotColour(i)),
+    filament_diameter: per('filament_diameter', () => undefined, '1.75'),
+    nozzle_temperature: per('nozzle_temperature', (p) => p.nozzle_temperature, DISPLAY_DEFAULTS.nozzle_temperature),
+    nozzle_temperature_initial_layer: per(
+      'nozzle_temperature_initial_layer',
+      (p) => p.nozzle_temperature,
+      DISPLAY_DEFAULTS.nozzle_temperature,
+    ),
+    hot_plate_temp: per('hot_plate_temp', (p) => p.bed_temperature, DISPLAY_DEFAULTS.bed_temperature),
+    hot_plate_temp_initial_layer: per(
+      'hot_plate_temp_initial_layer',
+      (p) => p.bed_temperature,
+      DISPLAY_DEFAULTS.bed_temperature,
+    ),
     filament_start_gcode: padHook('filament_start_gcode'),
     filament_end_gcode: padHook('filament_end_gcode'),
-    filament_map: Array.from({ length: n }, (_, i) => String((i % nozzles) + 1)),
+    filament_map:
+      declaredIfSized('filament_map', n, namesANozzle) ??
+      Array.from({ length: n }, (_, i) => String((i % nozzles) + 1)),
     filament_map_mode: 'Manual',
-    flush_volumes_matrix: matrix,
-    flush_multiplier: Array.from({ length: nozzles }, () => '1'),
+    flush_volumes_matrix: declaredIfSized('flush_volumes_matrix', nozzles * n * n) ?? matrix,
+    flush_multiplier: declaredIfSized('flush_multiplier', nozzles) ?? Array.from({ length: nozzles }, () => '1'),
   }
 }
 
@@ -669,8 +768,16 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
           // Single-entry arrays collapse to a plain string exactly as before —
           // the two are equivalent once the bridge joins them, and keeping the
           // old shape avoids churning every ordinary single-extruder field.
-          if (items.length === 1) passthrough[field] = items[0]
-          else if (items.length > 1) passthrough[field] = items
+          // An empty one is dropped rather than stored as "", also as before:
+          // real leaf profiles carry [""] for every option they inherit rather
+          // than override, and buildConfig() merges _passthrough field by field
+          // with later layers winning — so a stored "" blanks out the built-in
+          // preset's value for that key instead of leaving it alone. A
+          // *multi*-entry array keeps its empties: there the length is load-
+          // bearing (filament_start_gcode: ["", ""] is what sizes the vector).
+          if (items.length === 1) {
+            if (items[0] !== '') passthrough[field] = items[0]
+          } else if (items.length > 1) passthrough[field] = items
           continue
         }
         const sv = typeof val === 'boolean' ? (val ? '1' : '0') : String(val)

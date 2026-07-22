@@ -556,6 +556,12 @@ function doSlice(stl: ArrayBuffer, config: OrcaConfig, extruderId?: number) {
     // that has one goes through it as a single-object plate. orc_slice would
     // silently print it with the default filament instead — the picker would
     // appear to do nothing outside a plate slice.
+    //
+    // This also changes how the object is placed: orc_slice centres it
+    // (center_object_xy_only), while orc_slice_multi runs arrange_objects()
+    // even for a single object. So the same item can land elsewhere on the bed
+    // purely because a slot was picked — expected, but it is why re-slicing
+    // after an assignment differs by more than the tool changes.
     const bytes = new Uint8Array(stl)
     const gcode = extruderId
       ? sliceMultiStl(

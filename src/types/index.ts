@@ -156,7 +156,9 @@ export interface QueueItem {
   /** 1-based filament slot this object is assigned to (undefined/0 = inherit
    *  the config default). Reaches the engine as orc_slice_multi's per-object
    *  `extruder` override — a single slice routes through that entry point too,
-   *  as a one-object plate, since orc_slice takes no assignment. Which
+   *  as a one-object plate, since orc_slice takes no assignment — which also
+   *  arranges rather than centres it, so assigning a slot can move the object
+   *  on the bed (see doSlice() in src/workers/slicer.worker.ts). Which
    *  physical nozzle the slot lands on is `filament_map`'s business, so this
    *  covers both the AMS-style single-nozzle case and a real multi-nozzle
    *  machine (see withFilamentSlots() in src/lib/profiles.ts).
