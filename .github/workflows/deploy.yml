@@ -33,13 +33,32 @@ concurrency:
 
 jobs:
   deploy:
-    # workflow_run fires for every Build WASM run, including PR-validation
-    # builds (which target PR branches, not master, and never publish) and
-    # failed builds. Only actually deploy for a successful master build; for
-    # every other trigger type (push, workflow_dispatch) just proceed.
+    # Two independent guards, ANDed:
+    #
+    # 1. Never deploy in response to our own auto-bump commit. This is the
+    #    runaway-loop protection, and it deliberately does NOT rely on the
+    #    "[skip actions]" marker in the commit message (see "Auto-bump app
+    #    version" below for why the marker alone is not enough to trust): the
+    #    bump push is authenticated with the SSH deploy key rather than
+    #    GITHUB_TOKEN, so GitHub happily retriggers workflows for it, and a
+    #    marker that silently stops being honored would let the bump-deploy-
+    #    bump cycle back in (it ran away v0.7.1 -> v0.7.9 in about a minute
+    #    once already). Matching the commit-message prefix we generate
+    #    ourselves is a check this repo fully controls.
+    # 2. workflow_run fires for every Build WASM run, including PR-validation
+    #    builds (which target PR branches, not master, and never publish) and
+    #    failed builds. Only actually deploy for a successful master build; for
+    #    every other trigger type (push, workflow_dispatch) just proceed.
+    # Note: every line below sits at the same indentation on purpose — a more
+    # indented line would make YAML's folded scalar keep the newline literally
+    # instead of folding it to a space, embedding "\n" in the expression.
     if: >
-      github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master')
+      (github.event_name != 'push' ||
+      !startsWith(github.event.head_commit.message, 'chore(release): auto-bump'))
+      &&
+      (github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'master'))
     runs-on: ubuntu-latest
 
     env:
@@ -158,14 +177,32 @@ jobs:
           if git diff --cached --quiet; then
             echo "No version-file changes to commit"
           else
-            # [skip ci] is load-bearing, not decoration: this push is authenticated
-            # via the SSH deploy key, not GITHUB_TOKEN, so it does NOT get GitHub's
-            # usual "don't retrigger workflows for token-authored pushes" exemption.
-            # Without this marker, the commit re-triggers deploy.yml, which bumps
-            # again, which triggers again... (confirmed live: v0.7.1 ran away to
-            # v0.7.9 in about a minute before an unrelated stale-checkout error
-            # happened to break the cycle).
-            git commit -m "chore(release): auto-bump to v${NEW_VERSION} [skip ci]"
+            # The skip marker is load-bearing, not decoration: this push is
+            # authenticated via the SSH deploy key, not GITHUB_TOKEN, so it does
+            # NOT get GitHub's usual "don't retrigger workflows for token-authored
+            # pushes" exemption. Without a marker the commit re-triggers every
+            # workflow, including deploy.yml, which bumps again, which triggers
+            # again... (confirmed live: v0.7.1 ran away to v0.7.9 in about a
+            # minute before an unrelated stale-checkout error broke the cycle).
+            #
+            # It is "[skip actions]" and NOT "[skip ci]" ON PURPOSE — do not
+            # "tidy" this back. Cloudflare Workers Builds mirrors this app via
+            # its own Git integration on master, and it honors "[skip ci]" too,
+            # so with that marker the mirror skipped this commit and rebuilt only
+            # merge commits — leaving it permanently one bump behind (verified
+            # live: gh-pages served v0.7.67 while Cloudflare served v0.7.66 from
+            # byte-identical app code). GitHub honors "[skip ci]", "[ci skip]",
+            # "[no ci]", "[skip actions]" and "[actions skip]"; Cloudflare's list
+            # does not include the Actions-specific ones, so this marker stops
+            # GitHub without stopping the mirror, and the two versions line up.
+            #
+            # That divergence is undocumented on the Workers Builds side and
+            # could change, so it is treated as an optimization, not a safety
+            # mechanism: the job-level `if:` at the top of this file is what
+            # actually prevents the bump loop. Worst case if Cloudflare starts
+            # honoring "[skip actions]" too, the mirror's version label drifts a
+            # bump behind again — cosmetic, same code, no broken deploy.
+            git commit -m "chore(release): auto-bump to v${NEW_VERSION} [skip actions]"
             # A concurrent deploy could have pushed to master between our checkout
             # and this push (cancel-in-progress narrows but doesn't eliminate the
             # window). On rejection, do NOT rebase-replay this commit onto the new
@@ -192,7 +229,9 @@ jobs:
                 pushed=1
                 break
               fi
-              git commit -m "chore(release): auto-bump to v${NEW_VERSION} [skip ci]"
+              # Same marker rationale as the first commit above ([skip actions],
+              # deliberately not [skip ci] — it must not stop the Cloudflare mirror).
+              git commit -m "chore(release): auto-bump to v${NEW_VERSION} [skip actions]"
             done
             if [ -z "$pushed" ]; then
               echo "::error::Failed to push version-bump commit to master after 3 attempts"

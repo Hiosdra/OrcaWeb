@@ -382,6 +382,14 @@ Engine-side 3MF write + read (`orc_write_3mf` / `orc_read_3mf`, issue #108) are 
     # Build command:  npm run build:cf   (scripts/cf-build.mjs)
     # Deploy command: npx wrangler deploy   (wrangler.jsonc, static assets)
     #
+    # This builds independently of deploy.yml, off the same master pushes —
+    # including deploy.yml's own auto-bump commit, so the version label here
+    # matches GitHub Pages. That commit is marked [skip actions] rather than
+    # [skip ci] specifically because Workers Builds honors [skip ci] as well:
+    # with the old marker the mirror only ever rebuilt merge commits and sat
+    # permanently one patch version behind (identical code, stale label).
+    # See the comment on deploy.yml's "Auto-bump app version" step.
+    #
     # public/_headers sends Cross-Origin-Opener-Policy: same-origin +
     # Cross-Origin-Embedder-Policy: require-corp on every response here —
     # the one host in this deployment that's crossOriginIsolated, so it's
