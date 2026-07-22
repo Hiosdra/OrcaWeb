@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import { strToU8, zipSync } from 'fflate'
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { overriddenFields } from '../lib/config-layers'
+import { type ConfigField, overriddenFields } from '../lib/config-layers'
 import { downloadBlob } from '../lib/download'
 import {
   DISPLAY_DEFAULTS,
@@ -32,8 +32,8 @@ import { ChevronIcon, DownloadIcon, UploadIcon, XIcon } from './icons'
  * threading the same two values through ~30 call sites by hand.
  */
 interface OverrideState {
-  isOverridden: (field: keyof OrcaConfig) => boolean
-  revert: (field: keyof OrcaConfig) => void
+  isOverridden: (field: ConfigField) => boolean
+  revert: (field: ConfigField) => void
 }
 
 const OverrideContext = createContext<OverrideState>({ isOverridden: () => false, revert: () => {} })
@@ -50,7 +50,7 @@ const OverrideContext = createContext<OverrideState>({ isOverridden: () => false
  * its own to mark (the infill slider), and a useContext() call inside the
  * provider component would read the default value, not the provided one.
  */
-function overrideMarker({ isOverridden, revert }: OverrideState, field?: keyof OrcaConfig) {
+function overrideMarker({ isOverridden, revert }: OverrideState, field?: ConfigField) {
   const overridden = field !== undefined && isOverridden(field)
   return {
     overridden,
@@ -73,7 +73,7 @@ function overrideMarker({ isOverridden, revert }: OverrideState, field?: keyof O
 }
 
 /** The same marker, for the field primitives that live under the provider. */
-function useOverride(field?: keyof OrcaConfig) {
+function useOverride(field?: ConfigField) {
   return overrideMarker(useContext(OverrideContext), field)
 }
 
@@ -81,7 +81,7 @@ function useOverride(field?: keyof OrcaConfig) {
 // state. The summary uses this list to keep a reset action reachable even when
 // an overridden control is currently hidden behind a toggle or the advanced
 // section.
-const BASIC_SETTING_FIELDS: (keyof OrcaConfig)[] = [
+const BASIC_SETTING_FIELDS: ConfigField[] = [
   'nozzle_diameter',
   'nozzle_temperature',
   'bed_temperature',
@@ -101,7 +101,7 @@ const BASIC_SETTING_FIELDS: (keyof OrcaConfig)[] = [
   'skirt_distance',
 ]
 
-const ADVANCED_SETTING_FIELDS: (keyof OrcaConfig)[] = [
+const ADVANCED_SETTING_FIELDS: ConfigField[] = [
   'default_speed',
   'outer_wall_speed',
   'initial_layer_speed',
@@ -113,13 +113,13 @@ const ADVANCED_SETTING_FIELDS: (keyof OrcaConfig)[] = [
   'enable_ironing',
 ]
 
-const OVERRIDE_LABELS: Partial<Record<keyof OrcaConfig, string>> = {
+const OVERRIDE_LABELS: Partial<Record<ConfigField, string>> = {
   support_type: 'Support type',
   fuzzy_skin_thickness: 'Fuzzy skin thickness',
   fuzzy_skin_point_dist: 'Fuzzy skin point distance',
 }
 
-function overrideLabel(field: keyof OrcaConfig): string {
+function overrideLabel(field: ConfigField): string {
   return OVERRIDE_LABELS[field] ?? String(field).replace(/_/g, ' ')
 }
 
@@ -128,7 +128,7 @@ interface Props {
   onChange: (patch: Partial<OrcaConfig>) => void
   /** The manual override layer — the fields to flag as edited. */
   overrides: Partial<OrcaConfig>
-  onRevertField: (field: keyof OrcaConfig) => void
+  onRevertField: (field: ConfigField) => void
   onRevertAll: () => void
   onProfileImport: (profile: {
     name: string
@@ -182,21 +182,21 @@ export function SettingsPanel({
   const overriddenKeys = overriddenFields(overrides)
   const overrideContext = useMemo(
     () => ({
-      isOverridden: (field: keyof OrcaConfig) => field in overrides,
+      isOverridden: (field: ConfigField) => field in overrides,
       revert: onRevertField,
     }),
     [overrides, onRevertField],
   )
   const densityOverride = overrideMarker(overrideContext, 'sparse_infill_density')
-  const visibleOverrideFields = new Set<keyof OrcaConfig>(BASIC_SETTING_FIELDS)
+  const visibleOverrideFields = new Set<ConfigField>(BASIC_SETTING_FIELDS)
   if (showAdvanced) {
-    for (const field of ADVANCED_SETTING_FIELDS) visibleOverrideFields.add(field)
+    const fuzzySkinEnabled = (config.fuzzy_skin ?? DISPLAY_DEFAULTS.fuzzy_skin) !== 'none'
+    for (const field of ADVANCED_SETTING_FIELDS) {
+      if (!fuzzySkinEnabled && (field === 'fuzzy_skin_thickness' || field === 'fuzzy_skin_point_dist')) continue
+      visibleOverrideFields.add(field)
+    }
   }
   if (config.enable_support) visibleOverrideFields.add('support_type')
-  if ((config.fuzzy_skin ?? DISPLAY_DEFAULTS.fuzzy_skin) !== 'none') {
-    visibleOverrideFields.add('fuzzy_skin_thickness')
-    visibleOverrideFields.add('fuzzy_skin_point_dist')
-  }
   const hiddenOverrideKeys = overriddenKeys.filter((field) => !visibleOverrideFields.has(field))
 
   function handleProfileFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -835,7 +835,7 @@ function SelectField({
   className,
 }: {
   label: string
-  field?: keyof OrcaConfig
+  field?: ConfigField
   value: string
   options: string[]
   onChange: (v: string) => void
@@ -882,7 +882,7 @@ function NumberField({
   onChange,
 }: {
   label: string
-  field?: keyof OrcaConfig
+  field?: ConfigField
   unit: string
   value: number
   min: number
@@ -986,7 +986,7 @@ function ToggleField({
   className,
 }: {
   label: string
-  field?: keyof OrcaConfig
+  field?: ConfigField
   value: boolean
   onChange: (v: boolean) => void
   className?: string

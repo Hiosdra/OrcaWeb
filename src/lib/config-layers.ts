@@ -40,6 +40,9 @@ import type { OrcaConfig } from '../types'
  */
 export type ConfigLayer = 'preset' | 'imported' | 'manual'
 
+/** Config keys that may be represented by a manual override. */
+export type ConfigField = Exclude<keyof OrcaConfig, '_passthrough'>
+
 /**
  * Merge config layers left-to-right, later layers winning — with
  * `_passthrough` merged field-by-field rather than replaced wholesale, so an
@@ -70,12 +73,12 @@ export function resolveConfig(layers: {
  * `_passthrough` is not a field: it's the bag of unmapped values, has no
  * control of its own, and is never written by the panel.
  */
-export function overriddenFields(manual: Partial<OrcaConfig>): (keyof OrcaConfig)[] {
-  return Object.keys(manual).filter((key) => key !== '_passthrough') as (keyof OrcaConfig)[]
+export function overriddenFields(manual: Partial<OrcaConfig>): ConfigField[] {
+  return Object.keys(manual).filter((key): key is ConfigField => key !== '_passthrough')
 }
 
 /** Drop a single manual override, revealing whatever the layers below say. */
-export function revertField(manual: Partial<OrcaConfig>, key: keyof OrcaConfig): Partial<OrcaConfig> {
+export function revertField(manual: Partial<OrcaConfig>, key: ConfigField): Partial<OrcaConfig> {
   const { [key]: _dropped, ...rest } = manual
   return rest
 }

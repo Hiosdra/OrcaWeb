@@ -7,7 +7,7 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { ConfigSummary, PlateResultCard, QueueItemCard, SliceHeader } from './components/SliceCards'
 import { ViewerErrorBoundary } from './components/ViewerErrorBoundary'
 import { useSliceQueue } from './hooks/useSliceQueue'
-import { mergeConfigLayers, resolveConfig, revertField } from './lib/config-layers'
+import { type ConfigField, mergeConfigLayers, resolveConfig, revertField } from './lib/config-layers'
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
 import { buildConfig, DISPLAY_DEFAULTS, FILAMENT_PRESETS, PRESETS, PRINTER_PRESETS } from './lib/profiles'
@@ -396,7 +396,7 @@ export default function App() {
     setImportedProfile((profile) => (profile?.type === 'filament' ? null : profile))
   }
 
-  const handleRevertField = useCallback((key: keyof OrcaConfig) => {
+  const handleRevertField = useCallback((key: ConfigField) => {
     setManualOverrides((prev) => revertField(prev, key))
   }, [])
 

@@ -77,3 +77,44 @@ test('keeps an imported machine profile active when the filament changes', async
   await page.getByTitle('Remove imported profile').click()
   await expect(profileChip).toBeHidden()
 })
+
+test('keeps a manual setting when presets underneath it change', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('model-file-input').setInputFiles(VORON_CUBE_STL)
+  await page.getByTestId('tab-settings').click()
+
+  const skirt = page.getByTestId('setting-skirt_loops')
+  await skirt.fill('0')
+  await skirt.blur()
+  await expect(skirt).toHaveValue('0')
+  await expect(page.getByTestId('override-summary')).toContainText('1 setting changed by you')
+
+  // Quality chips are buttons, so clicking the already-selected one is the
+  // exact interaction that used to clear manualOverrides without changing
+  // the visible preset selection.
+  await page.getByRole('button', { name: /Standard/ }).click()
+  await page.locator('select').nth(0).selectOption('Prusa MK4')
+  await page.locator('select').nth(1).selectOption('PETG')
+
+  await expect(skirt).toHaveValue('0')
+  await expect(page.getByTestId('revert-skirt_loops')).toBeVisible()
+})
+
+test('offers a reset for a manual setting hidden by its parent option', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('model-file-input').setInputFiles(VORON_CUBE_STL)
+  await page.getByTestId('tab-settings').click()
+  await page.getByRole('button', { name: 'Show advanced settings' }).click()
+
+  const fuzzySkin = page.getByTestId('setting-fuzzy_skin')
+  await fuzzySkin.selectOption('external')
+  const thickness = page.getByTestId('setting-fuzzy_skin_thickness')
+  await thickness.fill('1')
+  await thickness.blur()
+  await expect(page.getByTestId('revert-fuzzy_skin_thickness')).toBeVisible()
+
+  await fuzzySkin.selectOption('none')
+  await expect(page.getByTestId('override-summary')).toContainText('Fuzzy skin thickness')
+  await page.getByTestId('revert-fuzzy_skin_thickness').click()
+  await expect(page.getByTestId('override-summary')).not.toContainText('Fuzzy skin thickness')
+})
