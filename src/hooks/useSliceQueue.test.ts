@@ -66,3 +66,37 @@ describe('per-object filament-slot assignment', () => {
     expect(next.plate).toEqual(state.plate)
   })
 })
+
+describe('filament slots removed from the config', () => {
+  const assigned = [
+    { id: 'a', status: 'ready', extruderId: 3 },
+    { id: 'b', status: 'ready', extruderId: 1 },
+  ] as unknown as typeof state.items
+
+  it('drops assignments naming a slot the config no longer has', () => {
+    // Below two slots the picker disappears entirely, so a stale assignment is
+    // invisible — but buildPlateExtruderIds would still send it and the engine
+    // would index its per-filament vectors out of range.
+    const next = sliceQueueReducer({ ...state, items: assigned }, { type: 'CONFIG_CHANGED', epoch: 1, slotCount: 2 })
+    expect(next.items[0].extruderId).toBeUndefined()
+    expect(next.items[1].extruderId).toBe(1)
+    expect(buildPlateExtruderIds(next.items)).toEqual([0, 1])
+  })
+
+  it('leaves assignments alone when every slot still exists', () => {
+    const next = sliceQueueReducer({ ...state, items: assigned }, { type: 'CONFIG_CHANGED', epoch: 1, slotCount: 3 })
+    expect(next.items.map((i) => i.extruderId)).toEqual([3, 1])
+  })
+
+  it('clears every assignment when the config drops back to one slot', () => {
+    const next = sliceQueueReducer({ ...state, items: assigned }, { type: 'CONFIG_CHANGED', epoch: 1, slotCount: 1 })
+    expect(buildPlateExtruderIds(next.items)).toBeUndefined()
+  })
+
+  it('still marks sliced items stale while dropping the assignment', () => {
+    const items = [{ id: 'a', status: 'done', gcode: 'G1', extruderId: 3 }] as unknown as typeof state.items
+    const next = sliceQueueReducer({ ...state, items }, { type: 'CONFIG_CHANGED', epoch: 1, slotCount: 1 })
+    expect(next.items[0]).toMatchObject({ stale: true })
+    expect(next.items[0].extruderId).toBeUndefined()
+  })
+})

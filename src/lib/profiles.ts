@@ -138,21 +138,74 @@ function nozzleCount(config: Partial<OrcaConfig> | undefined): number {
  * — which is what produces genuine T0/T1 tool changes.
  */
 export function withFilamentSlots(config: OrcaConfig, filaments: string[]): OrcaConfig {
-  const slots = filaments.filter((name) => name in FILAMENT_PRESETS)
+  const ui = filaments.filter((name) => name in FILAMENT_PRESETS)
+  // An imported profile can declare more filaments than the UI has slots for
+  // (a multi-material project file). The queue's picker offers those slots
+  // too — it reads the same count — so they need the same per-filament
+  // vectors; sizing only the UI's slots is exactly what leaves the engine
+  // indexing past the end of one.
+  const n = Math.max(ui.length, declaredSlotCount(config))
   // One slot is the pre-existing single-filament config, untouched.
-  if (slots.length < 2) return config
-  // Deliberately resolved from the *merged* config rather than the built-in
-  // printer preset: an imported machine profile (a real dual-nozzle H2D) only
-  // shows up once the layers are combined, and it is what decides whether the
-  // slots land on one nozzle or alternate across two.
-  const extra = multiFilamentPassthrough(slots, nozzleCount(config))
+  if (n < 2) return config
+  // Nozzle count is deliberately resolved from the *merged* config rather than
+  // the built-in printer preset: an imported machine profile (a real
+  // dual-nozzle H2D) only shows up once the layers are combined, and it is
+  // what decides whether the slots land on one nozzle or alternate across two.
+  const extra = multiFilamentPassthrough(config, ui, n, nozzleCount(config))
   return { ...config, _passthrough: { ...config._passthrough, ...extra } }
 }
 
-function multiFilamentPassthrough(filaments: string[], nozzles: number): PassthroughConfig {
-  const n = filaments.length
-  const per = (pick: (preset: Partial<OrcaConfig>) => unknown): string[] =>
-    filaments.map((name) => String(pick(FILAMENT_PRESETS[name] ?? {}) ?? ''))
+/**
+ * How many filaments the config already declares on its own, ignoring the UI's
+ * slot list — `filament_colour` is the engine's count, and `filament_type` is
+ * the multi-value form a multi-material profile arrives in.
+ */
+function declaredSlotCount(config: OrcaConfig): number {
+  const pt = config._passthrough
+  if (Array.isArray(pt?.filament_colour)) return pt.filament_colour.length
+  return Array.isArray(pt?.filament_type) ? pt.filament_type.length : 1
+}
+
+/**
+ * Where slot `i` takes its per-filament values from.
+ *
+ * Slot 0 is the slot the settings panel edits, so it reads the *resolved*
+ * config — manual overrides and any imported filament layer included — not the
+ * stock preset for its material. These arrays land in `_passthrough`, which
+ * the worker spreads *over* the resolved config, so reading the preset here is
+ * what used to make adding a second slot silently revert a hand-typed nozzle
+ * or bed temperature back to the preset value.
+ *
+ * Slots the UI knows about take their stock preset. Slots beyond it exist only
+ * because an imported profile declared them, so they take whatever it named.
+ */
+function slotSource(config: OrcaConfig, ui: string[], i: number): Partial<OrcaConfig> {
+  if (i === 0) return config
+  if (i < ui.length) return FILAMENT_PRESETS[ui[i]] ?? {}
+  const declared = config._passthrough?.filament_type
+  const type = Array.isArray(declared) ? declared[i] : undefined
+  if (!type) return {}
+  return FILAMENT_PRESETS[type] ?? { filament_type: type }
+}
+
+function multiFilamentPassthrough(config: OrcaConfig, ui: string[], n: number, nozzles: number): PassthroughConfig {
+  const sources = Array.from({ length: n }, (_, i) => slotSource(config, ui, i))
+  const per = (pick: (src: Partial<OrcaConfig>) => unknown, fallback: string | number): string[] =>
+    sources.map((src) => String(pick(src) ?? fallback))
+
+  // Per-filament G-code hooks. The engine reads these with .at(filament_id)
+  // (GCode.cpp's filament_start_gcode lookup), so a vector left at its
+  // one-entry default throws the moment anything prints with a filament other
+  // than the first — which is why assigning an object to slot 2 used to fail
+  // while slot 1 worked. Pad whatever the printer or imported profile already
+  // set across the new slots rather than blanking it: overwriting with "" is a
+  // silent way to drop a preset's own filament start G-code (a K-factor line,
+  // say), which a single-slot config would still have honoured.
+  const padHook = (key: 'filament_start_gcode' | 'filament_end_gcode'): string[] => {
+    const raw = config._passthrough?.[key]
+    const existing = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw]
+    return Array.from({ length: n }, (_, i) => existing[i] ?? existing[0] ?? '')
+  }
 
   // One N×N matrix per nozzle: 0 to purge a filament into itself, FLUSH_VOLUME
   // between two different ones.
@@ -162,25 +215,40 @@ function multiFilamentPassthrough(filaments: string[], nozzles: number): Passthr
       for (let to = 0; to < n; to++) matrix.push(String(from === to ? 0 : FLUSH_VOLUME))
 
   return {
-    filament_type: per((p) => p.filament_type ?? 'PLA'),
-    filament_colour: filaments.map((_, i) => SLOT_COLOURS[i % SLOT_COLOURS.length]),
-    filament_diameter: filaments.map(() => '1.75'),
-    nozzle_temperature: per((p) => p.nozzle_temperature ?? DISPLAY_DEFAULTS.nozzle_temperature),
-    nozzle_temperature_initial_layer: per((p) => p.nozzle_temperature ?? DISPLAY_DEFAULTS.nozzle_temperature),
-    hot_plate_temp: per((p) => p.bed_temperature ?? DISPLAY_DEFAULTS.bed_temperature),
-    hot_plate_temp_initial_layer: per((p) => p.bed_temperature ?? DISPLAY_DEFAULTS.bed_temperature),
-    // Per-filament G-code hooks. The engine reads these with .at(filament_id)
-    // (GCode.cpp's filament_start_gcode lookup), so a vector left at its
-    // one-entry default throws the moment anything prints with a filament
-    // other than the first — which is why assigning an object to slot 2 used
-    // to fail while slot 1 worked.
-    filament_start_gcode: filaments.map(() => ''),
-    filament_end_gcode: filaments.map(() => ''),
-    filament_map: filaments.map((_, i) => String((i % nozzles) + 1)),
+    filament_type: per((p) => p.filament_type, DISPLAY_DEFAULTS.filament_type),
+    filament_colour: Array.from({ length: n }, (_, i) => SLOT_COLOURS[i % SLOT_COLOURS.length]),
+    filament_diameter: Array.from({ length: n }, () => '1.75'),
+    nozzle_temperature: per((p) => p.nozzle_temperature, DISPLAY_DEFAULTS.nozzle_temperature),
+    nozzle_temperature_initial_layer: per((p) => p.nozzle_temperature, DISPLAY_DEFAULTS.nozzle_temperature),
+    hot_plate_temp: per((p) => p.bed_temperature, DISPLAY_DEFAULTS.bed_temperature),
+    hot_plate_temp_initial_layer: per((p) => p.bed_temperature, DISPLAY_DEFAULTS.bed_temperature),
+    filament_start_gcode: padHook('filament_start_gcode'),
+    filament_end_gcode: padHook('filament_end_gcode'),
+    filament_map: Array.from({ length: n }, (_, i) => String((i % nozzles) + 1)),
     filament_map_mode: 'Manual',
     flush_volumes_matrix: matrix,
     flush_multiplier: Array.from({ length: nozzles }, () => '1'),
   }
+}
+
+/**
+ * One label per real filament slot, in engine order — what the queue's
+ * per-object picker lists and, via its length, the number of slots anything
+ * assigned to a slot may legally name.
+ *
+ * Reads the same count the engine does (`filament_colour`, else the
+ * multi-value `filament_type` an imported multi-material profile arrives in),
+ * so it cannot disagree with what withFilamentSlots() actually sized. Falls
+ * back to filamentSlots() for a single-slot config, which is display text
+ * rather than a count — see its doc and #155.
+ */
+export function filamentSlotLabels(config: OrcaConfig): string[] {
+  const types = config._passthrough?.filament_type
+  const perSlot = Array.isArray(types) ? types : undefined
+  const count = declaredSlotCount(config)
+  if (count < 2) return filamentSlots(config)
+  const fallback = String(config.filament_type ?? DISPLAY_DEFAULTS.filament_type)
+  return Array.from({ length: count }, (_, i) => perSlot?.[i] || fallback)
 }
 
 export function buildConfig(
@@ -586,7 +654,6 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
         // scalar keeps driving the UI. See #140.
         const isMultiValue = Array.isArray(val) && val.length > 1
         if (alreadyMapped.has(field) && !isMultiValue) continue
-        let sv: string
         if (Array.isArray(val)) {
           // OrcaSlicer wraps values in arrays (single-extruder: ["0.8"], multi: ["0.8","1.0"]).
           // Forward the array *as an array* and let the WASM bridge join it: the
@@ -606,7 +673,7 @@ export function parseOrcaProfileJson(json: string): Partial<OrcaConfig> {
           else if (items.length > 1) passthrough[field] = items
           continue
         }
-        sv = typeof val === 'boolean' ? (val ? '1' : '0') : String(val)
+        const sv = typeof val === 'boolean' ? (val ? '1' : '0') : String(val)
         if (sv !== '') passthrough[field] = sv
       }
       if (Object.keys(passthrough).length > 0) config._passthrough = passthrough

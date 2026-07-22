@@ -124,6 +124,9 @@ export interface UserPreset {
   name: string
   printer: string
   filament: string
+  /** One entry per filament slot. `filament` above is the legacy single-slot
+   *  field, kept so presets saved by an older build still load. */
+  filaments?: string[]
   preset: string
   overrides: Partial<OrcaConfig>
   createdAt: string
@@ -150,13 +153,16 @@ export interface QueueItem {
   /** Set when the config changed after this item was sliced — its G-code no
    *  longer reflects the current settings and Slice re-runs it. */
   stale?: boolean
-  /** 1-based filament/extruder slot this object is assigned to on a
-   *  multi-material plate (undefined/0 = inherit the config default). Only
-   *  meaningful when the config has more than one filament slot and the item
-   *  is sliced via slicePlate() → orc_slice_multi's per-object `extruder`
-   *  override; single slicing ignores it. See src/lib/profiles.ts's
-   *  isMultiExtruderProfile note — this is the single-nozzle multi-material
-   *  (AMS-style) path, not real multi-nozzle. */
+  /** 1-based filament slot this object is assigned to (undefined/0 = inherit
+   *  the config default). Reaches the engine as orc_slice_multi's per-object
+   *  `extruder` override — a single slice routes through that entry point too,
+   *  as a one-object plate, since orc_slice takes no assignment. Which
+   *  physical nozzle the slot lands on is `filament_map`'s business, so this
+   *  covers both the AMS-style single-nozzle case and a real multi-nozzle
+   *  machine (see withFilamentSlots() in src/lib/profiles.ts).
+   *
+   *  Never names a slot the config does not have: the queue drops assignments
+   *  above filamentSlotLabels(config).length on every config change. */
   extruderId?: number
   error?: string
   /** Latest progress emitted by a progress-capable WASM engine while slicing. */

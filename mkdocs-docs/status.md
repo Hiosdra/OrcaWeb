@@ -48,6 +48,7 @@ Last updated: **2026-07-22** · engine version: **OrcaSlicer v2.4.2** (self-buil
 | ST / MT engine variants | Single-threaded (ST, `slicer.js`/`slicer.wasm`) served everywhere; multithreaded (MT, `slicer-mt.js`/`slicer-mt.wasm`, real oneTBB) served only where the page is cross-origin isolated (currently the Cloudflare mirror) — see [ADR-011](adr/adr-011-multithreaded-engine.md) and the [ST vs MT benchmark](st-mt-benchmark.md) |
 | `orc_obj_to_stl` | WASM export: OBJ → binary STL conversion without needing `orc_init`; result returned as an `ArrayBuffer` to the worker |
 | `orc_slice_multi` | Multiple STLs → one G-code: auto-arrange via `arrange_objects()` (libnest2d + NLopt); output identical in shape to `orc_slice` |
+| Multi-material + real multi-nozzle printers | Filament slots are defined in the Settings panel and assigned per object on the Slice tab, reaching the engine as `orc_slice_multi`'s `extruder_ids` (OrcaSlicer's per-object `"extruder"` key, normalised to `*_filament_id` by `normalize_fdm()`). `filament_map` decides whether slots share one nozzle (AMS-style) or drive genuine T0/T1 tool changes on a real dual-nozzle machine such as a Bambu Lab H2D — see `withFilamentSlots()` in `src/lib/profiles.ts`. Unblocked in [#160](https://github.com/Hiosdra/OrcaWeb/pull/160): the crash that had gated real multi-nozzle profiles off was the bridge joining every multi-value option with `,` regardless of its type, not the engine |
 | `orc_write_3mf` | WASM export: writes the mesh + embedded config as `.3mf` via `Slic3r::store_bbs_3mf()` — no plate/G-code/thumbnail data (no `PartPlateList` in the headless bridge); verified by the smoke test (ZIP unpacks, `3D/3dmodel.model` + `Metadata/*.config` present) |
 | `orc_read_3mf` | WASM import: reads `.3mf` via `Slic3r::load_bbs_3mf()` — merged binary STL (per-instance/volume transforms applied by `ModelObject::mesh()`) + config JSON (same keys as OrcaSlicer's native `.config`, parsed by the existing `parseOrcaProfileJson()`); verified by the smoke test (round-trip: triangle count + config keys) |
 | No `slicer.data` | The headless flat-config slicer never reads `orca/resources` → data file reduced **200 MB → 0** |
@@ -110,15 +111,6 @@ OrcaSlicer's C++ source is patched in place (`orca-wasm/patches/apply.py`) for W
 | Printer temperature ranges | Not independently verified — printer+filament preset combinations may be inconsistent for exotic pairings |
 | Large STL files (>50 MB) | May cause stutter during preview |
 
-### Multi-extruder / multi-material
-
-The bridge exposes `orc_slice_multi`'s `extruder_ids` — per-object assignment to OrcaSlicer's `"extruder"` config key (`ModelConfig::set`, `PrintConfig.cpp`), which the engine already normalises to `*_filament_id` (`normalize_fdm()`). This is the "single nozzle, multiple filament slots" (AMS-style) path — it does **not** touch `nozzle_diameter`, so it doesn't exercise `support_different_extruders()`, the code path behind a previously confirmed crash on a real Bambu Lab H2D profile (see `isMultiExtruderProfile()` in `src/lib/profiles.ts` and [ADR-008](adr/adr-008-session-handle.md)).
-
-| Item | Status |
-|------|--------|
-| Bridge: `orc_slice_multi(..., extruder_ids, ...)` | ✅ implemented, verified by the smoke test ("plate: 2 objects, per-object extruder override") |
-| Real multi-nozzle printers + per-object extruder/filament assignment UI | ❌ deliberately blocked — see [#141](https://github.com/Hiosdra/OrcaWeb/issues/141) |
-
 ---
 
 ## Not yet implemented
@@ -127,7 +119,6 @@ Tracked in GitHub issues rather than listed here, so this page doesn't drift int
 
 - [#138](https://github.com/Hiosdra/OrcaWeb/issues/138) — Variable layer height
 - [#139](https://github.com/Hiosdra/OrcaWeb/issues/139) — Support enforcement / blocking
-- [#141](https://github.com/Hiosdra/OrcaWeb/issues/141) — Real multi-nozzle / multi-extruder printers
 - [#108](https://github.com/Hiosdra/OrcaWeb/issues/108) — Full "sliced project" 3MF export (per-plate G-code, plate thumbnails); `orc_write_3mf`/`orc_read_3mf` intentionally cover mesh + embedded config only, since the headless bridge has no `PartPlateList` to source that from — this is a documented non-goal for the current bridge shape, not a plain backlog item
 
 ---

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { OrcaConfig } from '../types'
+import type { OrcaConfig, PassthroughConfig } from '../types'
 import {
   describeExportCompatibility,
   exportOrcaProfileBundle,
   exportOrcaProfileJson,
+  filamentSlotLabels,
   filamentSlots,
   MAX_FILAMENT_SLOTS,
   parseOrcaProfileJson,
@@ -381,5 +382,55 @@ describe('withFilamentSlots (#140)', () => {
   it('offers a slot for every colour it can assign', () => {
     const pt = withFilamentSlots(singleNozzle, Array(MAX_FILAMENT_SLOTS).fill('PLA'))._passthrough
     expect(new Set(pt?.filament_colour as string[]).size).toBe(MAX_FILAMENT_SLOTS)
+  })
+
+  it('keeps slot 0 on the resolved config, not the stock preset for its material', () => {
+    // These arrays land in _passthrough, which the worker spreads *over* the
+    // resolved config — so reading FILAMENT_PRESETS for slot 0 is a silent way
+    // to revert a manual override the moment a second slot is added.
+    const edited: OrcaConfig = { filament_type: 'PLA', nozzle_temperature: 250, bed_temperature: 80 }
+    const pt = withFilamentSlots(edited, ['PLA', 'PETG'])._passthrough as PassthroughConfig
+    expect(pt.nozzle_temperature[0]).toBe('250')
+    expect(pt.hot_plate_temp[0]).toBe('80')
+    expect(pt.hot_plate_temp_initial_layer[0]).toBe('80')
+    // Slot 1 has no UI of its own, so it still takes PETG's preset values.
+    expect(pt.nozzle_temperature[1]).not.toBe('250')
+  })
+
+  it('pads an existing filament start G-code across the new slots instead of blanking it', () => {
+    const withHook: OrcaConfig = { _passthrough: { filament_start_gcode: 'M900 K0.02' } }
+    const pt = withFilamentSlots(withHook, ['PLA', 'PETG'])._passthrough
+    expect(pt?.filament_start_gcode).toEqual(['M900 K0.02', 'M900 K0.02'])
+  })
+
+  it('sizes the per-filament vectors for slots an imported profile declares on its own', () => {
+    // A multi-material profile arrives with more filaments than the UI has
+    // slots for. The queue's picker offers them, so they need the same
+    // vectors — sizing only the UI's one slot is the .at(filament_id) throw.
+    const imported: OrcaConfig = { _passthrough: { filament_type: ['PLA', 'PETG'] } }
+    const pt = withFilamentSlots(imported, ['PLA'])._passthrough
+    expect(pt?.filament_colour).toHaveLength(2)
+    expect(pt?.filament_start_gcode).toHaveLength(2)
+    expect(pt?.flush_volumes_matrix).toHaveLength(4)
+    expect(pt?.filament_type).toEqual(['PLA', 'PETG'])
+  })
+})
+
+describe('filamentSlotLabels', () => {
+  it('falls back to the display text for a single-slot config', () => {
+    expect(filamentSlotLabels({ filament_type: 'PLA' })).toEqual(['PLA'])
+  })
+
+  it('lists one label per real slot once the config declares several', () => {
+    const config = withFilamentSlots({ filament_type: 'PLA' }, ['PLA', 'PETG', 'ABS'])
+    expect(filamentSlotLabels(config)).toEqual(['PLA', 'PETG', 'ABS'])
+  })
+
+  it('agrees with the count withFilamentSlots actually sized', () => {
+    // The queue drops assignments above this number, so a disagreement here
+    // either strands a valid slot or lets an out-of-range one through.
+    const config = withFilamentSlots({ _passthrough: { filament_type: ['PLA', 'PETG'] } }, ['PLA'])
+    const colours = (config._passthrough as PassthroughConfig).filament_colour
+    expect(filamentSlotLabels(config)).toHaveLength(colours.length)
   })
 })

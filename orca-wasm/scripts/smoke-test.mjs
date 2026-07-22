@@ -231,6 +231,60 @@ const BASE_CONFIG = {
   bed_temperature: 55,
 }
 
+// A real dual-nozzle machine (Bambu Lab H2D shape) with two filament slots,
+// one per nozzle — the exact config shape withFilamentSlots() in
+// src/lib/profiles.ts builds, written out here rather than imported for the
+// same reason BASE_CONFIG is (see above).
+//
+// This is the scenario issue #140 was about, and it is worth a committed
+// regression test for two independent reasons:
+//
+//  - Every multi-value option below has to survive serialization with the
+//    separator its *type* requires. The bridge used to join all of them with
+//    ',', which fused each per-nozzle printable area and colour into one
+//    entry — leaving nozzle_diameter length 2 with length-1 companions,
+//    indexed by extruder id, and dying in Brim.cpp. A plain "did it slice?"
+//    check catches that, since it crashed rather than misbehaved quietly.
+//  - The per-filament vectors must all agree in length, or the engine reads
+//    past the end of one. flush_volumes_matrix in particular is one N×N
+//    sub-matrix per nozzle laid end to end, which append_full_config()
+//    validates against flush_multiplier's length.
+const DUAL_NOZZLE_CONFIG = {
+  ...BASE_CONFIG,
+  nozzle_diameter: ['0.4', '0.4'],
+  extruder_printable_area: ['0x0,325x0,325x320,0x320', '25x0,350x0,350x320,25x320'],
+  filament_type: ['PLA', 'PETG'],
+  filament_colour: ['#F5A623', '#4A90D9'],
+  filament_diameter: ['1.75', '1.75'],
+  nozzle_temperature: ['220', '255'],
+  nozzle_temperature_initial_layer: ['220', '255'],
+  hot_plate_temp: ['55', '70'],
+  hot_plate_temp_initial_layer: ['55', '70'],
+  filament_start_gcode: ['', ''],
+  filament_end_gcode: ['', ''],
+  // slot 1 -> nozzle 1, slot 2 -> nozzle 2: this is what produces T0/T1
+  filament_map: ['1', '2'],
+  filament_map_mode: 'Manual',
+  // 2 nozzles x 2 filaments squared; 0 to purge a filament into itself
+  flush_volumes_matrix: ['0', '280', '280', '0', '0', '280', '280', '0'],
+  flush_multiplier: ['1', '1'],
+}
+
+// Both nozzles actually used. A config that silently collapsed to a single
+// filament still slices and still passes assertSaneGcode() — it just prints
+// everything with one tool, which is precisely the failure mode #140's
+// comma-joining produced once it stopped crashing outright.
+function assertToolChanges(gcode, label) {
+  const tools = new Set()
+  for (const line of gcode.split('\n')) {
+    const m = line.match(/^T(\d+)\b/)
+    if (m) tools.add(m[1])
+  }
+  if (!tools.has('0') || !tools.has('1')) {
+    throw new Error(`${label}: expected both T0 and T1 tool changes, saw [${[...tools].join(',') || 'none'}]`)
+  }
+}
+
 // ── test meshes ──────────────────────────────────────────────────────────────
 // Repo root — this script lives in orca-wasm/scripts/.
 const VORON_CUBE_PATH = resolve(import.meta.dirname, '../../e2e/fixtures/voron-design-cube-v7.stl')
@@ -298,14 +352,9 @@ async function main() {
     }
 
     // Multi-object plate with a per-object "extruder" override (same value on
-    // both objects — a real physical-multi-nozzle config is NOT exercised
-    // here; nozzle_diameter stays length-1, so this never enters the
-    // support_different_extruders() code path). This specifically probes the
-    // orc_slice_multi extruder_ids plumbing added alongside the session-handle
-    // refactor, not multi-nozzle machine support (see isMultiExtruderProfile()
-    // in src/lib/profiles.ts and mkdocs-docs/adr/adr-008-session-handle.md for
-    // why real multi-nozzle configs remain gated off pending a debug-build
-    // root-cause session this script cannot perform).
+    // both objects, nozzle_diameter length 1) — the AMS-style path, probing
+    // the orc_slice_multi extruder_ids plumbing on its own. The genuinely
+    // multi-nozzle case is the scenario below.
     const plateLabel = `[${mesh.label}] plate: 2 objects, per-object extruder override (single nozzle)`
     process.stdout.write(`[smoke-test] ${plateLabel} ... `)
     try {
@@ -313,6 +362,24 @@ async function main() {
       const gcode = sliceMultiOnce(module, session, [mesh.bytes, mesh.bytes], Int32Array.from([1, 1]))
       assertSaneGcode(gcode, plateLabel)
       assertRestsOnBed(gcode, plateLabel, BASE_CONFIG.initial_layer_height)
+      console.log(`PASS (${gcode.length} bytes)`)
+    } catch (err) {
+      failures++
+      console.log('FAIL')
+      console.error(`  ${err.message}`)
+    }
+
+    // Real multi-nozzle: two objects on one plate, each assigned to a slot
+    // that maps to a different physical nozzle. See DUAL_NOZZLE_CONFIG above
+    // for why this scenario is committed rather than run by hand (#140).
+    const dualLabel = `[${mesh.label}] plate: 2 objects on a real dual-nozzle machine (T0 + T1)`
+    process.stdout.write(`[smoke-test] ${dualLabel} ... `)
+    try {
+      initSession(module, session, JSON.stringify(DUAL_NOZZLE_CONFIG))
+      const gcode = sliceMultiOnce(module, session, [mesh.bytes, mesh.bytes], Int32Array.from([1, 2]))
+      assertSaneGcode(gcode, dualLabel)
+      assertRestsOnBed(gcode, dualLabel, BASE_CONFIG.initial_layer_height)
+      assertToolChanges(gcode, dualLabel)
       console.log(`PASS (${gcode.length} bytes)`)
     } catch (err) {
       failures++

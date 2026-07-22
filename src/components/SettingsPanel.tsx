@@ -124,6 +124,18 @@ function overrideLabel(field: ConfigField): string {
   return OVERRIDE_LABELS[field] ?? String(field).replace(/_/g, ' ')
 }
 
+/**
+ * What a newly added slot starts out as: the first material not already in
+ * use. Repeating the last one gives two slots the engine will happily purge
+ * 280 mm³ between for no reason, and two identically-labelled entries in the
+ * queue's per-object picker. Falls back to repeating once every material is
+ * already assigned to some slot.
+ */
+function nextSlotMaterial(slots: string[]): string {
+  const options = Object.keys(FILAMENT_PRESETS)
+  return options.find((o) => !slots.includes(o)) ?? slots[slots.length - 1]
+}
+
 interface Props {
   config: OrcaConfig
   onChange: (patch: Partial<OrcaConfig>) => void
@@ -489,7 +501,7 @@ export function SettingsPanel({
           {selectedFilaments.length < MAX_FILAMENT_SLOTS && (
             <button
               type="button"
-              onClick={() => onFilamentsChange([...selectedFilaments, selectedFilaments[selectedFilaments.length - 1]])}
+              onClick={() => onFilamentsChange([...selectedFilaments, nextSlotMaterial(selectedFilaments)])}
               data-testid="add-filament-slot"
               className="text-xs font-semibold text-orca-600 hover:text-orca-700 transition-colors"
             >

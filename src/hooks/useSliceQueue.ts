@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { logError, logWarn } from '../lib/log'
-import { parseOrcaProfileJson } from '../lib/profiles'
+import { filamentSlotLabels, parseOrcaProfileJson } from '../lib/profiles'
 import { addWorkerListener, getWasmStatus, getWorker, terminateWorker, type WasmStatus } from '../lib/worker-singleton'
 import type { ConversionKind, OrcaConfig, QueueItem, SliceProgress, WorkerOutMessage } from '../types'
 
@@ -51,7 +51,9 @@ type QueueAction =
   | { type: 'PLATE_STARTED'; configEpoch: number }
   | { type: 'PLATE_DONE'; gcode: string }
   | { type: 'PLATE_FAILED'; message: string }
-  | { type: 'CONFIG_CHANGED'; epoch: number }
+  // slotCount: how many filament slots the new config has, so assignments
+  // naming a slot it no longer has can be dropped (see the reducer).
+  | { type: 'CONFIG_CHANGED'; epoch: number; slotCount: number }
   | { type: 'CANCELLED' }
   | { type: 'ENGINE_FAILED'; message: string }
 
@@ -233,10 +235,23 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
       }
 
     case 'CONFIG_CHANGED': {
+      // Removing a filament slot leaves assignments pointing at a slot that no
+      // longer exists. Nothing in the UI shows them any more — the picker
+      // disappears entirely below two slots — but buildPlateExtruderIds would
+      // still send them, and the engine would index its per-filament vectors
+      // by an out-of-range filament id. Drop them here, where the slot count
+      // can actually change.
+      //
+      // A config back down to one slot drops *every* assignment, not just the
+      // out-of-range ones: "slot 1" of one slot is what the config already
+      // does, and keeping it would leave the plate on the assigned code path
+      // (a non-empty extruderIds array) with no picker to clear it from.
+      const staleSlot = (id: number | undefined) => id !== undefined && (action.slotCount < 2 || id > action.slotCount)
+      const dropStaleSlot = (i: QueueItem): QueueItem => (staleSlot(i.extruderId) ? { ...i, extruderId: undefined } : i)
       return {
         ...state,
         configEpoch: action.epoch,
-        items: state.items.map((i) => (i.status === 'done' ? { ...i, stale: true } : i)),
+        items: state.items.map((i) => dropStaleSlot(i.status === 'done' ? { ...i, stale: true } : i)),
         plate: state.plate.gcode ? { ...state.plate, stale: true } : state.plate,
       }
     }
@@ -381,7 +396,7 @@ export function useSliceQueue(
       epoch: configSnapshotRef.current.epoch + 1,
     }
     configSnapshotRef.current = snapshot
-    dispatch({ type: 'CONFIG_CHANGED', epoch: snapshot.epoch })
+    dispatch({ type: 'CONFIG_CHANGED', epoch: snapshot.epoch, slotCount: filamentSlotLabels(config).length })
   }, [config])
 
   // ── Worker messages → reducer ─────────────────────────────────────────────

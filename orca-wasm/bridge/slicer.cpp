@@ -697,12 +697,14 @@ int orc_obj_to_stl(const char* obj_data, int obj_len,
  *              override per object (0 = inherit the config's default),
  *              forwarded to OrcaSlicer's per-object `extruder` config key
  *              (PrintConfig.cpp: coInt, min 0 = inherit; normalize_fdm()
- *              resolves it to the per-region *_filament_id fields). This is
- *              the classic single-nozzle multi-material path — different
- *              objects on one plate printed with different filament slots —
- *              and does NOT touch nozzle_diameter/support_different_extruders(),
- *              so it stays clear of the still-unresolved multi-nozzle crash
- *              documented on isMultiExtruderProfile() in src/lib/profiles.ts.
+ *              resolves it to the per-region *_filament_id fields). Names a
+ *              *filament* slot, not a nozzle: whether two slots share one
+ *              nozzle (AMS-style) or drive genuine T0/T1 tool changes is
+ *              decided by `filament_map` in the config, which the frontend
+ *              builds in withFilamentSlots() (src/lib/profiles.ts). Real
+ *              multi-nozzle profiles work here as of #160 — the crash this
+ *              used to be gated against was our own array serialization, see
+ *              json_array_to_config_string() above.
  *              Ignored (no-op) when null, so existing single-extruder callers
  *              are unaffected.
  *

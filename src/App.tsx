@@ -14,7 +14,7 @@ import {
   buildConfig,
   DISPLAY_DEFAULTS,
   FILAMENT_PRESETS,
-  filamentSlots,
+  filamentSlotLabels,
   PRESETS,
   PRINTER_PRESETS,
   withFilamentSlots,
@@ -118,6 +118,13 @@ function isUserPreset(value: unknown): value is UserPreset {
     Object.keys(PRINTER_PRESETS).includes(p.printer) &&
     typeof p.filament === 'string' &&
     Object.keys(FILAMENT_PRESETS).includes(p.filament) &&
+    // Optional — presets saved before multi-slot existed have only `filament`.
+    // Present but naming a filament this build no longer ships is rejected the
+    // same way `filament` itself is, rather than loading a partial slot list.
+    (p.filaments === undefined ||
+      (Array.isArray(p.filaments) &&
+        p.filaments.length > 0 &&
+        p.filaments.every((f) => typeof f === 'string' && Object.keys(FILAMENT_PRESETS).includes(f)))) &&
     typeof p.preset === 'string' &&
     PRESETS.some((preset) => preset.name === p.preset) &&
     !!p.overrides &&
@@ -248,7 +255,7 @@ export default function App() {
     } catch (err) {
       logWarn('Failed to persist settings — storage full or unavailable', err)
     }
-  }, [selectedPrinter, selectedFilament, selectedPreset, manualOverrides, importedProfile])
+  }, [selectedPrinter, selectedFilament, selectedFilaments, selectedPreset, manualOverrides, importedProfile])
 
   useEffect(() => {
     try {
@@ -270,6 +277,7 @@ export default function App() {
         name,
         printer: selectedPrinter,
         filament: selectedFilament,
+        filaments: selectedFilaments,
         preset: selectedPreset,
         overrides: manualOverrides,
         createdAt: new Date().toISOString(),
@@ -285,7 +293,7 @@ export default function App() {
       }
       setUserPresets((prev) => [...prev, preset])
     },
-    [selectedPrinter, selectedFilament, selectedPreset, manualOverrides, userPresets],
+    [selectedPrinter, selectedFilament, selectedFilaments, selectedPreset, manualOverrides, userPresets],
   )
 
   // Applies a saved preset's full selection in one go. The four setState
@@ -312,7 +320,12 @@ export default function App() {
         if (!ok) return
       }
       setSelectedPrinter(p.printer)
-      setSelectedFilament(p.filament)
+      // The whole slot list, not just slot 0 — a preset is a complete
+      // selection, so loading one has to replace however many slots are
+      // currently defined rather than leave the extra ones standing. `filament`
+      // is the legacy single-slot field, kept for presets saved by an older
+      // build.
+      setSelectedFilaments(p.filaments?.length ? p.filaments : [p.filament])
       setSelectedPreset(p.preset)
       setManualOverrides(p.overrides)
       setImportedProfile(null)
@@ -337,23 +350,26 @@ export default function App() {
 
   // Settings embedded in an imported file (3MF) form their own layer so later
   // dropdown changes cannot silently erase them.
-  const handleSettingsImported = useCallback((patch: Partial<OrcaConfig>, filename: string) => {
-    setImportedProfile({ name: filename, type: 'print', settings: patch })
-    // Sync the dropdowns too — without this, config.printer_model/filament_type
-    // get overridden correctly (visible on the Slice tab) but the Settings tab
-    // dropdowns keep showing whatever was selected before import, and touching
-    // either one afterwards wipes every imported override via
-    // onPrinterChange/onFilamentChange's setConfigOverrides({}) reset.
-    if (patch.printer_model !== undefined) {
-      const matched = findPresetKeyByField(PRINTER_PRESETS, 'printer_model', patch.printer_model)
-      if (matched) setSelectedPrinter(matched)
-    }
-    if (patch.filament_type !== undefined) {
-      const matched = findPresetKeyByField(FILAMENT_PRESETS, 'filament_type', patch.filament_type)
-      if (matched) setSelectedFilament(matched)
-    }
-    setImportNotice(`Imported print settings from ${filename}`)
-  }, [])
+  const handleSettingsImported = useCallback(
+    (patch: Partial<OrcaConfig>, filename: string) => {
+      setImportedProfile({ name: filename, type: 'print', settings: patch })
+      // Sync the dropdowns too — without this, config.printer_model/filament_type
+      // get overridden correctly (visible on the Slice tab) but the Settings tab
+      // dropdowns keep showing whatever was selected before import, and touching
+      // either one afterwards wipes every imported override via
+      // onPrinterChange/onFilamentChange's setConfigOverrides({}) reset.
+      if (patch.printer_model !== undefined) {
+        const matched = findPresetKeyByField(PRINTER_PRESETS, 'printer_model', patch.printer_model)
+        if (matched) setSelectedPrinter(matched)
+      }
+      if (patch.filament_type !== undefined) {
+        const matched = findPresetKeyByField(FILAMENT_PRESETS, 'filament_type', patch.filament_type)
+        if (matched) setSelectedFilament(matched)
+      }
+      setImportNotice(`Imported print settings from ${filename}`)
+    },
+    [setSelectedFilament],
+  )
 
   useEffect(() => {
     if (!importNotice) return
@@ -380,18 +396,9 @@ export default function App() {
   const bedShape = config.bed_shape ?? DISPLAY_DEFAULTS.bed_shape
 
   // Labels for the queue's per-object filament picker, one per real slot.
-  //
-  // A multi-slot config carries filament_type as a per-filament array in the
-  // passthrough — that is the engine's own notion of "how many filaments",
-  // and it covers both slots defined in the settings panel and a
-  // multi-material project that arrived by import. The scalar filament_type
-  // is only ever slot 0, so reading it here would hide the picker exactly
-  // when it is needed; filamentSlots() stays as the single-slot fallback
-  // (it is display text, not a count — see its doc and #155).
-  const filamentSlotLabels = useMemo(() => {
-    const perSlot = config._passthrough?.filament_type
-    return Array.isArray(perSlot) && perSlot.length > 1 ? perSlot : filamentSlots(config)
-  }, [config])
+  // Shared with useSliceQueue, which uses the same count to drop assignments
+  // that no longer name a slot — the two must not disagree.
+  const slotLabels = useMemo(() => filamentSlotLabels(config), [config])
 
   // None of these three touch manualOverrides: they swap a layer *below* the
   // user's own edits, which outrank them and stay put (config-layers.ts).
@@ -433,13 +440,21 @@ export default function App() {
   }
 
   const handleFilamentsChange = (names: string[]) => {
+    const next = names.length > 0 ? names : ['PLA']
     // Same "does this click change anything?" guard the printer/preset
     // handlers use — re-picking the current material is also how you shed a
     // filament import, so an unchanged list still has to drop that layer.
-    const unchanged = names.length === selectedFilaments.length && names.every((n, i) => n === selectedFilaments[i])
+    const unchanged = next.length === selectedFilaments.length && next.every((n, i) => n === selectedFilaments[i])
     if (unchanged && importedProfile?.type !== 'filament') return
-    setSelectedFilaments(names.length > 0 ? names : ['PLA'])
-    setImportedProfile((profile) => (profile?.type === 'filament' ? null : profile))
+    setSelectedFilaments(next)
+    // An imported filament profile describes slot 0 — that is the only slot
+    // whose scalars it feeds — so only a change there sheds it. Adding or
+    // removing a *slot*, or repicking a material further down the list, leaves
+    // the import standing rather than silently discarding a file the user
+    // still has selected.
+    if (next[0] !== selectedFilament || unchanged) {
+      setImportedProfile((profile) => (profile?.type === 'filament' ? null : profile))
+    }
   }
 
   const handleRevertField = useCallback((key: ConfigField) => {
@@ -674,7 +689,7 @@ export default function App() {
                   bedY={bedY}
                   bedShape={bedShape}
                   onExport3mf={export3mf}
-                  filamentSlotLabels={filamentSlotLabels}
+                  filamentSlotLabels={slotLabels}
                   onAssignExtruder={assignExtruder}
                 />
               ))}
