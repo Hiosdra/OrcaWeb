@@ -33,6 +33,7 @@ Last updated: **2026-07-22** · engine version: **OrcaSlicer v2.4.2** (self-buil
 | Slice cancellation | "Cancel" button — restarts the worker (the synchronous WASM slice loop can't be interrupted any other way); pending OBJ/STEP conversions are retried automatically |
 | Stale-result detection | Changing settings after slicing marks a result "Sliced with previous settings"; the button becomes "Re-slice" |
 | Settings persistence | Printer, filament, quality preset, and overrides kept in `localStorage`, restored on the next visit |
+| Manual overrides outrank profiles | A hand-edited field is flagged (amber outline + per-field "reset") and survives switching printer/filament/quality preset and loading another 3MF or profile — preset < imported file < your edits, see [Settings precedence](profiles.md#settings-precedence) |
 | Queue as a state machine | `useSliceQueue` (reducer) — correlates worker responses by `requestId`; an engine error fails every pending item instead of leaving spinners running forever |
 | Engine status badge | "Loading engine…" / "Engine error" in the header |
 | Engine version in header | `v{app} · {date} · engine v{orca}` under the logo — same text at every screen width |

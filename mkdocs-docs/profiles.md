@@ -93,17 +93,38 @@ OrcaSlicer saves complete project files as `.3mf` archives. When you load a 3MF 
 
 The mesh geometry (`3D/3dmodel.model`) is converted from the 3MF XML format to binary STL transparently — the WASM slicer receives a standard STL.
 
+## Settings precedence
+
+Every value OrcaWeb slices with comes from one of three layers. Later layers win, field by field:
+
+| # | Layer | Where it comes from | Replaced when |
+|---|-------|--------------------|---------------|
+| 1 | **Preset** | The selected printer + filament + quality preset | You pick a different printer, filament or quality preset |
+| 2 | **Imported file** | Settings embedded in a `.3mf`, or an imported `.json` OrcaSlicer preset | You import another file, or remove the active import |
+| 3 | **Your edits** | Any field you changed by hand in the settings panel | Only by you — per-field **reset**, **Reset all**, or loading a saved preset |
+
+The rule that matters in daily use is the third row: **a setting you changed by hand survives everything underneath it.** Switch printer, switch filament, switch quality preset, load a different 3MF — your edited fields stay exactly as you left them, and only the fields you never touched follow the new profile. This matches desktop OrcaSlicer, where a modified setting stays modified (and stays flagged) as you switch presets around it.
+
+Edited fields are marked in the panel with an amber outline and a **reset** button that drops that one override and reveals the profile's own value again. A summary at the top of the panel counts them and offers **Reset all**.
+
+!!! warning "Loading a saved preset is the one exception"
+    "My presets" stores a complete selection — printer, filament, quality preset *and* the manual edits that were active when you saved it. Loading one therefore replaces all three layers, including your current edits.
+
+A field left unset in all three layers is not sent to the engine at all; OrcaSlicer then resolves it from its own built-in default. The number shown in the panel for such a field is a display-only default that deliberately matches that engine default — see `DISPLAY_DEFAULTS` in `src/lib/profiles.ts`.
+
+The layer model itself lives in [`src/lib/config-layers.ts`](https://github.com/Hiosdra/OrcaWeb/blob/master/src/lib/config-layers.ts), which is the single place this order is defined and the only thing that may change it.
+
 ## Import behaviour
 
 When you import a profile:
 
 1. OrcaWeb reads the JSON and extracts all recognised fields into the UI model
 2. Any remaining OrcaSlicer fields are collected and forwarded verbatim to the WASM slicer
-3. The extracted settings are applied as **overrides** on top of the current preset
+3. The extracted settings become the **imported** layer — above the preset selection, below your own edits
 4. A confirmation message shows the profile name and type (e.g. `Imported "Bambu Lab P1S 0.4 nozzle" · machine profile · 42 settings`)
-5. You can still manually adjust individual settings after importing
+5. You can still manually adjust individual settings after importing, and those adjustments outrank the file
 
-Importing a second profile replaces the overrides from the first.
+Importing a second profile replaces the first one's layer. It does not touch settings you edited by hand.
 
 !!! tip "Machine profiles"
     Import a machine profile JSON from your OrcaSlicer installation (`%APPDATA%\OrcaSlicer\user\default\machine\` on Windows) to transfer the full printer configuration — G-code dialect, retraction, Z-hop, start/end G-code scripts, and kinematics limits — to the browser slicer.
