@@ -7,6 +7,7 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { ConfigSummary, PlateResultCard, QueueItemCard, SliceHeader } from './components/SliceCards'
 import { ViewerErrorBoundary } from './components/ViewerErrorBoundary'
 import { useSliceQueue } from './hooks/useSliceQueue'
+import { mergeConfigLayers, resolveConfig, revertField } from './lib/config-layers'
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
 import { buildConfig, DISPLAY_DEFAULTS, FILAMENT_PRESETS, PRESETS, PRINTER_PRESETS } from './lib/profiles'
@@ -41,14 +42,6 @@ function isProfileType(value: unknown): value is ProfileType {
 function countProfileSettings(settings: Partial<OrcaConfig>): number {
   const { _passthrough, ...known } = settings
   return Object.keys(known).length + Object.keys(_passthrough ?? {}).length
-}
-
-function mergeConfigLayers(...layers: Partial<OrcaConfig>[]): OrcaConfig {
-  const passthrough = Object.assign({}, ...layers.map((layer) => layer._passthrough ?? {}))
-  return {
-    ...Object.assign({}, ...layers),
-    ...(Object.keys(passthrough).length > 0 ? { _passthrough: passthrough } : {}),
-  } as OrcaConfig
 }
 
 function loadSavedSettings(): SavedSettings | null {
@@ -206,8 +199,10 @@ export default function App() {
     () => buildConfig(selectedPrinter, selectedFilament, selectedPreset),
     [selectedPrinter, selectedFilament, selectedPreset],
   )
+  // preset < imported file < manual edits — see config-layers.ts for what
+  // each layer is and why the manual one must outlive changes to the others.
   const config: OrcaConfig = useMemo(
-    () => mergeConfigLayers(baseConfig, importedProfile?.settings ?? {}, manualOverrides),
+    () => resolveConfig({ preset: baseConfig, imported: importedProfile?.settings, manual: manualOverrides }),
     [baseConfig, importedProfile, manualOverrides],
   )
 
@@ -356,15 +351,25 @@ export default function App() {
   const bedY = config.bed_size_y ?? DISPLAY_DEFAULTS.bed_size_y
   const bedShape = config.bed_shape ?? DISPLAY_DEFAULTS.bed_shape
 
+  // None of these three touch manualOverrides: they swap a layer *below* the
+  // user's own edits, which outrank them and stay put (config-layers.ts).
+  // Overrides go away only on an explicit revert / "Reset all", or when a
+  // saved user preset replaces the whole selection.
+  //
+  // Each bails out only when the click would change nothing at all. Testing
+  // the name alone isn't enough: re-picking the already-selected entry is
+  // also how you shed an import of that kind, and the quality chips are
+  // plain buttons that fire even when they're already active (the <select>s
+  // can't fire on an unchanged value, but the guard is the same shape for
+  // all three rather than relying on that).
   const handlePresetChange = (name: string) => {
+    if (name === selectedPreset && importedProfile?.type !== 'process') return
     setSelectedPreset(name)
-    setManualOverrides({})
     setImportedProfile((profile) => (profile?.type === 'process' ? null : profile))
   }
 
   const handleProfileImported = (profile: ImportedProfile) => {
     setImportedProfile(profile)
-    setManualOverrides({})
     const printer =
       profile.settings.printer_model === undefined
         ? undefined
@@ -379,16 +384,22 @@ export default function App() {
 
   const handlePrinterChange = (name: string) => {
     if (name === `Imported: ${importedProfile?.name}`) return
+    if (name === selectedPrinter && importedProfile?.type !== 'machine') return
     setSelectedPrinter(name)
-    setManualOverrides({})
     setImportedProfile((profile) => (profile?.type === 'machine' ? null : profile))
   }
 
   const handleFilamentChange = (name: string) => {
+    if (name === selectedFilament && importedProfile?.type !== 'filament') return
     setSelectedFilament(name)
-    setManualOverrides({})
     setImportedProfile((profile) => (profile?.type === 'filament' ? null : profile))
   }
+
+  const handleRevertField = useCallback((key: keyof OrcaConfig) => {
+    setManualOverrides((prev) => revertField(prev, key))
+  }, [])
+
+  const handleRevertAll = useCallback(() => setManualOverrides({}), [])
 
   // ── Derived state ─────────────────────────────────────────────────────────
 
@@ -554,6 +565,9 @@ export default function App() {
               <SettingsPanel
                 config={config}
                 onChange={(patch) => setManualOverrides((prev) => mergeConfigLayers(prev, patch))}
+                overrides={manualOverrides}
+                onRevertField={handleRevertField}
+                onRevertAll={handleRevertAll}
                 onProfileImport={handleProfileImported}
                 activeImport={
                   importedProfile && {

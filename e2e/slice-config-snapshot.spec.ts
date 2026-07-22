@@ -59,7 +59,10 @@ async function releaseDelayedReads(page: Page) {
 
 async function changeSettingsDuringRead(page: Page, temperature = '225') {
   await page.getByTestId('tab-settings').click()
-  const nozzleTemp = page.getByText('Nozzle temp', { exact: true }).locator('..').locator('input')
+  // By test id, not by walking up from the label text: the label sits in its
+  // own row alongside the per-field override "reset" control, so `..` is that
+  // row rather than the field wrapper the input lives in.
+  const nozzleTemp = page.getByTestId('setting-nozzle_temperature')
   await nozzleTemp.fill(temperature)
   await nozzleTemp.blur()
   await expect(nozzleTemp).toHaveValue(temperature)
