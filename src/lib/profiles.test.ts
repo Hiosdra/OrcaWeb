@@ -431,6 +431,56 @@ describe('withFilamentSlots (#140)', () => {
     expect(pt?.flush_volumes_matrix).toHaveLength(4)
     expect(pt?.filament_type).toEqual(['PLA', 'PETG'])
   })
+
+  it('emits exactly the option set orca-wasm/scripts/smoke-test.mjs slices with', () => {
+    // DUAL_NOZZLE_CONFIG in the smoke test is a hand-written copy of what this
+    // function produces — it has to be, since a node script cannot import the
+    // TS module. That makes it the one thing in this PR that can drift: the
+    // smoke test would keep proving T0/T1 for a config the app no longer
+    // builds. Pin the contract between them here, where both are visible.
+    const pt = withFilamentSlots(dualNozzle, ['PLA', 'PETG'])._passthrough as PassthroughConfig
+    expect(Object.keys(pt).sort()).toEqual(
+      [
+        'filament_colour',
+        'filament_diameter',
+        'filament_end_gcode',
+        'filament_map',
+        'filament_map_mode',
+        'filament_start_gcode',
+        'filament_type',
+        'flush_multiplier',
+        'flush_volumes_matrix',
+        'hot_plate_temp',
+        'hot_plate_temp_initial_layer',
+        'nozzle_diameter',
+        'nozzle_temperature',
+        'nozzle_temperature_initial_layer',
+      ].sort(),
+    )
+    // Every filament-indexed vector is N long; the engine reads them by
+    // filament id and a short one is read out of bounds.
+    for (const key of [
+      'filament_type',
+      'filament_colour',
+      'filament_diameter',
+      'nozzle_temperature',
+      'nozzle_temperature_initial_layer',
+      'hot_plate_temp',
+      'hot_plate_temp_initial_layer',
+      'filament_start_gcode',
+      'filament_end_gcode',
+      'filament_map',
+    ]) {
+      expect(pt[key], key).toHaveLength(2)
+    }
+    // The three the engine validates by shape rather than by index: one N x N
+    // sub-matrix per nozzle, one multiplier per nozzle, slots alternating
+    // across the two nozzles (which is what produces T0 and T1).
+    expect(pt.flush_volumes_matrix).toEqual(['0', '280', '280', '0', '0', '280', '280', '0'])
+    expect(pt.flush_multiplier).toEqual(['1', '1'])
+    expect(pt.filament_map).toEqual(['1', '2'])
+    expect(pt.filament_map_mode).toBe('Manual')
+  })
 })
 
 describe('withFilamentSlots on an imported multi-material profile', () => {
@@ -473,9 +523,27 @@ describe('withFilamentSlots on an imported multi-material profile', () => {
     expect(pt?.flush_volumes_matrix).toEqual(['0', '700', '700', '0'])
   })
 
-  it('keeps a declared initial-layer temperature, which has no UI of its own', () => {
+  it('keeps a declared nozzle initial-layer temperature, which has no UI of its own', () => {
+    // toEngineConfig() never writes nozzle_temperature_initial_layer, so no
+    // panel value can contradict the imported one. Its bed counterpart is the
+    // opposite case — see the next test.
     const pt = withFilamentSlots(imported(), ['PLA'])._passthrough
     expect(pt?.nozzle_temperature_initial_layer).toEqual(['210', '250'])
+  })
+
+  it('lets the panel drive the first-layer bed temperature, which it edits through the same knob', () => {
+    // toEngineConfig() fans the panel's single "Bed temp" field out to *both*
+    // hot_plate_temp and hot_plate_temp_initial_layer, so a declared
+    // first-layer value must not outrank it for slot 0 — a single-slot config
+    // puts the typed number in both, and adding a slot silently left the first
+    // layer on the import's temperature while the panel showed the new one.
+    const declaresBoth = {
+      ...imported(),
+      _passthrough: { ...imported()._passthrough, hot_plate_temp_initial_layer: ['55', '80'] },
+    } as OrcaConfig
+    const pt = withFilamentSlots({ ...declaresBoth, bed_temperature: 60 }, ['PLA'])._passthrough
+    expect(pt?.hot_plate_temp).toEqual(['60', '80'])
+    expect(pt?.hot_plate_temp_initial_layer).toEqual(['60', '80'])
   })
 
   it('still lets a manual override win for slot 0', () => {
@@ -493,6 +561,17 @@ describe('withFilamentSlots on an imported multi-material profile', () => {
     const pt = withFilamentSlots(imported(), ['PLA', 'ABS'])._passthrough
     expect(pt?.filament_type).toEqual(['PLA', 'ABS'])
     expect(pt?.nozzle_temperature?.[1]).not.toBe('255')
+  })
+
+  it('keeps a declared filament diameter for a slot the UI names, which has no diameter to offer', () => {
+    // The "UI slot wins" rule is only sound for options read off the picked
+    // material's preset. No FILAMENT_PRESETS entry carries a diameter, so
+    // routing this through per() could only ever replace an imported 2.85 mm
+    // with the stock 1.75 — silently, and off by (2.85/1.75)^2 in every E value.
+    expect(withFilamentSlots(imported(), ['PLA'])._passthrough?.filament_diameter).toEqual(['2.85', '2.85'])
+    expect(withFilamentSlots(imported(), ['PLA', 'ABS'])._passthrough?.filament_diameter).toEqual(['2.85', '2.85'])
+    // Nothing declared: the engine's own PrintConfig.cpp default, per slot.
+    expect(withFilamentSlots({}, ['PLA', 'ABS'])._passthrough?.filament_diameter).toEqual(['1.75', '1.75'])
   })
 
   it('discards a declared flush matrix that is the wrong shape for this machine', () => {

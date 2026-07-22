@@ -346,7 +346,7 @@ static void center_object_xy_only(Slic3r::ModelObject* obj) {
 // icosphere in smoke-test.mjs started failing purely because an unrelated
 // bridge edit shifted the binary layout. Zero it explicitly, exactly like
 // set_is_bbl_printer() below does for the other uninitialised Print member.
-static void set_plate_origin(Slic3r::Print& print) {
+static void zero_plate_origin(Slic3r::Print& print) {
     print.set_plate_origin(Slic3r::Vec3d::Zero());
 }
 
@@ -531,7 +531,7 @@ int orc_slice(void* session_ptr, const void* stl_data, int stl_len,
         // ── configure & slice ────────────────────────────────────────
         Slic3r::Print print;
         print.apply(model, session->config);
-        set_plate_origin(print);
+        zero_plate_origin(print);
         set_is_bbl_printer(print, session->config);
         attach_progress_callback(print);
 
@@ -821,7 +821,7 @@ int orc_slice_multi(
         // ── configure & slice ─────────────────────────────────────────────
         Slic3r::Print print;
         print.apply(model, session->config);
-        set_plate_origin(print);
+        zero_plate_origin(print);
         set_is_bbl_printer(print, session->config);
         attach_progress_callback(print);
 

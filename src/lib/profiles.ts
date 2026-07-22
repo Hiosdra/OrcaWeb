@@ -108,6 +108,13 @@ export const MAX_FILAMENT_SLOTS = SLOT_COLOURS.length
 const FLUSH_VOLUME = 280
 
 /**
+ * Filament diameter for a slot nothing declares one for, in mm — the engine's
+ * own PrintConfig.cpp default, and what every FFF profile this app ships is
+ * built around. Only a fallback: an imported profile carrying 2.85 keeps it.
+ */
+const DEFAULT_FILAMENT_DIAMETER = '1.75'
+
+/**
  * How many physical nozzles the chosen printer has. Real multi-nozzle machines
  * carry a `nozzle_diameter` array (a Bambu Lab H2D has two); everything else
  * is a single nozzle feeding however many filament slots.
@@ -209,8 +216,22 @@ function slotSource(config: OrcaConfig, ui: string[], i: number): Partial<OrcaCo
  * revert the user's edit (the #159 interaction). Every other per-filament
  * option has no UI of its own, so a declared value is the best answer for any
  * slot including the first.
+ *
+ * "Edits" means whatever toEngineConfig() writes from a panel field, not just
+ * the fields the panel names. Its one "Bed temp" knob fans out to *both*
+ * hot_plate_temp and hot_plate_temp_initial_layer, so both belong here — with
+ * only the first listed, a single-slot config put the typed value in both
+ * while a multi-slot one silently left the first layer on the imported
+ * profile's temperature. `nozzle_temperature_initial_layer` is deliberately
+ * absent for exactly the same reason read the other way: toEngineConfig()
+ * never writes it, so there is no panel value for a declared one to contradict.
  */
-const PANEL_EDITED_SLOT_OPTIONS = new Set(['filament_type', 'nozzle_temperature', 'hot_plate_temp'])
+const PANEL_EDITED_SLOT_OPTIONS = new Set([
+  'filament_type',
+  'nozzle_temperature',
+  'hot_plate_temp',
+  'hot_plate_temp_initial_layer',
+])
 
 /**
  * Colour for a slot the config did not name one for. Past the hand-picked
@@ -221,10 +242,22 @@ const PANEL_EDITED_SLOT_OPTIONS = new Set(['filament_type', 'nozzle_temperature'
 function slotColour(i: number): string {
   if (i < SLOT_COLOURS.length) return SLOT_COLOURS[i]
   const hue = ((i * 137.508) % 360) / 360
+  // Standard HSL -> RGB (the hue2rgb helper), at a saturation and lightness
+  // picked to sit alongside SLOT_COLOURS rather than for any property of their
+  // own. Derived from those two rather than written out as literals: the ramp's
+  // slope is a function of the min/max it moves between, and an earlier
+  // revision had them disagree by a factor of two — leaving the piecewise curve
+  // discontinuous at both joins, so some hues came out muddy while this comment
+  // still claimed a plain HSL conversion.
+  const saturation = 0.62
+  const lightness = 0.55
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation
+  const min = lightness - chroma / 2
+  const max = lightness + chroma / 2
+  const slope = 6 * chroma
   const channel = (offset: number): string => {
     const t = (hue + offset) % 1
-    // Standard HSL -> RGB at S=0.62, L=0.55, expanded for the two constants.
-    const v = t < 1 / 6 ? 0.238 + 1.932 * t : t < 1 / 2 ? 0.872 : t < 2 / 3 ? 0.872 - 1.932 * (t - 1 / 2) : 0.238
+    const v = t < 1 / 6 ? min + slope * t : t < 1 / 2 ? max : t < 2 / 3 ? max - slope * (t - 1 / 2) : min
     return Math.round(v * 255)
       .toString(16)
       .padStart(2, '0')
@@ -243,6 +276,16 @@ function multiFilamentPassthrough(config: OrcaConfig, ui: string[], n: number, n
   }
 
   /**
+   * One value per slot for an option with no UI and nothing to derive it from:
+   * whatever the config declared for that slot, else `fallback`. Used for the
+   * options `per()` below cannot serve because they have no material to read.
+   */
+  const declaredOr = (key: string, fallback: (i: number) => string): string[] => {
+    const values = declared(key)
+    return Array.from({ length: n }, (_, i) => values[i] ?? fallback(i))
+  }
+
+  /**
    * One value per slot, preferring what the config already declared for that
    * slot over anything derived. An imported multi-material profile is the only
    * thing that can declare these, and its values are the user's — regenerating
@@ -251,6 +294,13 @@ function multiFilamentPassthrough(config: OrcaConfig, ui: string[], n: number, n
    *
    * A slot the UI names is the exception: the user picked that material in the
    * panel, so it outranks whatever an older import happened to say.
+   *
+   * That exception is only sound while `pick` genuinely reads the slot's own
+   * material — it is what makes the derived value more current than the
+   * declared one. An option with nothing to pick has no such value to offer
+   * and would only overwrite the import with `fallback`, so it belongs in
+   * `declaredOr()` above instead. `filament_diameter` sat here with `() => undefined`
+   * and silently reset an imported 2.85 mm profile's second slot to 1.75.
    */
   const per = (key: string, pick: (src: Partial<OrcaConfig>) => unknown, fallback: string | number): string[] => {
     const own = declared(key)
@@ -305,8 +355,11 @@ function multiFilamentPassthrough(config: OrcaConfig, ui: string[], n: number, n
 
   return {
     filament_type: per('filament_type', (p) => p.filament_type, DISPLAY_DEFAULTS.filament_type),
-    filament_colour: Array.from({ length: n }, (_, i) => declared('filament_colour')[i] ?? slotColour(i)),
-    filament_diameter: per('filament_diameter', () => undefined, '1.75'),
+    filament_colour: declaredOr('filament_colour', slotColour),
+    // No FILAMENT_PRESETS entry carries a diameter, so there is nothing a UI
+    // slot could derive — declared value first for every slot, 1.75 only where
+    // nothing said otherwise. See per()'s doc for why this is not per().
+    filament_diameter: declaredOr('filament_diameter', () => DEFAULT_FILAMENT_DIAMETER),
     nozzle_temperature: per('nozzle_temperature', (p) => p.nozzle_temperature, DISPLAY_DEFAULTS.nozzle_temperature),
     nozzle_temperature_initial_layer: per(
       'nozzle_temperature_initial_layer',
