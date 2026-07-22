@@ -112,16 +112,25 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
     case 'PATCH_ITEM':
       return { ...state, items: patchItem(state.items, action.id, action.patch) }
 
-    case 'ASSIGN_EXTRUDER':
+    case 'ASSIGN_EXTRUDER': {
+      // Picking a different filament changes what this object would print
+      // with, so any G-code already produced for it no longer matches — mark
+      // it stale exactly like CONFIG_CHANGED does for a settings edit, so the
+      // Slice button offers to re-run it. Both slice paths honour the
+      // assignment (the single one via a one-object plate), so re-slicing
+      // genuinely produces different output rather than the same bytes.
+      const item = state.items.find((i) => i.id === action.id)
+      const wasSliced = item?.status === 'done'
       return {
         ...state,
-        items: patchItem(state.items, action.id, { extruderId: action.extruderId }),
-        // A slot change alters what a plate slice would produce, so an existing
-        // plate result no longer matches the queue — same staleness rule
-        // CONFIG_CHANGED applies to settings edits. Per-item results are
-        // untouched: extruderIds only reach the engine via slicePlate().
+        items: patchItem(state.items, action.id, {
+          extruderId: action.extruderId,
+          ...(wasSliced ? { stale: true } : {}),
+        }),
+        // The plate mixes every object, so it goes stale on any reassignment.
         plate: state.plate.gcode ? { ...state.plate, stale: true } : state.plate,
       }
+    }
 
     case 'CONVERSION_DONE': {
       const item = state.items.find((i) => i.id === action.id)
@@ -500,7 +509,15 @@ export function useSliceQueue(
         const stl = await next.stlFile.arrayBuffer()
         if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
-        getWorker().postMessage({ type: 'SLICE', stl, config: configSnapshot.config }, [stl])
+        getWorker().postMessage(
+          {
+            type: 'SLICE',
+            stl,
+            config: configSnapshot.config,
+            ...(next.extruderId ? { extruderId: next.extruderId } : {}),
+          },
+          [stl],
+        )
       } catch (err) {
         if (requestGeneration !== sliceRequestGeneration.current) return
         logError(`[queue] failed to read "${next.name}" for slicing:`, err)

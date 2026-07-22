@@ -363,6 +363,14 @@ describe('withFilamentSlots (#140)', () => {
     expect(m[3]).toBe('0') // slot 2 -> slot 2
   })
 
+  it('sizes the per-filament G-code hooks, so a slot other than the first can print', () => {
+    // The engine reads these with .at(filament_id); leaving them at their
+    // one-entry default made assigning an object to slot 2 throw.
+    const pt = withFilamentSlots(singleNozzle, ['PLA', 'PETG', 'ABS'])._passthrough
+    expect(pt?.filament_start_gcode).toHaveLength(3)
+    expect(pt?.filament_end_gcode).toHaveLength(3)
+  })
+
   it('preserves passthrough the profile already had', () => {
     const withGcode: OrcaConfig = { _passthrough: { machine_start_gcode: 'G28' } }
     const pt = withFilamentSlots(withGcode, ['PLA', 'PETG'])._passthrough

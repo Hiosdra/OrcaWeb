@@ -183,7 +183,15 @@ export type WorkerInMessage =
   // human-readable resolved WASM release tag (__ORCA_ENGINE_VERSION__), used
   // only for console diagnostics, never for cache-busting or URLs.
   | { type: 'LOAD_WASM'; url: string; version: string; engineLabel: string }
-  | { type: 'SLICE'; stl: ArrayBuffer; config: OrcaConfig }
+  | {
+      type: 'SLICE'
+      stl: ArrayBuffer
+      config: OrcaConfig
+      // 1-based filament slot for this object (omitted = the config default).
+      // Routed through orc_slice_multi as a single-object plate, since only
+      // that entry point takes a per-object assignment.
+      extruderId?: number
+    }
   | {
       type: 'SLICE_MULTI'
       stls: ArrayBuffer[]

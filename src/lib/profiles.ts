@@ -169,6 +169,13 @@ function multiFilamentPassthrough(filaments: string[], nozzles: number): Passthr
     nozzle_temperature_initial_layer: per((p) => p.nozzle_temperature ?? DISPLAY_DEFAULTS.nozzle_temperature),
     hot_plate_temp: per((p) => p.bed_temperature ?? DISPLAY_DEFAULTS.bed_temperature),
     hot_plate_temp_initial_layer: per((p) => p.bed_temperature ?? DISPLAY_DEFAULTS.bed_temperature),
+    // Per-filament G-code hooks. The engine reads these with .at(filament_id)
+    // (GCode.cpp's filament_start_gcode lookup), so a vector left at its
+    // one-entry default throws the moment anything prints with a filament
+    // other than the first — which is why assigning an object to slot 2 used
+    // to fail while slot 1 worked.
+    filament_start_gcode: filaments.map(() => ''),
+    filament_end_gcode: filaments.map(() => ''),
     filament_map: filaments.map((_, i) => String((i % nozzles) + 1)),
     filament_map_mode: 'Manual',
     flush_volumes_matrix: matrix,

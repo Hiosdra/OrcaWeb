@@ -42,6 +42,19 @@ describe('per-object filament-slot assignment', () => {
     expect(buildPlateExtruderIds([{ extruderId: 2 }, {}, { extruderId: 1 }])).toEqual([2, 0, 1])
   })
 
+  it('marks a sliced item stale when its own slot is reassigned', () => {
+    const items = [{ id: 'a', status: 'done', gcode: 'G1' }] as unknown as typeof state.items
+    const next = sliceQueueReducer({ ...state, items }, { type: 'ASSIGN_EXTRUDER', id: 'a', extruderId: 2 })
+    expect(next.items[0]).toMatchObject({ extruderId: 2, stale: true })
+  })
+
+  it('does not invent staleness for an item that was never sliced', () => {
+    const items = [{ id: 'a', status: 'ready' }] as unknown as typeof state.items
+    const next = sliceQueueReducer({ ...state, items }, { type: 'ASSIGN_EXTRUDER', id: 'a', extruderId: 2 })
+    expect(next.items[0]).toMatchObject({ extruderId: 2 })
+    expect((next.items[0] as { stale?: boolean }).stale).toBeUndefined()
+  })
+
   it('marks an existing plate result stale when a slot is reassigned', () => {
     const plate = { ...state.plate, gcode: 'G1 X0', stale: false }
     const next = sliceQueueReducer({ ...state, plate }, { type: 'ASSIGN_EXTRUDER', id: 'a', extruderId: 2 })
