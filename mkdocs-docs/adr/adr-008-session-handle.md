@@ -67,9 +67,9 @@ identical to the old global-state bridge. Only the storage changed.
   slicer sessions in one WASM instance without cross-contamination.
 - **Positive:** `orc_slice_multi` also gained a per-object `extruder_ids`
   parameter alongside this refactor (see `orca-wasm/bridge/slicer.cpp`'s doc
-  comment on `orc_slice_multi` and `status.md`'s "Multi-ekstruder / multi-material"
-  section) — unrelated to session scoping itself, but landed in the same pass
-  since both touch the same function signatures.
+  comment on `orc_slice_multi` and `status.md`'s "Multi-material + real
+  multi-nozzle printers" row) — unrelated to session scoping itself, but
+  landed in the same pass since both touch the same function signatures.
 - **Neutral:** Purely mechanical change — no algorithmic difference, verified by
   re-checking every `record_error`/state-access call site by hand (this repo's
   sandbox has no Emscripten toolchain to compile against locally; CI's

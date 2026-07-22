@@ -51,13 +51,21 @@ calls end-to-end:
    default, so a future Arachne-specific regression doesn't take down the
    classic path's coverage with it.
 4. **plate, 2 objects, per-object `extruder` override** — probes the
-   `extruder_ids` plumbing added in ADR-008 (single-nozzle multi-material
-   assignment only; deliberately does **not** exercise a real multi-nozzle
-   `nozzle_diameter` array, which remains a known, unverified crash risk — see
-   `status.md`'s "Multi-ekstruder / multi-material" section).
+   `extruder_ids` plumbing added in ADR-008 on its own: both objects take the
+   same slot and `nozzle_diameter` stays length 1, so this is the AMS-style
+   single-nozzle path.
+5. **plate, 2 objects on a real dual-nozzle machine** — added in
+   [#160](https://github.com/Hiosdra/OrcaWeb/pull/160), when real multi-nozzle
+   profiles stopped being a known crash risk. A Bambu Lab H2D-shaped config
+   (`nozzle_diameter` length 2, one printable area and one filament per
+   nozzle, `filament_map` `[1,2]`) with the two objects on different slots,
+   asserting **both `T0` and `T1`** appear. This is the scenario the whole
+   class of bugs hid in: a config that silently collapses to a single filament
+   still slices and still passes the sanity assertions — it just prints
+   everything with one tool.
 
-Scenarios 2–4 also run against both meshes, not just the synthetic one — every
-scenario × mesh combination is exercised (8 total by default).
+Scenarios 2–5 also run against both meshes, not just the synthetic one — every
+scenario × mesh combination is exercised (10 total by default).
 
 Each scenario asserts the return code is `0` and the resulting G-code is
 non-trivially sized and contains real `G1` extrusion moves — not just "didn't
