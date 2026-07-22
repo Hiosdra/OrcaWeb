@@ -77,6 +77,52 @@ function useOverride(field?: keyof OrcaConfig) {
   return overrideMarker(useContext(OverrideContext), field)
 }
 
+// Controls that are present while the panel is in its default (non-advanced)
+// state. The summary uses this list to keep a reset action reachable even when
+// an overridden control is currently hidden behind a toggle or the advanced
+// section.
+const BASIC_SETTING_FIELDS: (keyof OrcaConfig)[] = [
+  'nozzle_diameter',
+  'nozzle_temperature',
+  'bed_temperature',
+  'layer_height',
+  'wall_loops',
+  'initial_layer_print_height',
+  'top_shell_layers',
+  'bottom_shell_layers',
+  'wall_generator',
+  'sparse_infill_density',
+  'sparse_infill_pattern',
+  'enable_support',
+  'brim_width',
+  'brim_type',
+  'raft_layers',
+  'skirt_loops',
+  'skirt_distance',
+]
+
+const ADVANCED_SETTING_FIELDS: (keyof OrcaConfig)[] = [
+  'default_speed',
+  'outer_wall_speed',
+  'initial_layer_speed',
+  'travel_speed',
+  'seam_position',
+  'fuzzy_skin',
+  'fuzzy_skin_thickness',
+  'fuzzy_skin_point_dist',
+  'enable_ironing',
+]
+
+const OVERRIDE_LABELS: Partial<Record<keyof OrcaConfig, string>> = {
+  support_type: 'Support type',
+  fuzzy_skin_thickness: 'Fuzzy skin thickness',
+  fuzzy_skin_point_dist: 'Fuzzy skin point distance',
+}
+
+function overrideLabel(field: keyof OrcaConfig): string {
+  return OVERRIDE_LABELS[field] ?? String(field).replace(/_/g, ' ')
+}
+
 interface Props {
   config: OrcaConfig
   onChange: (patch: Partial<OrcaConfig>) => void
@@ -142,6 +188,16 @@ export function SettingsPanel({
     [overrides, onRevertField],
   )
   const densityOverride = overrideMarker(overrideContext, 'sparse_infill_density')
+  const visibleOverrideFields = new Set<keyof OrcaConfig>(BASIC_SETTING_FIELDS)
+  if (showAdvanced) {
+    for (const field of ADVANCED_SETTING_FIELDS) visibleOverrideFields.add(field)
+  }
+  if (config.enable_support) visibleOverrideFields.add('support_type')
+  if ((config.fuzzy_skin ?? DISPLAY_DEFAULTS.fuzzy_skin) !== 'none') {
+    visibleOverrideFields.add('fuzzy_skin_thickness')
+    visibleOverrideFields.add('fuzzy_skin_point_dist')
+  }
+  const hiddenOverrideKeys = overriddenKeys.filter((field) => !visibleOverrideFields.has(field))
 
   function handleProfileFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -215,10 +271,29 @@ export function SettingsPanel({
             data-testid="override-summary"
             className="flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"
           >
-            <span className="min-w-0">
-              {overriddenKeys.length} setting{overriddenKeys.length === 1 ? '' : 's'} changed by you · kept when you
-              switch printer, filament, preset or load another file
-            </span>
+            <div className="min-w-0 flex-1">
+              <div>
+                {overriddenKeys.length} setting{overriddenKeys.length === 1 ? '' : 's'} changed by you · kept when you
+                switch printer, filament, preset or load another file
+              </div>
+              {hiddenOverrideKeys.length > 0 && (
+                <div className="mt-1 flex flex-wrap items-center gap-1">
+                  <span className="mr-1">Hidden settings:</span>
+                  {hiddenOverrideKeys.map((field) => (
+                    <button
+                      type="button"
+                      key={field}
+                      onClick={() => onRevertField(field)}
+                      title={`Revert ${overrideLabel(field)} to the value from the selected profile`}
+                      data-testid={`revert-${field}`}
+                      className="rounded px-1 font-semibold hover:bg-amber-100"
+                    >
+                      {overrideLabel(field)} reset
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button
               type="button"
               onClick={onRevertAll}

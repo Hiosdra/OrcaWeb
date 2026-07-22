@@ -363,9 +363,10 @@ export default function App() {
   // can't fire on an unchanged value, but the guard is the same shape for
   // all three rather than relying on that).
   const handlePresetChange = (name: string) => {
-    if (name === selectedPreset && importedProfile?.type !== 'process') return
+    const presetImport = importedProfile?.type === 'process' || importedProfile?.type === 'print'
+    if (name === selectedPreset && !presetImport) return
     setSelectedPreset(name)
-    setImportedProfile((profile) => (profile?.type === 'process' ? null : profile))
+    setImportedProfile((profile) => (profile?.type === 'process' || profile?.type === 'print' ? null : profile))
   }
 
   const handleProfileImported = (profile: ImportedProfile) => {
