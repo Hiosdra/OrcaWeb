@@ -9,6 +9,7 @@ const state = {
   configEpoch: 0,
   sliceStartEpoch: 0,
   plateStartEpoch: 0,
+  slotLabels: [] as string[],
 }
 
 describe('slice queue mutual exclusion', () => {
@@ -121,31 +122,85 @@ describe('filament slots removed from the config', () => {
     { id: 'a', status: 'ready', extruderId: 3 },
     { id: 'b', status: 'ready', extruderId: 1 },
   ] as unknown as typeof state.items
+  const three = ['PLA', 'PETG', 'ABS']
+  // Every case starts from the same three-slot config, so a shorter list in
+  // the action really is a removal rather than a first-ever CONFIG_CHANGED.
+  const from3 = { ...state, slotLabels: three }
 
   it('drops assignments naming a slot the config no longer has', () => {
     // Below two slots the picker disappears entirely, so a stale assignment is
     // invisible — but buildPlateExtruderIds would still send it and the engine
     // would index its per-filament vectors out of range.
-    const next = sliceQueueReducer({ ...state, items: assigned }, { type: 'CONFIG_CHANGED', epoch: 1, slotCount: 2 })
+    const next = sliceQueueReducer(
+      { ...from3, items: assigned },
+      { type: 'CONFIG_CHANGED', epoch: 1, slotLabels: ['PLA', 'PETG'] },
+    )
     expect(next.items[0].extruderId).toBeUndefined()
     expect(next.items[1].extruderId).toBe(1)
     expect(buildPlateExtruderIds(next.items)).toEqual([0, 1])
   })
 
   it('leaves assignments alone when every slot still exists', () => {
-    const next = sliceQueueReducer({ ...state, items: assigned }, { type: 'CONFIG_CHANGED', epoch: 1, slotCount: 3 })
+    const next = sliceQueueReducer(
+      { ...from3, items: assigned },
+      { type: 'CONFIG_CHANGED', epoch: 1, slotLabels: three },
+    )
     expect(next.items.map((i) => i.extruderId)).toEqual([3, 1])
   })
 
   it('clears every assignment when the config drops back to one slot', () => {
-    const next = sliceQueueReducer({ ...state, items: assigned }, { type: 'CONFIG_CHANGED', epoch: 1, slotCount: 1 })
+    const next = sliceQueueReducer(
+      { ...from3, items: assigned },
+      { type: 'CONFIG_CHANGED', epoch: 1, slotLabels: ['PLA'] },
+    )
     expect(buildPlateExtruderIds(next.items)).toBeUndefined()
   })
 
   it('still marks sliced items stale while dropping the assignment', () => {
     const items = [{ id: 'a', status: 'done', gcode: 'G1', extruderId: 3 }] as unknown as typeof state.items
-    const next = sliceQueueReducer({ ...state, items }, { type: 'CONFIG_CHANGED', epoch: 1, slotCount: 1 })
+    const next = sliceQueueReducer({ ...from3, items }, { type: 'CONFIG_CHANGED', epoch: 1, slotLabels: ['PLA'] })
     expect(next.items[0]).toMatchObject({ stale: true })
     expect(next.items[0].extruderId).toBeUndefined()
+  })
+
+  it('drops an in-range assignment the removal renumbered onto another material', () => {
+    // Removing the middle slot leaves [PLA, ABS]: slot 2 still exists, so the
+    // length test passes it, but it now means ABS where the user picked PETG.
+    // Silent — the picker just starts reading "Slot 2 · ABS".
+    const items = [{ id: 'a', status: 'ready', extruderId: 2 }] as unknown as typeof state.items
+    const next = sliceQueueReducer(
+      { ...from3, items },
+      { type: 'CONFIG_CHANGED', epoch: 1, slotLabels: ['PLA', 'ABS'] },
+    )
+    expect(next.items[0].extruderId).toBeUndefined()
+  })
+
+  it('keeps an assignment the removal did not move', () => {
+    // Same removal, but this object is on slot 1 — still PLA, so it stays.
+    // The control that stops the fix above from degrading into "any removal
+    // clears everything".
+    const items = [{ id: 'a', status: 'ready', extruderId: 1 }] as unknown as typeof state.items
+    const next = sliceQueueReducer(
+      { ...from3, items },
+      { type: 'CONFIG_CHANGED', epoch: 1, slotLabels: ['PLA', 'ABS'] },
+    )
+    expect(next.items[0].extruderId).toBe(1)
+  })
+
+  it('keeps an assignment when the slot is merely re-picked, not removed', () => {
+    // Changing slot 2's material in the panel is deliberate: the object stays
+    // on slot 2 and prints with the new filament. Only a *shorter* list means
+    // the position was renumbered, which is why the label test is gated on it.
+    const items = [{ id: 'a', status: 'ready', extruderId: 2 }] as unknown as typeof state.items
+    const next = sliceQueueReducer(
+      { ...from3, items },
+      { type: 'CONFIG_CHANGED', epoch: 1, slotLabels: ['PLA', 'ABS', 'ABS'] },
+    )
+    expect(next.items[0].extruderId).toBe(2)
+  })
+
+  it('records the new slot list, so the next change compares against it', () => {
+    const next = sliceQueueReducer(from3, { type: 'CONFIG_CHANGED', epoch: 1, slotLabels: ['PLA', 'ABS'] })
+    expect(next.slotLabels).toEqual(['PLA', 'ABS'])
   })
 })

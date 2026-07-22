@@ -34,6 +34,10 @@ interface QueueState {
   configEpoch: number
   sliceStartEpoch: number
   plateStartEpoch: number
+  /** The filament slots the last CONFIG_CHANGED reported, in engine order.
+   *  Kept so the next one can tell a slot that *vanished* from a slot that was
+   *  merely re-picked — see the CONFIG_CHANGED case. */
+  slotLabels: string[]
 }
 
 type QueueAction =
@@ -51,9 +55,11 @@ type QueueAction =
   | { type: 'PLATE_STARTED'; configEpoch: number }
   | { type: 'PLATE_DONE'; gcode: string }
   | { type: 'PLATE_FAILED'; message: string }
-  // slotCount: how many filament slots the new config has, so assignments
-  // naming a slot it no longer has can be dropped (see the reducer).
-  | { type: 'CONFIG_CHANGED'; epoch: number; slotCount: number }
+  // slotLabels: the new config's filament slots in engine order. The length
+  // drops assignments naming a slot it no longer has; the labels catch the
+  // ones that stayed in range but now mean a different material (see the
+  // reducer).
+  | { type: 'CONFIG_CHANGED'; epoch: number; slotLabels: string[] }
   | { type: 'CANCELLED' }
   | { type: 'ENGINE_FAILED'; message: string }
 
@@ -67,6 +73,7 @@ const INITIAL_STATE: QueueState = {
   configEpoch: 0,
   sliceStartEpoch: 0,
   plateStartEpoch: 0,
+  slotLabels: [],
 }
 
 class ItemRemovedError extends Error {}
@@ -257,18 +264,44 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
       // longer exists. Nothing in the UI shows them any more — the picker
       // disappears entirely below two slots — but buildPlateExtruderIds would
       // still send them, and the engine would index its per-filament vectors
-      // by an out-of-range filament id. Drop them here, where the slot count
+      // by an out-of-range filament id. Drop them here, where the slot list
       // can actually change.
       //
-      // A config back down to one slot drops *every* assignment, not just the
-      // out-of-range ones: "slot 1" of one slot is what the config already
-      // does, and keeping it would leave the plate on the assigned code path
-      // (a non-empty extruderIds array) with no picker to clear it from.
-      const staleSlot = (id: number | undefined) => id !== undefined && (action.slotCount < 2 || id > action.slotCount)
+      // Slots are positional: index IS the identity, for the engine's
+      // per-filament vectors and therefore for extruderId too. So removing one
+      // from the *middle* renumbers every slot after it while leaving every id
+      // in range, and an object assigned to "slot 2" silently becomes an object
+      // assigned to whatever moved into position 2. That prints the wrong
+      // material rather than indexing out of bounds, so nothing catches it
+      // downstream.
+      //
+      // Comparing the labels catches it — but only together with the length
+      // test. A label changing on its own is the user re-picking that slot's
+      // material in the panel, which is deliberate and must leave the
+      // assignment alone; it is a label changing *because the list got shorter*
+      // that means this position now describes a different filament. Dropping
+      // to "Auto" rather than following the material to its new index is the
+      // conservative half: the picker is right there, and a wrong slot is worse
+      // than an unset one.
+      const previous = state.slotLabels
+      const slots = action.slotLabels
+      const shrank = slots.length < previous.length
+      const staleSlot = (id: number | undefined) =>
+        id !== undefined &&
+        // A config back down to one slot drops *every* assignment, not just the
+        // out-of-range ones: "slot 1" of one slot is what the config already
+        // does, and keeping it would leave the plate on the assigned code path
+        // (a non-empty extruderIds array) with no picker to clear it from.
+        (slots.length < 2 ||
+          // Removed from the end.
+          id > slots.length ||
+          // Still in range, but renumbered onto a different material.
+          (shrank && slots[id - 1] !== previous[id - 1]))
       const dropStaleSlot = (i: QueueItem): QueueItem => (staleSlot(i.extruderId) ? { ...i, extruderId: undefined } : i)
       return {
         ...state,
         configEpoch: action.epoch,
+        slotLabels: slots,
         items: state.items.map((i) => dropStaleSlot(i.status === 'done' ? { ...i, stale: true } : i)),
         plate: state.plate.gcode ? { ...state.plate, stale: true } : state.plate,
       }
@@ -414,7 +447,7 @@ export function useSliceQueue(
       epoch: configSnapshotRef.current.epoch + 1,
     }
     configSnapshotRef.current = snapshot
-    dispatch({ type: 'CONFIG_CHANGED', epoch: snapshot.epoch, slotCount: filamentSlotLabels(config).length })
+    dispatch({ type: 'CONFIG_CHANGED', epoch: snapshot.epoch, slotLabels: filamentSlotLabels(config) })
   }, [config])
 
   // ── Worker messages → reducer ─────────────────────────────────────────────
