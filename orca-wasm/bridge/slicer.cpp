@@ -269,6 +269,53 @@ static std::string json_val_to_string(const nlohmann::json& v) {
     return "";
 }
 
+/**
+ * Serialize a JSON array into the single string OrcaSlicer's deserializer
+ * expects for that specific option — the separator is a property of the
+ * option's *type*, not a universal comma:
+ *
+ *   coStrings       ';' plus c-style quoting/escaping (escape_strings_cstyle)
+ *   coPointsGroups  '#' between groups, ',' between points inside one group
+ *   everything else ','
+ *
+ * Getting this wrong silently fuses N values into 1 rather than failing, which
+ * is exactly how a real multi-nozzle profile used to die: a Bambu Lab H2D
+ * stores two per-extruder printable areas and two filament colours, both of
+ * which collapsed to a single entry. The engine then had nozzle_diameter of
+ * length 2 but length-1 companions, and indexed them by extruder id — blowing
+ * up in Brim.cpp's outer_inner_brim_area() and ToolOrdering's flush-matrix
+ * lookup (issue #140).
+ *
+ * The separator is looked up in the engine's own option registry rather than
+ * mirrored in a hand-maintained list on the JS side, so it cannot drift out of
+ * sync with the engine version this bridge is compiled against. Strings go
+ * through escape_strings_cstyle() rather than a plain join because several
+ * coStrings options (filament_start_gcode and friends) legitimately contain
+ * ';' and newlines, which a raw join would corrupt.
+ */
+static std::string json_array_to_config_string(const std::string& key, const nlohmann::json& arr) {
+    std::vector<std::string> parts;
+    parts.reserve(arr.size());
+    for (const auto& el : arr) {
+        if (el.is_null()) continue;
+        parts.push_back(json_val_to_string(el));
+    }
+    if (parts.empty()) return "";
+
+    const Slic3r::ConfigOptionDef* def = Slic3r::print_config_def.get(key);
+    const Slic3r::ConfigOptionType type = def ? def->type : Slic3r::coNone;
+    if (type == Slic3r::coStrings)
+        return Slic3r::escape_strings_cstyle(parts);
+
+    const char sep = (type == Slic3r::coPointsGroups) ? '#' : ',';
+    std::string out;
+    for (std::size_t i = 0; i < parts.size(); ++i) {
+        if (i) out += sep;
+        out += parts[i];
+    }
+    return out;
+}
+
 // ModelObject::center_around_origin() centers the raw mesh bounding box on
 // *all three* axes, including Z — it's meant to be called with an existing
 // instance that absorbs the shift (see its desktop usage), which then
@@ -282,6 +329,25 @@ static void center_object_xy_only(Slic3r::ModelObject* obj) {
     shift.z() = 0.0;
     obj->translate(shift);
     obj->origin_translation += shift;
+}
+
+// Print::m_origin (the plate offset, read via get_plate_origin()) has no
+// default member initializer either, and Vec3d is an Eigen type whose default
+// constructor leaves its components uninitialized. Only the desktop GUI's
+// PartPlate code ever calls set_plate_origin(), so in this headless bridge it
+// stays garbage — and PrintInstance::shift_without_plate_offset() (Print.cpp)
+// subtracts it from every instance shift:
+//     return shift - Point(scaled(plate_offset.x()), scaled(plate_offset.y()));
+// Brim.cpp's append_and_translate() then translates the brim/no-brim polygons
+// by that value and hands them to Clipper, which rejects anything beyond its
+// coordinate range ("Coordinate outside allowed range"). Because the garbage
+// depends on whatever happens to be on the stack, this reproduced only for
+// some meshes and flipped with unrelated code changes — the synthetic
+// icosphere in smoke-test.mjs started failing purely because an unrelated
+// bridge edit shifted the binary layout. Zero it explicitly, exactly like
+// set_is_bbl_printer() below does for the other uninitialised Print member.
+static void set_plate_origin(Slic3r::Print& print) {
+    print.set_plate_origin(Slic3r::Vec3d::Zero());
 }
 
 // Print::m_isBBLPrinter (accessed via is_BBL_printer()) has no default
@@ -389,7 +455,11 @@ int orc_init(void* session_ptr, const char* json_data, int json_len) {
         session->config.set_deserialize_strict("use_relative_e_distances", "0");
 
         for (auto& [key, val] : j.items()) {
-            std::string sv = json_val_to_string(val);
+            // Arrays carry multi-value options (per-extruder / per-filament);
+            // the separator depends on the option's type — see
+            // json_array_to_config_string().
+            std::string sv = val.is_array() ? json_array_to_config_string(key, val)
+                                            : json_val_to_string(val);
             if (sv.empty()) continue;
             try {
                 // set_deserialize_strict builds a ConfigSubstitutionContext with
@@ -461,6 +531,7 @@ int orc_slice(void* session_ptr, const void* stl_data, int stl_len,
         // ── configure & slice ────────────────────────────────────────
         Slic3r::Print print;
         print.apply(model, session->config);
+        set_plate_origin(print);
         set_is_bbl_printer(print, session->config);
         attach_progress_callback(print);
 
@@ -748,6 +819,7 @@ int orc_slice_multi(
         // ── configure & slice ─────────────────────────────────────────────
         Slic3r::Print print;
         print.apply(model, session->config);
+        set_plate_origin(print);
         set_is_bbl_printer(print, session->config);
         attach_progress_callback(print);
 

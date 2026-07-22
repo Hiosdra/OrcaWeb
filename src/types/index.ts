@@ -1,3 +1,6 @@
+/** Raw OrcaSlicer option values forwarded straight to the engine. */
+export type PassthroughConfig = Record<string, string | string[]>
+
 export interface OrcaConfig {
   // Printer
   printer_model?: string
@@ -58,7 +61,13 @@ export interface OrcaConfig {
   printable_height?: number
 
   // Arbitrary OrcaSlicer fields not modeled above — forwarded verbatim to WASM
-  _passthrough?: Record<string, string>
+  /** Arbitrary OrcaSlicer fields not modeled above, forwarded verbatim to WASM.
+   *  Multi-value options stay as arrays: the WASM bridge joins them using the
+   *  separator that option's *type* requires (';' for coStrings, '#' between
+   *  coPointsGroups groups, ',' otherwise), which only the engine's own option
+   *  registry knows. See json_array_to_config_string() in
+   *  orca-wasm/bridge/slicer.cpp and issue #140. */
+  _passthrough?: PassthroughConfig
 }
 
 // Curated subset of PrintConfig.cpp's sparse_infill_pattern enum (26 values

@@ -269,3 +269,49 @@ describe('parseOrcaProfileJson initial_layer_print_height', () => {
     expect(parsed._passthrough?.initial_layer_height).toBe('0.3')
   })
 })
+
+describe('parseOrcaProfileJson multi-value options (#140)', () => {
+  // A real Bambu Lab H2D: two nozzles, one printable area per nozzle.
+  const H2D = {
+    nozzle_diameter: ['0.4', '0.4'],
+    extruder_printable_area: ['0x0,325x0,325x320,0x320', '25x0,350x0,350x320,25x320'],
+    filament_type: ['PLA', 'PETG'],
+    single_valued_field: ['0.8'],
+    scalar_field: 'plain',
+  }
+
+  it('keeps multi-value options as arrays so the bridge can pick the right separator', () => {
+    const pt = parseOrcaProfileJson(JSON.stringify(H2D))._passthrough
+    // Joining these in JS is what used to fuse a dual-nozzle machine's two
+    // printable areas into one 8-point group and crash the brim generator.
+    expect(pt?.extruder_printable_area).toEqual(['0x0,325x0,325x320,0x320', '25x0,350x0,350x320,25x320'])
+    expect(pt?.filament_type).toEqual(['PLA', 'PETG'])
+  })
+
+  it('forwards multi-value fields that are also UI-mapped, which the scalar mapping would flatten', () => {
+    const parsed = parseOrcaProfileJson(JSON.stringify(H2D))
+    // The UI keeps a single number...
+    expect(parsed.nozzle_diameter).toBe(0.4)
+    // ...but the engine must still see both nozzles, or it slices a
+    // dual-nozzle machine as if it had one.
+    expect(parsed._passthrough?.nozzle_diameter).toEqual(['0.4', '0.4'])
+  })
+
+  it('does not pass single-valued mapped fields through twice', () => {
+    const pt = parseOrcaProfileJson(JSON.stringify({ nozzle_diameter: ['0.4'] }))._passthrough
+    expect(pt?.nozzle_diameter).toBeUndefined()
+  })
+
+  it('still collapses single-entry arrays and leaves scalars alone', () => {
+    const pt = parseOrcaProfileJson(JSON.stringify(H2D))._passthrough
+    expect(pt?.single_valued_field).toBe('0.8')
+    expect(pt?.scalar_field).toBe('plain')
+  })
+
+  it('no longer drops a multi-nozzle profile wholesale', () => {
+    // This used to return an empty passthrough: multi-extruder profiles were
+    // rejected outright because they crashed the engine.
+    const pt = parseOrcaProfileJson(JSON.stringify(H2D))._passthrough
+    expect(pt && Object.keys(pt).length).toBeGreaterThan(0)
+  })
+})
