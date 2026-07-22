@@ -89,9 +89,11 @@ the patch on top of it.
 - **App/pages patch releases**: every deploy (any push to master, or the
   chained redeploy after an engine rebuild) auto-bumps the patch version,
   updates `mkdocs-docs/status.md`, commits (via the `release_deploy_key`
-  deploy key, tagged `[skip ci]` so it doesn't retrigger itself), and tags —
-  see deploy.yml's "Auto-bump app version" step. Nothing to run manually for
-  a routine patch.
+  deploy key, marked `[skip actions]` so it doesn't retrigger itself — and
+  deliberately not `[skip ci]`, which would also stop the Cloudflare mirror
+  and leave it a bump behind; see the comment in deploy.yml), and tags — see
+  deploy.yml's "Auto-bump app version" step. Nothing to run manually for a
+  routine patch.
 - **Engine releases**: any master push touching `orca-wasm/**` (or
   `build-wasm.yml` itself) automatically triggers `build-wasm.yml`, which
   builds and publishes a new `wasm-v2.4.0-patchN` release, and deploy.yml
