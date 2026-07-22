@@ -1,6 +1,6 @@
 import clsx from 'clsx'
 import { strToU8, zipSync } from 'fflate'
-import { createContext, useContext, useId, useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { overriddenFields } from '../lib/config-layers'
 import { downloadBlob } from '../lib/download'
 import {
@@ -829,6 +829,46 @@ function NumberField({
     if (!Number.isNaN(n)) onChange(Math.min(max, Math.max(min, n)))
   }
 
+  // Buffering means the input can show a value the config has never seen,
+  // and blur was the only way out of that state — which is not a signal to
+  // depend on. Reported twice as "I set 0 skirt loops and still got a
+  // skirt", and every symptom fit: no override marker, a green (not stale)
+  // result card, and the field back at its profile value on return, because
+  // the panel remounts with an empty draft. The reporter had used the
+  // stepper arrows, which in several browsers don't focus the input at all,
+  // so no blur was ever coming; requiring Enter to make a click "count" is
+  // not a reasonable thing to ask of anyone either.
+  //
+  // So the draft is flushed on two more occasions, held in a ref because
+  // neither effect may re-run per keystroke (that would commit each one,
+  // which is exactly what the buffer exists to avoid).
+  const pendingRef = useRef<{ draft: string | null; commit: (raw: string) => void }>({ draft, commit })
+  pendingRef.current = { draft, commit }
+
+  // 1. The browser's own "this edit is finished" signal. For the stepper
+  //    buttons, the arrow keys and the mouse wheel a native `change` fires
+  //    immediately; while typing it holds off until Enter or blur — exactly
+  //    the split this field wants. It has to be a real listener: React's
+  //    onChange is the `input` event, which fires on every keystroke.
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    const onNativeChange = () => pendingRef.current.commit(el.value)
+    el.addEventListener('change', onNativeChange)
+    return () => el.removeEventListener('change', onNativeChange)
+  }, [])
+
+  // 2. The field going away — switching to the Slice tab unmounts the whole
+  //    panel, and a value still sitting in the buffer would go with it.
+  useEffect(
+    () => () => {
+      const { draft: pending, commit: flush } = pendingRef.current
+      if (pending !== null) flush(pending)
+    },
+    [],
+  )
+
   return (
     <div>
       <div className="flex items-center justify-between gap-1 mb-1">
@@ -840,6 +880,7 @@ function NumberField({
       <div className="flex items-center gap-1">
         <input
           id={id}
+          ref={inputRef}
           data-testid={field && `setting-${field}`}
           type="number"
           value={draft ?? String(value)}
