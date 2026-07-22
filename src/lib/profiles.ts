@@ -89,15 +89,106 @@ export function filamentSlots(config: OrcaConfig): string[] {
     .filter(Boolean)
 }
 
+/**
+ * Default slot colours. `filament_colour` is not cosmetic here: the engine
+ * derives its filament *count* from `filament_colour.values.size()`
+ * (ToolOrdering.cpp's `number_of_extruders`), which then sizes the flush
+ * matrix. A slot without a colour is a slot the engine does not know exists.
+ */
+const SLOT_COLOURS = ['#F5A623', '#4A90D9', '#7ED321', '#D0021B', '#9013FE', '#50E3C2', '#F8E71C', '#B8E986']
+
+/**
+ * Upper bound on filament slots offered in the UI — one per SLOT_COLOURS entry,
+ * comfortably above the 4 slots of a single AMS unit. The engine imposes no
+ * limit of its own, but each extra slot grows the flush matrix quadratically.
+ */
+export const MAX_FILAMENT_SLOTS = SLOT_COLOURS.length
+
+/** Volume purged when switching between two different filaments, in mm³. */
+const FLUSH_VOLUME = 280
+
+/**
+ * How many physical nozzles the chosen printer has. Real multi-nozzle machines
+ * carry a `nozzle_diameter` array (a Bambu Lab H2D has two); everything else
+ * is a single nozzle feeding however many filament slots.
+ */
+function nozzleCount(config: Partial<OrcaConfig> | undefined): number {
+  const raw = config?._passthrough?.nozzle_diameter
+  return Array.isArray(raw) && raw.length > 0 ? raw.length : 1
+}
+
+/**
+ * The per-filament options the engine needs in order to treat a config as
+ * having N filaments rather than one.
+ *
+ * Every filament-indexed vector has to be N long, because the engine indexes
+ * them by filament id; a short one is read out of bounds. The three that are
+ * easy to miss:
+ *
+ *  - `filament_colour` defines the count (see SLOT_COLOURS).
+ *  - `flush_volumes_matrix` holds one N×N sub-matrix *per nozzle*, laid out
+ *    end to end — `get_flush_volumes_matrix()` slices it by nozzle id.
+ *  - `flush_multiplier` has one entry per nozzle, and is what
+ *    `GCode::append_full_config()` divides the matrix length by to check it
+ *    ("Flush volumes matrix do not match to the correct size!").
+ *
+ * `filament_map` assigns each slot to a physical extruder (1-based). Slots are
+ * spread round-robin over the available nozzles, so a single-nozzle AMS-style
+ * printer maps every slot to extruder 1, while a dual-nozzle machine alternates
+ * — which is what produces genuine T0/T1 tool changes.
+ */
+export function withFilamentSlots(config: OrcaConfig, filaments: string[]): OrcaConfig {
+  const slots = filaments.filter((name) => name in FILAMENT_PRESETS)
+  // One slot is the pre-existing single-filament config, untouched.
+  if (slots.length < 2) return config
+  // Deliberately resolved from the *merged* config rather than the built-in
+  // printer preset: an imported machine profile (a real dual-nozzle H2D) only
+  // shows up once the layers are combined, and it is what decides whether the
+  // slots land on one nozzle or alternate across two.
+  const extra = multiFilamentPassthrough(slots, nozzleCount(config))
+  return { ...config, _passthrough: { ...config._passthrough, ...extra } }
+}
+
+function multiFilamentPassthrough(filaments: string[], nozzles: number): PassthroughConfig {
+  const n = filaments.length
+  const per = (pick: (preset: Partial<OrcaConfig>) => unknown): string[] =>
+    filaments.map((name) => String(pick(FILAMENT_PRESETS[name] ?? {}) ?? ''))
+
+  // One N×N matrix per nozzle: 0 to purge a filament into itself, FLUSH_VOLUME
+  // between two different ones.
+  const matrix: string[] = []
+  for (let nozzle = 0; nozzle < nozzles; nozzle++)
+    for (let from = 0; from < n; from++)
+      for (let to = 0; to < n; to++) matrix.push(String(from === to ? 0 : FLUSH_VOLUME))
+
+  return {
+    filament_type: per((p) => p.filament_type ?? 'PLA'),
+    filament_colour: filaments.map((_, i) => SLOT_COLOURS[i % SLOT_COLOURS.length]),
+    filament_diameter: filaments.map(() => '1.75'),
+    nozzle_temperature: per((p) => p.nozzle_temperature ?? DISPLAY_DEFAULTS.nozzle_temperature),
+    nozzle_temperature_initial_layer: per((p) => p.nozzle_temperature ?? DISPLAY_DEFAULTS.nozzle_temperature),
+    hot_plate_temp: per((p) => p.bed_temperature ?? DISPLAY_DEFAULTS.bed_temperature),
+    hot_plate_temp_initial_layer: per((p) => p.bed_temperature ?? DISPLAY_DEFAULTS.bed_temperature),
+    filament_map: filaments.map((_, i) => String((i % nozzles) + 1)),
+    filament_map_mode: 'Manual',
+    flush_volumes_matrix: matrix,
+    flush_multiplier: Array.from({ length: nozzles }, () => '1'),
+  }
+}
+
 export function buildConfig(
   printer: string,
-  filament: string,
+  filament: string | string[],
   preset: string,
   overrides: Partial<OrcaConfig> = {},
 ): OrcaConfig {
+  // The first slot drives every scalar the settings panel shows; the rest only
+  // exist as the per-filament arrays added below.
+  const filaments = (Array.isArray(filament) ? filament : [filament]).filter((name) => name in FILAMENT_PRESETS)
+  const slots = filaments.length > 0 ? filaments : ['PLA']
   const sources = [
     PRINTER_PRESETS[printer],
-    FILAMENT_PRESETS[filament],
+    FILAMENT_PRESETS[slots[0]],
     PRESETS.find((p) => p.name === preset)?.config ?? {},
     overrides,
   ]

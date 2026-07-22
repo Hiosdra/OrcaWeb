@@ -17,6 +17,7 @@ import {
   filamentSlots,
   PRESETS,
   PRINTER_PRESETS,
+  withFilamentSlots,
 } from './lib/profiles'
 import type { WasmStatus } from './lib/worker-singleton'
 import type { OrcaConfig, UserPreset } from './types'
@@ -28,6 +29,9 @@ const SETTINGS_KEY = 'orcaweb.settings.v1'
 interface SavedSettings {
   printer: string
   filament: string
+  /** One entry per filament slot. `filament` above is the legacy single-slot
+   *  field, kept so settings saved by an older build still load. */
+  filaments?: string[]
   preset: string
   manualOverrides: Partial<OrcaConfig>
   importedProfile?: ImportedProfile
@@ -64,6 +68,9 @@ function loadSavedSettings(): SavedSettings | null {
       printer:
         typeof s.printer === 'string' && s.printer in PRINTER_PRESETS ? s.printer : Object.keys(PRINTER_PRESETS)[0],
       filament: typeof s.filament === 'string' && s.filament in FILAMENT_PRESETS ? s.filament : 'PLA',
+      filaments: Array.isArray(s.filaments)
+        ? s.filaments.filter((f): f is string => typeof f === 'string' && f in FILAMENT_PRESETS)
+        : undefined,
       preset: typeof s.preset === 'string' && PRESETS.some((p) => p.name === s.preset) ? s.preset : 'standard',
       manualOverrides:
         s.manualOverrides && typeof s.manualOverrides === 'object'
@@ -196,21 +203,33 @@ export default function App() {
   const [saved] = useState(loadSavedSettings)
   const [selectedPreset, setSelectedPreset] = useState(saved?.preset ?? 'standard')
   const [selectedPrinter, setSelectedPrinter] = useState(saved?.printer ?? Object.keys(PRINTER_PRESETS)[0])
-  const [selectedFilament, setSelectedFilament] = useState(saved?.filament ?? 'PLA')
+  // One entry per filament slot; slot 0 is what the settings panel's scalar
+  // fields show. Falls back to the legacy single-slot setting.
+  const [selectedFilaments, setSelectedFilaments] = useState<string[]>(() =>
+    saved?.filaments?.length ? saved.filaments : [saved?.filament ?? 'PLA'],
+  )
+  const selectedFilament = selectedFilaments[0]
+  const setSelectedFilament = useCallback((name: string) => {
+    setSelectedFilaments((prev) => (prev.length <= 1 ? [name] : prev.map((s, i) => (i === 0 ? name : s))))
+  }, [])
   const [manualOverrides, setManualOverrides] = useState<Partial<OrcaConfig>>(saved?.manualOverrides ?? {})
   const [importedProfile, setImportedProfile] = useState<ImportedProfile | null>(saved?.importedProfile ?? null)
   const [importNotice, setImportNotice] = useState<string | null>(null)
   const [userPresets, setUserPresets] = useState<UserPreset[]>(loadUserPresets)
 
   const baseConfig = useMemo(
-    () => buildConfig(selectedPrinter, selectedFilament, selectedPreset),
-    [selectedPrinter, selectedFilament, selectedPreset],
+    () => buildConfig(selectedPrinter, selectedFilaments, selectedPreset),
+    [selectedPrinter, selectedFilaments, selectedPreset],
   )
   // preset < imported file < manual edits — see config-layers.ts for what
   // each layer is and why the manual one must outlive changes to the others.
   const config: OrcaConfig = useMemo(
-    () => resolveConfig({ preset: baseConfig, imported: importedProfile?.settings, manual: manualOverrides }),
-    [baseConfig, importedProfile, manualOverrides],
+    () =>
+      withFilamentSlots(
+        resolveConfig({ preset: baseConfig, imported: importedProfile?.settings, manual: manualOverrides }),
+        selectedFilaments,
+      ),
+    [baseConfig, importedProfile, manualOverrides, selectedFilaments],
   )
 
   useEffect(() => {
@@ -220,6 +239,7 @@ export default function App() {
         JSON.stringify({
           printer: selectedPrinter,
           filament: selectedFilament,
+          filaments: selectedFilaments,
           preset: selectedPreset,
           manualOverrides,
           ...(importedProfile ? { importedProfile } : {}),
@@ -359,14 +379,19 @@ export default function App() {
   const bedY = config.bed_size_y ?? DISPLAY_DEFAULTS.bed_size_y
   const bedShape = config.bed_shape ?? DISPLAY_DEFAULTS.bed_shape
 
-  // Labels for the queue's per-object filament picker. These are the material
-  // names mentioned by filament_type, which is display text — NOT a slot count
-  // (see filamentSlots' own doc and #155). More than one name means the config
-  // came from a multi-material import, which is the only situation where
-  // assigning objects to different filaments is meaningful today, so it is a
-  // usable trigger for showing the picker even though the real slot count
-  // lives elsewhere.
-  const filamentSlotLabels = useMemo(() => filamentSlots(config), [config])
+  // Labels for the queue's per-object filament picker, one per real slot.
+  //
+  // A multi-slot config carries filament_type as a per-filament array in the
+  // passthrough — that is the engine's own notion of "how many filaments",
+  // and it covers both slots defined in the settings panel and a
+  // multi-material project that arrived by import. The scalar filament_type
+  // is only ever slot 0, so reading it here would hide the picker exactly
+  // when it is needed; filamentSlots() stays as the single-slot fallback
+  // (it is display text, not a count — see its doc and #155).
+  const filamentSlotLabels = useMemo(() => {
+    const perSlot = config._passthrough?.filament_type
+    return Array.isArray(perSlot) && perSlot.length > 1 ? perSlot : filamentSlots(config)
+  }, [config])
 
   // None of these three touch manualOverrides: they swap a layer *below* the
   // user's own edits, which outrank them and stay put (config-layers.ts).
@@ -407,9 +432,13 @@ export default function App() {
     setImportedProfile((profile) => (profile?.type === 'machine' ? null : profile))
   }
 
-  const handleFilamentChange = (name: string) => {
-    if (name === selectedFilament && importedProfile?.type !== 'filament') return
-    setSelectedFilament(name)
+  const handleFilamentsChange = (names: string[]) => {
+    // Same "does this click change anything?" guard the printer/preset
+    // handlers use — re-picking the current material is also how you shed a
+    // filament import, so an unchanged list still has to drop that layer.
+    const unchanged = names.length === selectedFilaments.length && names.every((n, i) => n === selectedFilaments[i])
+    if (unchanged && importedProfile?.type !== 'filament') return
+    setSelectedFilaments(names.length > 0 ? names : ['PLA'])
     setImportedProfile((profile) => (profile?.type === 'filament' ? null : profile))
   }
 
@@ -602,8 +631,8 @@ export default function App() {
                   importedProfile?.type === 'machine' ? `Imported: ${importedProfile.name}` : undefined
                 }
                 onPrinterChange={handlePrinterChange}
-                selectedFilament={selectedFilament}
-                onFilamentChange={handleFilamentChange}
+                selectedFilaments={selectedFilaments}
+                onFilamentsChange={handleFilamentsChange}
                 userPresets={userPresets}
                 onSaveUserPreset={saveUserPreset}
                 onLoadUserPreset={loadUserPreset}

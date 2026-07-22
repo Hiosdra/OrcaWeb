@@ -8,6 +8,7 @@ import {
   describeExportCompatibility,
   exportOrcaProfileBundle,
   FILAMENT_PRESETS,
+  MAX_FILAMENT_SLOTS,
   PRESETS,
   PRINTER_PRESETS,
   parseOrcaProfileJson,
@@ -142,8 +143,9 @@ interface Props {
   selectedPrinter: string
   importedPrinterLabel?: string
   onPrinterChange: (name: string) => void
-  selectedFilament: string
-  onFilamentChange: (name: string) => void
+  /** One entry per filament slot; slot 0 drives the panel's scalar fields. */
+  selectedFilaments: string[]
+  onFilamentsChange: (names: string[]) => void
   userPresets: UserPreset[]
   onSaveUserPreset: (name: string) => void
   onLoadUserPreset: (id: string) => void
@@ -164,8 +166,8 @@ export function SettingsPanel({
   selectedPrinter,
   importedPrinterLabel,
   onPrinterChange,
-  selectedFilament,
-  onFilamentChange,
+  selectedFilaments,
+  onFilamentsChange,
   userPresets,
   onSaveUserPreset,
   onLoadUserPreset,
@@ -238,7 +240,7 @@ export function SettingsPanel({
   // bundling all three, matching the multi-file zip download already used
   // for G-code exports in SliceCards.tsx.
   function handleExportProfile() {
-    const name = `OrcaWeb — ${selectedPrinter} / ${selectedFilament} / ${selectedPreset}`
+    const name = `OrcaWeb — ${selectedPrinter} / ${selectedFilaments.join('+')} / ${selectedPreset}`
     const files = exportOrcaProfileBundle(config, name)
     const zipped = zipSync(Object.fromEntries(files.map((f) => [f.filename, strToU8(f.json)])))
     downloadBlob(new Blob([zipped], { type: 'application/zip' }), 'orcaweb-settings.zip')
@@ -460,12 +462,45 @@ export function SettingsPanel({
 
         {/* Filament */}
         <Section title="Filament">
-          <SelectField
-            label="Material"
-            value={selectedFilament}
-            options={Object.keys(FILAMENT_PRESETS)}
-            onChange={onFilamentChange}
-          />
+          {selectedFilaments.map((slot, i) => (
+            // Slots are a positional list — index IS the identity, and the
+            // engine indexes its per-filament arrays the same way.
+            // biome-ignore lint/suspicious/noArrayIndexKey: slot index is the identity
+            <div key={i} className="flex items-end gap-2 mb-2">
+              <SelectField
+                className="flex-1"
+                label={selectedFilaments.length > 1 ? `Slot ${i + 1}` : 'Material'}
+                value={slot}
+                options={Object.keys(FILAMENT_PRESETS)}
+                onChange={(v) => onFilamentsChange(selectedFilaments.map((s, j) => (j === i ? v : s)))}
+              />
+              {selectedFilaments.length > 1 && (
+                <button
+                  type="button"
+                  aria-label={`Remove filament slot ${i + 1}`}
+                  onClick={() => onFilamentsChange(selectedFilaments.filter((_, j) => j !== i))}
+                  className="mb-1 px-2 py-1.5 rounded-lg border border-slate-200 text-slate-400 hover:border-red-300 hover:text-red-500 transition-colors"
+                >
+                  <XIcon className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          ))}
+          {selectedFilaments.length < MAX_FILAMENT_SLOTS && (
+            <button
+              type="button"
+              onClick={() => onFilamentsChange([...selectedFilaments, selectedFilaments[selectedFilaments.length - 1]])}
+              data-testid="add-filament-slot"
+              className="text-xs font-semibold text-orca-600 hover:text-orca-700 transition-colors"
+            >
+              + Add filament slot
+            </button>
+          )}
+          {selectedFilaments.length > 1 && (
+            <p className="mt-2 text-xs text-slate-400">
+              Assign objects to slots on the Slice tab. Multiple slots make each plate slice a multi-material print.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-3 mt-3">
             <NumberField
               label="Nozzle temp"

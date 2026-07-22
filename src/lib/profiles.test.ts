@@ -5,7 +5,9 @@ import {
   exportOrcaProfileBundle,
   exportOrcaProfileJson,
   filamentSlots,
+  MAX_FILAMENT_SLOTS,
   parseOrcaProfileJson,
+  withFilamentSlots,
 } from './profiles'
 
 describe('filamentSlots', () => {
@@ -313,5 +315,63 @@ describe('parseOrcaProfileJson multi-value options (#140)', () => {
     // rejected outright because they crashed the engine.
     const pt = parseOrcaProfileJson(JSON.stringify(H2D))._passthrough
     expect(pt && Object.keys(pt).length).toBeGreaterThan(0)
+  })
+})
+
+describe('withFilamentSlots (#140)', () => {
+  const singleNozzle: OrcaConfig = {}
+  // A real dual-nozzle machine, as an imported profile leaves it in the config.
+  const dualNozzle: OrcaConfig = { _passthrough: { nozzle_diameter: ['0.4', '0.4'] } }
+
+  it('leaves a one-slot config completely untouched', () => {
+    expect(withFilamentSlots(singleNozzle, ['PLA'])).toBe(singleNozzle)
+  })
+
+  it('ignores slots naming a material that does not exist', () => {
+    expect(withFilamentSlots(singleNozzle, ['PLA', 'Unobtainium'])).toBe(singleNozzle)
+  })
+
+  it('gives the engine one colour per slot — that is what it counts filaments by', () => {
+    const pt = withFilamentSlots(singleNozzle, ['PLA', 'PETG', 'ABS'])._passthrough
+    expect(pt?.filament_colour).toHaveLength(3)
+    expect(new Set(pt?.filament_colour as string[]).size).toBe(3)
+    expect(pt?.filament_type).toEqual(['PLA', 'PETG', 'ABS'])
+  })
+
+  it('keeps every slot on the single nozzle of an AMS-style printer', () => {
+    const pt = withFilamentSlots(singleNozzle, ['PLA', 'PETG', 'ABS', 'TPU'])._passthrough
+    expect(pt?.filament_map).toEqual(['1', '1', '1', '1'])
+    // one nozzle x 4 filaments squared
+    expect(pt?.flush_volumes_matrix).toHaveLength(16)
+    expect(pt?.flush_multiplier).toEqual(['1'])
+  })
+
+  it('alternates slots across the nozzles of a real multi-nozzle machine', () => {
+    const pt = withFilamentSlots(dualNozzle, ['PLA', 'PETG'])._passthrough
+    // this is what produces genuine T0/T1 tool changes
+    expect(pt?.filament_map).toEqual(['1', '2'])
+    // two nozzles x 2 filaments squared, and one multiplier per nozzle —
+    // the engine rejects any other length outright
+    expect(pt?.flush_volumes_matrix).toHaveLength(8)
+    expect(pt?.flush_multiplier).toEqual(['1', '1'])
+  })
+
+  it('purges nothing into the same filament and something into a different one', () => {
+    const m = withFilamentSlots(singleNozzle, ['PLA', 'PETG'])._passthrough?.flush_volumes_matrix as string[]
+    expect(m[0]).toBe('0') // slot 1 -> slot 1
+    expect(Number(m[1])).toBeGreaterThan(0) // slot 1 -> slot 2
+    expect(m[3]).toBe('0') // slot 2 -> slot 2
+  })
+
+  it('preserves passthrough the profile already had', () => {
+    const withGcode: OrcaConfig = { _passthrough: { machine_start_gcode: 'G28' } }
+    const pt = withFilamentSlots(withGcode, ['PLA', 'PETG'])._passthrough
+    expect(pt?.machine_start_gcode).toBe('G28')
+    expect(pt?.filament_colour).toHaveLength(2)
+  })
+
+  it('offers a slot for every colour it can assign', () => {
+    const pt = withFilamentSlots(singleNozzle, Array(MAX_FILAMENT_SLOTS).fill('PLA'))._passthrough
+    expect(new Set(pt?.filament_colour as string[]).size).toBe(MAX_FILAMENT_SLOTS)
   })
 })
