@@ -79,7 +79,11 @@ describe('humanizeSliceError (#164)', () => {
   it('rewrites the desktop Preferences path into the in-app toggle', () => {
     const out = humanizeSliceError(engineMsg)
     expect(out).not.toMatch(/Preferences/)
-    expect(out).toContain('Allow mixed-temperature filaments')
+    // Assert the *rendered sentence*, not just substring containment — the
+    // lead-in "the option in" has to be consumed too, or the clauses collide
+    // ("enable the option the … toggle"). This is the exact text a user sees.
+    expect(out).toContain('you can enable the “Allow mixed-temperature filaments” toggle in the Filament settings.')
+    expect(out).not.toContain('the option')
     // The diagnosis itself (why it failed) is preserved.
     expect(out).toContain('nozzle temperatures are incompatible')
   })

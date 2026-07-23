@@ -612,8 +612,9 @@ export function SettingsPanel({
                   onChange={(v) => onChange({ remove_mixed_temp_restriction: v })}
                 />
                 <p className="mt-2 text-xs text-slate-400">
-                  Lets a single nozzle print filaments whose recommended temperature ranges don't overlap. Mismatched
-                  temperatures can cause clogging or damage — leave off unless you know the combination is safe.
+                  Lets a single nozzle print filaments whose recommended temperature ranges don't overlap. Only affects
+                  slots that share a nozzle. Mismatched temperatures can cause clogging or damage — leave off unless you
+                  know the combination is safe.
                 </p>
               </div>
             </>
