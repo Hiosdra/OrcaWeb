@@ -488,6 +488,13 @@ export function SettingsPanel({
             // whether that sheds the import); re-picking the imported label
             // itself is a no-op. See #161.
             const importedLabel = importedFilamentLabels?.[i]
+            // A filament import is shed the moment slot 0 is re-picked, so its
+            // labelled dropdown stays live. A print (3MF) import is not shed by a
+            // material pick — slotSource keeps rebuilding the slot from the
+            // import's declared material, so a pick would silently snap back and
+            // read as broken. Lock the labelled slots for that case and point at
+            // the Remove-import control instead. See #161.
+            const importLocked = Boolean(importedLabel) && activeImport?.type === 'print'
             return (
               // Slots are a positional list — index IS the identity, and the
               // engine indexes its per-filament arrays the same way.
@@ -497,6 +504,12 @@ export function SettingsPanel({
                   className="flex-1"
                   label={selectedFilaments.length > 1 ? `Slot ${i + 1}` : 'Material'}
                   value={importedLabel ?? slot}
+                  disabled={importLocked}
+                  title={
+                    importLocked
+                      ? `Material comes from the imported ${activeImport?.name ?? '3MF'} — remove the import (×) to pick a preset`
+                      : undefined
+                  }
                   options={
                     importedLabel ? [...Object.keys(FILAMENT_PRESETS), importedLabel] : Object.keys(FILAMENT_PRESETS)
                   }
@@ -518,6 +531,11 @@ export function SettingsPanel({
               </div>
             )
           })}
+          {activeImport?.type === 'print' && importedFilamentLabels?.some(Boolean) && (
+            <p data-testid="filament-import-locked-hint" className="mb-2 text-xs text-slate-400">
+              Material is set by the imported {activeImport.name}. Remove the import (× above) to choose a preset.
+            </p>
+          )}
           {selectedFilaments.length < MAX_FILAMENT_SLOTS && (
             <button
               type="button"
@@ -900,6 +918,8 @@ function SelectField({
   options,
   onChange,
   className,
+  disabled,
+  title,
 }: {
   label: string
   field?: ConfigField
@@ -907,6 +927,8 @@ function SelectField({
   options: string[]
   onChange: (v: string) => void
   className?: string
+  disabled?: boolean
+  title?: string
 }) {
   const id = useId()
   const { inputClass, revertButton } = useOverride(field)
@@ -922,9 +944,12 @@ function SelectField({
         id={id}
         data-testid={field && `setting-${field}`}
         value={value}
+        disabled={disabled}
+        title={title}
         onChange={(e) => onChange(e.target.value)}
         className={clsx(
-          'w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-orca-400',
+          'w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orca-400',
+          disabled ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-800',
           inputClass,
         )}
       >
