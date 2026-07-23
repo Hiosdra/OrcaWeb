@@ -111,6 +111,13 @@ struct OrcSession {
     double bed_cy = 128.0;
     // "rectangle" or "circle" — read from bed_shape in the config JSON.
     std::string bed_shape = "rectangle";
+    // Opt-in override of the engine's mixed-nozzle-temperature guard, matching
+    // desktop OrcaSlicer's "Remove mixed temperature restriction" preference.
+    // Off by default (the guard exists to prevent nozzle clogging / damage);
+    // when set, orc_slice / orc_slice_multi call
+    // Print::set_check_multi_filaments_compatibility(false) before validate().
+    // See issue #164.
+    bool remove_mixed_temp_restriction = false;
 };
 
 // Slicing blocks the worker's event loop. MAIN_THREAD_EM_ASM delivers this
@@ -542,6 +549,27 @@ int orc_init(void* session_ptr, const char* json_data, int json_len) {
                 : "rectangle";
         }
 
+        // Opt-in override of the mixed-nozzle-temperature guard (issue #164),
+        // matching desktop's "Remove mixed temperature restriction". Not a
+        // native engine config key — read here as a pseudo-key (like bed_size_*
+        // above) and applied via Print::set_check_multi_filaments_compatibility
+        // before validate() in the slice functions. Accepts a JSON bool, or the
+        // "1"/"0" / "true"/"false" strings the config layer serializes it as.
+        {
+            session->remove_mixed_temp_restriction = false;
+            if (j.contains("remove_mixed_temp_restriction")) {
+                const auto& v = j["remove_mixed_temp_restriction"];
+                if (v.is_boolean())
+                    session->remove_mixed_temp_restriction = v.get<bool>();
+                else if (v.is_number())
+                    session->remove_mixed_temp_restriction = v.get<double>() != 0.0;
+                else if (v.is_string()) {
+                    const std::string s = v.get<std::string>();
+                    session->remove_mixed_temp_restriction = (s == "1" || s == "true");
+                }
+            }
+        }
+
         // Start from OrcaSlicer's built-in defaults so all required fields exist.
         session->config = Slic3r::DynamicPrintConfig();
         session->config.apply(g_defaults);
@@ -638,12 +666,25 @@ int orc_slice(void* session_ptr, const void* stl_data, int stl_len,
         print.apply(model, session->config);
         zero_plate_origin(print);
         set_is_bbl_printer(print, session->config);
+        // When the user opts in (issue #164), turn off the engine's
+        // mixed-nozzle-temperature guard so a single-nozzle AMS plate with
+        // filaments whose recommended ranges don't overlap (e.g. PLA + PETG)
+        // slices instead of failing validation. The incompatible-temperature
+        // case then surfaces through validate()'s `warning` out-param (below)
+        // rather than as a fatal error.
+        if (session->remove_mixed_temp_restriction)
+            print.set_check_multi_filaments_compatibility(false);
         attach_progress_callback(print);
 
         {
             // Print::validate() returns a StringObjectException whose
-            // `string` member holds the error message ("" when valid).
-            Slic3r::StringObjectException err = print.validate();
+            // `string` member holds the error message ("" when valid). The
+            // `warning` out-param catches the non-fatal mixed-temperature
+            // notice raised once the guard above is disabled — without a
+            // non-null pointer to absorb it, validate() would still return
+            // that notice as a fatal error. It is intentionally ignored.
+            Slic3r::StringObjectException warning;
+            Slic3r::StringObjectException err = print.validate(&warning);
             if (!err.string.empty()) { record_error(*session, err.string); return -6; }
         }
 
@@ -932,10 +973,17 @@ int orc_slice_multi(
         print.apply(model, session->config);
         zero_plate_origin(print);
         set_is_bbl_printer(print, session->config);
+        // See orc_slice: opt-in override of the mixed-nozzle-temperature guard
+        // for single-nozzle multi-material plates (issue #164).
+        if (session->remove_mixed_temp_restriction)
+            print.set_check_multi_filaments_compatibility(false);
         attach_progress_callback(print);
 
         {
-            Slic3r::StringObjectException err = print.validate();
+            // `warning` absorbs the non-fatal mixed-temperature notice when the
+            // guard above is off; see orc_slice for why the pointer is required.
+            Slic3r::StringObjectException warning;
+            Slic3r::StringObjectException err = print.validate(&warning);
             if (!err.string.empty()) { record_error(*session, err.string); return -6; }
         }
 
