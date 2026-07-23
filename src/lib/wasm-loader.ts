@@ -192,6 +192,26 @@ export function cadToStl(module: OrcaModule, cadData: Uint8Array): Uint8Array {
   )
 }
 
+/**
+ * Rewrite engine slice-error messages that reference desktop-only UI into the
+ * OrcaWeb equivalent, so the failure tells the user how to actually proceed
+ * here.
+ *
+ * The mixed-nozzle-temperature guard (Print::check_multi_filament_valid,
+ * returned as -6) ends its message with "enable the option in Preferences /
+ * Control / Slicing / Remove mixed temperature restriction" — a desktop menu
+ * path that doesn't exist in this app. Point at the in-app toggle instead
+ * (issue #164). The match is deliberately loose on separators/casing so a
+ * whitespace or wording drift in a future engine version still gets rewritten;
+ * any other message is returned unchanged.
+ */
+export function humanizeSliceError(message: string): string {
+  return message.replace(
+    /(?:in\s+)?Preferences\s*\/\s*Control\s*\/\s*Slicing\s*\/\s*Remove mixed temperature restriction/i,
+    'the “Allow mixed-temperature filaments” toggle in the Filament settings',
+  )
+}
+
 export class OrcaSliceError extends Error {
   constructor(
     public readonly code: number,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { OrcaModule } from '../types'
-import { cadToStl, objToStl, read3mf, sliceMultiStl, sliceStl, write3mf } from './wasm-loader'
+import { cadToStl, humanizeSliceError, objToStl, read3mf, sliceMultiStl, sliceStl, write3mf } from './wasm-loader'
 
 function fakeModule(failAt: number) {
   let allocation = 0
@@ -65,5 +65,34 @@ describe('WASM allocation failures', () => {
     module.getValue = () => 32
     expect(() => sliceMultiStl(module, 1, new Uint8Array(), new Int32Array(), 0, '{}')).not.toThrow()
     expect(freed).toEqual([16, 16, 16])
+  })
+})
+
+describe('humanizeSliceError (#164)', () => {
+  // The engine's own -6 message for the mixed-temperature guard.
+  const engineMsg =
+    "Selected nozzle temperatures are incompatible. Each filament's nozzle temperature must fall " +
+    'within the recommended nozzle temperature range of the other filaments. Otherwise, nozzle ' +
+    'clogging or printer damage may occur. If you still want to print, you can enable the option in ' +
+    'Preferences / Control / Slicing / Remove mixed temperature restriction.'
+
+  it('rewrites the desktop Preferences path into the in-app toggle', () => {
+    const out = humanizeSliceError(engineMsg)
+    expect(out).not.toMatch(/Preferences/)
+    expect(out).toContain('Allow mixed-temperature filaments')
+    // The diagnosis itself (why it failed) is preserved.
+    expect(out).toContain('nozzle temperatures are incompatible')
+  })
+
+  it('tolerates whitespace/casing drift in the desktop menu path', () => {
+    const drifted = engineMsg.replace(
+      'Preferences / Control / Slicing / Remove mixed temperature restriction',
+      'preferences/control/slicing/Remove mixed temperature restriction',
+    )
+    expect(humanizeSliceError(drifted)).toContain('Allow mixed-temperature filaments')
+  })
+
+  it('leaves unrelated messages untouched', () => {
+    expect(humanizeSliceError('STL load failed')).toBe('STL load failed')
   })
 })

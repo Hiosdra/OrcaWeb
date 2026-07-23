@@ -70,6 +70,17 @@ export interface OrcaConfig {
    *  engine default 60). Only used while enable_prime_tower is on. */
   prime_tower_width?: number
 
+  /** Opt out of the engine's mixed-nozzle-temperature safety guard, matching
+   *  desktop OrcaSlicer's "Remove mixed temperature restriction" preference.
+   *  Only relevant for a single-nozzle plate whose filaments' recommended
+   *  nozzle-temperature ranges don't overlap (e.g. PLA + PETG sharing one
+   *  nozzle), which the engine otherwise rejects (-6). Not a native engine
+   *  option — the WASM bridge reads it as a pseudo-key and calls
+   *  Print::set_check_multi_filaments_compatibility(false). Default (undefined /
+   *  false) keeps the guard on; the guard exists to prevent nozzle clogging /
+   *  printer damage, so this is opt-in. See issue #164. */
+  remove_mixed_temp_restriction?: boolean
+
   // Machine
   printable_height?: number
 

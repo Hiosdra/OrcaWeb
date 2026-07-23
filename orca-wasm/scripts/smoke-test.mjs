@@ -308,6 +308,34 @@ const SMALL_BED_AMS_CONFIG = {
   before_layer_change_gcode: 'G92 E0',
 }
 
+// Single-nozzle AMS with two filaments whose recommended nozzle-temperature
+// ranges don't overlap (PLA ~190–230, PETG ~220–260) sharing one nozzle. The
+// engine's mixed-temperature guard (Print::check_multi_filament_valid) rejects
+// this with -6 by default; setting remove_mixed_temp_restriction makes the
+// bridge call Print::set_check_multi_filaments_compatibility(false) so it
+// slices anyway. Both the rejection and the override are asserted below (#164).
+const MIXED_TEMP_AMS_CONFIG = {
+  ...BASE_CONFIG,
+  filament_type: ['PLA', 'PETG'],
+  filament_colour: ['#F5A623', '#4A90D9'],
+  filament_diameter: ['1.75', '1.75'],
+  nozzle_temperature: ['220', '255'],
+  nozzle_temperature_initial_layer: ['220', '255'],
+  hot_plate_temp: ['55', '70'],
+  hot_plate_temp_initial_layer: ['55', '70'],
+  filament_start_gcode: ['', ''],
+  filament_end_gcode: ['', ''],
+  // both slots share nozzle 1 — this is what makes the guard fire (a genuine
+  // dual-nozzle machine is exempt: each nozzle holds its own temperature).
+  filament_map: ['1', '1'],
+  filament_map_mode: 'Manual',
+  flush_volumes_matrix: ['0', '280', '280', '0'],
+  flush_multiplier: ['1'],
+  enable_prime_tower: '1',
+  use_relative_e_distances: '1',
+  before_layer_change_gcode: 'G92 E0',
+}
+
 // Both nozzles actually used. A config that silently collapsed to a single
 // filament still slices and still passes assertSaneGcode() — it just prints
 // everything with one tool, which is precisely the failure mode #140's
@@ -450,6 +478,54 @@ async function main() {
       assertSaneGcode(gcode, towerLabel)
       assertToolChanges(gcode, towerLabel)
       assertWipeTowerOnBed(gcode, SMALL_BED_AMS_CONFIG.bed_size_x, SMALL_BED_AMS_CONFIG.bed_size_y, towerLabel)
+      console.log(`PASS (${gcode.length} bytes)`)
+    } catch (err) {
+      failures++
+      console.log('FAIL')
+      console.error(`  ${err.message}`)
+    }
+
+    // Mixed-temperature single-nozzle guard (#164): without the override the
+    // engine must reject the plate with -6; with it the same plate slices. Both
+    // halves matter — a bridge that ignored the flag would pass the second
+    // check by never enforcing the guard, so the first check pins that the
+    // guard is still on by default.
+    const guardLabel = `[${mesh.label}] plate: mixed-temp single nozzle is rejected without the override`
+    process.stdout.write(`[smoke-test] ${guardLabel} ... `)
+    try {
+      initSession(module, session, JSON.stringify(MIXED_TEMP_AMS_CONFIG))
+      let rejected = false
+      try {
+        sliceMultiOnce(module, session, [mesh.bytes, mesh.bytes], Int32Array.from([1, 2]))
+      } catch (err) {
+        rejected = true
+        if (!/\(-6\)/.test(err.message) || !/incompatible/i.test(err.message)) {
+          throw new Error(`expected an incompatible-temperature -6 rejection, got: ${err.message}`)
+        }
+        // The message must still carry the desktop menu path that
+        // humanizeSliceError() (src/lib/wasm-loader.ts) rewrites into the
+        // in-app toggle. If a future engine reworded this tail, the frontend
+        // rewrite would silently no-op — pin the anchor here so that drift is
+        // caught at the engine boundary rather than in production (#164).
+        if (!/Preferences\s*\/\s*Control\s*\/\s*Slicing\s*\/\s*Remove mixed temperature restriction/.test(err.message)) {
+          throw new Error(`rejection message lost the desktop menu-path anchor humanizeSliceError keys on: ${err.message}`)
+        }
+      }
+      if (!rejected) throw new Error('expected the slice to be rejected, but it succeeded')
+      console.log('PASS (rejected as expected)')
+    } catch (err) {
+      failures++
+      console.log('FAIL')
+      console.error(`  ${err.message}`)
+    }
+
+    const overrideLabel = `[${mesh.label}] plate: mixed-temp single nozzle slices with the override on`
+    process.stdout.write(`[smoke-test] ${overrideLabel} ... `)
+    try {
+      initSession(module, session, JSON.stringify({ ...MIXED_TEMP_AMS_CONFIG, remove_mixed_temp_restriction: '1' }))
+      const gcode = sliceMultiOnce(module, session, [mesh.bytes, mesh.bytes], Int32Array.from([1, 2]))
+      assertSaneGcode(gcode, overrideLabel)
+      assertToolChanges(gcode, overrideLabel)
       console.log(`PASS (${gcode.length} bytes)`)
     } catch (err) {
       failures++
