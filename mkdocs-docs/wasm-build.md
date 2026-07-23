@@ -84,8 +84,11 @@ Dependencies are cached between runs (GitHub Actions cache key based on dependen
     OCCT's CMake all assume a POSIX toolchain).
 
     ```bash
-    # Install build tools (Arch example — use your distro's equivalents)
-    pacman -S --needed git cmake ninja python m4 texinfo openssl ccache base-devel
+    # Install build tools (Arch example — use your distro's equivalents).
+    # clang is required in addition to base-devel's gcc: Boost's b2 engine
+    # bootstraps with `--with-toolset=clang`, so a clang++ must be on PATH
+    # (the actual WASM compile still goes through em++).
+    pacman -S --needed git cmake ninja python m4 texinfo openssl ccache clang base-devel
 
     # Install emsdk (pinned to match CI — see EMSDK_VERSION in build-wasm.yml)
     git clone https://github.com/emscripten-core/emsdk.git /opt/emsdk
@@ -105,9 +108,21 @@ Dependencies are cached between runs (GitHub Actions cache key based on dependen
     `ccache` (set up automatically, `~/.cache/ccache`) makes repeat C++
     compiles of unchanged files fast.
 
-    Artifacts land directly in `public/wasm/slicer.js` / `slicer.wasm`
-    (also copied to `wasm-artifacts/` to mirror the CI upload step) — no
-    manual copy needed.
+    CI builds both the `st` (single-threaded) and `mt` (multithreaded,
+    real oneTBB + pthreads — see [ADR-011](adr/adr-011-multithreaded-engine.md))
+    variants as separate matrix legs; this script builds one at a time,
+    defaulting to `st`:
+
+    ```bash
+    WASM_VARIANT=mt ./orca-wasm/scripts/build-local-wsl.sh
+    ```
+
+    Artifacts land directly in `public/wasm/slicer.js` / `slicer.wasm` (st)
+    or `slicer-mt.js` / `slicer-mt.wasm` (mt) (also copied to
+    `wasm-artifacts/` to mirror the CI upload step) — no manual copy needed.
+
+    If emsdk lives somewhere other than `/opt/emsdk`, point the script at it
+    with `EMSDK=/path/to/emsdk ./orca-wasm/scripts/build-local-wsl.sh`.
 
 ## Applying patches before build
 

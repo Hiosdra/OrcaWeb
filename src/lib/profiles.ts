@@ -66,6 +66,14 @@ export const DISPLAY_DEFAULTS = {
   skirt_loops: 1,
   skirt_distance: 2,
   raft_layers: 0,
+  // Prime-tower width matches the engine default (PrintConfig.cpp
+  // prime_tower_width). enable_prime_tower is deliberately absent: its engine
+  // default is off, but withFilamentSlots() flips the *effective* default to
+  // on for a multi-slot config, and the panel toggle only ever shows in that
+  // context — so it reads PRIME_TOWER_DEFAULT_ENABLED, not this table. Putting
+  // false here would make the toggle render off while the slice ran with a
+  // tower.
+  prime_tower_width: 60,
 } as const satisfies OrcaConfig
 
 /**
@@ -106,6 +114,16 @@ export const MAX_FILAMENT_SLOTS = SLOT_COLOURS.length
 
 /** Volume purged when switching between two different filaments, in mm³. */
 const FLUSH_VOLUME = 280
+
+/**
+ * Whether a multi-slot config gets a prime (wipe) tower unless something says
+ * otherwise. OrcaSlicer's own engine default is *off* (PrintConfig.cpp
+ * `enable_prime_tower`), which is the #163 bug: #160 configures the per-filament
+ * flush volumes but, with no tower, the purge those volumes describe has nowhere
+ * to go. A multi-material plate wants one, so default it on — the settings-panel
+ * toggle and any imported profile still override this (see primeTowerEnabled).
+ */
+export const PRIME_TOWER_DEFAULT_ENABLED = true
 
 /**
  * Filament diameter for a slot nothing declares one for, in mm — the engine's
@@ -280,6 +298,23 @@ function slotColour(i: number): string {
   return `#${channel(1 / 3)}${channel(0)}${channel(2 / 3)}`
 }
 
+/**
+ * Whether this (multi-slot) config should slice with a prime tower. An explicit
+ * choice wins over the default in priority order: the modeled top-level field
+ * (the settings-panel toggle) first, then whatever an imported profile declared
+ * in `_passthrough`, then PRIME_TOWER_DEFAULT_ENABLED. `_passthrough` normally
+ * only carries this when a profile was imported *before* enable_prime_tower was
+ * modeled — a fresh import routes it to the top-level field via ORCA_FIELD_MAP —
+ * but reading both keeps either shape honoured.
+ */
+function primeTowerEnabled(config: OrcaConfig): boolean {
+  if (config.enable_prime_tower !== undefined) return config.enable_prime_tower
+  const declared = config._passthrough?.enable_prime_tower
+  const raw = Array.isArray(declared) ? declared[0] : declared
+  if (raw !== undefined) return raw === '1' || raw.toLowerCase() === 'true' || raw.toLowerCase() === 'yes'
+  return PRIME_TOWER_DEFAULT_ENABLED
+}
+
 function multiFilamentPassthrough(config: OrcaConfig, ui: string[], n: number, nozzles: number): PassthroughConfig {
   const sources = Array.from({ length: n }, (_, i) => slotSource(config, ui, i))
 
@@ -389,7 +424,9 @@ function multiFilamentPassthrough(config: OrcaConfig, ui: string[], n: number, n
   // engine index one that does not exist.
   const namesANozzle = (v: string) => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= nozzles
 
-  return {
+  const primeTower = primeTowerEnabled(config)
+
+  const base: PassthroughConfig = {
     filament_type: per('filament_type', (p) => p.filament_type, DISPLAY_DEFAULTS.filament_type),
     filament_colour: declaredOr('filament_colour', slotColour),
     // No FILAMENT_PRESETS entry carries a diameter, so there is nothing a UI
@@ -416,6 +453,63 @@ function multiFilamentPassthrough(config: OrcaConfig, ui: string[], n: number, n
     filament_map_mode: 'Manual',
     flush_volumes_matrix: declaredIfSized('flush_volumes_matrix', nozzles * n * n) ?? matrix,
     flush_multiplier: declaredIfSized('flush_multiplier', nozzles) ?? Array.from({ length: nozzles }, () => '1'),
+    // The structure the flush volumes above flush *into*. Without it a
+    // multi-material plate defines a purge with nowhere to deposit it — the
+    // engine's own default for this is off (see primeTowerEnabled), so it has
+    // to be turned on here rather than left to the engine. #163.
+    // prime_tower_width and the other tower dimensions have working engine
+    // defaults and reach the slice through toEngineConfig() / an import's own
+    // _passthrough, so they need no default injected here.
+    //
+    // Placement (wipe_tower_x/y) is intentionally NOT set here. It depends on
+    // the tower's footprint, which is driven by the *loaded model's height* —
+    // data this pre-slice config layer does not have. OrcaSlicer's own
+    // placement (PartPlateList::set_default_wipe_tower_pos_for_plate) lives in
+    // the GUI and never runs headless, so the WASM bridge ports it instead
+    // (clamp_wipe_tower_to_bed in orca-wasm/bridge/slicer.cpp): it anchors at
+    // desktop's default position and clamps the tower onto the bed once the mesh
+    // is loaded. That is the right place for it, not a mesh-blind heuristic here.
+    enable_prime_tower: primeTower ? '1' : '0',
+  }
+
+  // A wipe tower is only valid under relative extruder addressing, and the
+  // reset that addressing needs, or Print::validate() hard-fails the slice —
+  // see withPrimeTowerAddressing()'s doc for the exact engine checks. Only
+  // when the tower is actually on: a multi-material plate without one keeps the
+  // absolute addressing the bridge defaults to, exactly as it sliced before.
+  return primeTower ? { ...base, ...withPrimeTowerAddressing(config) } : base
+}
+
+/**
+ * The two companion options a prime tower cannot slice without, both enforced
+ * by Print::validate() in the engine (orca/src/libslic3r/Print.cpp):
+ *
+ *  - `use_relative_e_distances = 1`. The wipe tower is *only* supported under
+ *    relative extruder addressing ("The Wipe Tower is currently only supported
+ *    with the relative extruder addressing"). The WASM bridge otherwise forces
+ *    this off, because relative addressing itself needs the reset below and the
+ *    headless build ships no printer G-code to supply it (see slicer.cpp).
+ *  - a per-layer `G92 E0`. On a Marlin-flavour, non-Bambu printer, relative
+ *    addressing without an exact-uppercase "G92 E0" in the layer-change G-code
+ *    fails validation ("Relative extruder addressing requires resetting the
+ *    extruder position at each layer"). Bambu printers are exempt, but adding
+ *    it is harmless there, so it goes in unconditionally rather than depending
+ *    on which printer the config turns out to be.
+ *
+ * The reset is appended to whatever `before_layer_change_gcode` the config
+ * already carries rather than replacing it — an imported printer profile's own
+ * layer G-code (a real "G92 E0" line among it included) must survive. The
+ * engine matches "^[ \t]*G92[ \t]*E0…$" per line, so a value already carrying
+ * that line is left untouched and any other content keeps the reset on its own
+ * appended line.
+ */
+function withPrimeTowerAddressing(config: OrcaConfig): PassthroughConfig {
+  const raw = config._passthrough?.before_layer_change_gcode
+  const existing = (Array.isArray(raw) ? raw[0] : raw) ?? ''
+  const hasReset = /^[ \t]*G92[ \t]*E(0(\.0*)?|\.0+)[ \t]*(;.*)?$/m.test(existing)
+  return {
+    use_relative_e_distances: '1',
+    before_layer_change_gcode: hasReset ? existing : existing ? `${existing}\nG92 E0` : 'G92 E0',
   }
 }
 
@@ -615,6 +709,29 @@ export function toEngineConfig(config: OrcaConfig): Record<string, unknown> {
 }
 
 /**
+ * Flatten an OrcaConfig into the single JSON object the WASM bridge consumes:
+ * toEngineConfig's modeled output with the `_passthrough` block (raw engine
+ * keys carried through unmodeled) merged over it, `_passthrough` winning on
+ * conflicts — the same shape every slice/export call sends today.
+ *
+ * `hasFilamentSlot` is true when the slice carries a per-object filament
+ * assignment, i.e. it goes through orc_slice_multi (which runs
+ * clamp_wipe_tower_to_bed). When false the caller uses plain orc_slice, which
+ * prints one object with the default filament and never clamps the tower — so
+ * the prime tower is forced off, otherwise a still-multi-filament config would
+ * build a tower at the raw, unclamped PrintConfig default, the exact off-bed
+ * placement #163 fixes reached through a different call site. Multi-object and
+ * 3MF-export paths pass true and keep whatever the profile declares.
+ */
+export function flattenSliceConfig(config: OrcaConfig, hasFilamentSlot: boolean): Record<string, unknown> {
+  const { _passthrough, ...rest } = config
+  const engineRest = toEngineConfig(rest)
+  const flat: Record<string, unknown> = _passthrough ? { ...engineRest, ..._passthrough } : engineRest
+  if (!hasFilamentSlot) flat.enable_prime_tower = '0'
+  return flat
+}
+
+/**
  * Why an exported bundle won't load in desktop OrcaSlicer, or null when
  * nothing is known to be wrong with it. For the export button to say so
  * instead of reporting a plain success.
@@ -727,6 +844,11 @@ const ORCA_FIELD_MAP: Record<
   fuzzy_skin: { key: 'fuzzy_skin', type: 'str', category: 'process' },
   fuzzy_skin_thickness: { key: 'fuzzy_skin_thickness', type: 'num', category: 'process' },
   fuzzy_skin_point_dist: { key: 'fuzzy_skin_point_dist', type: 'num', category: 'process' },
+  // Prime (wipe) tower — real OrcaSlicer process-preset options (#163). Mapped
+  // so an imported profile's tower setting drives the panel toggle/width field
+  // rather than landing in _passthrough unseen, and so both round-trip on export.
+  enable_prime_tower: { key: 'enable_prime_tower', type: 'bool', category: 'process' },
+  prime_tower_width: { key: 'prime_tower_width', type: 'num', category: 'process' },
   // filament fields
   filament_type: { key: 'filament_type', type: 'str', category: 'filament' },
   nozzle_temperature: { key: 'nozzle_temperature', type: 'num', category: 'filament' },
@@ -1003,6 +1125,34 @@ for (const [field, meta] of Object.entries(ORCA_FIELD_MAP)) {
 const PASSTHROUGH_EXPORT_DENYLIST = new Set(['compatible_printers', 'compatible_printers_condition'])
 
 /**
+ * Passthrough options that are per-*machine*, not per-filament, so they belong
+ * only in `machine.json`. Two kinds live here:
+ *   - multi-material routing/purge options (`filament_map`,
+ *     `flush_volumes_matrix`, …) that describe how the printer moves between
+ *     slots, not any one filament;
+ *   - `nozzle_diameter`, which on a multi-nozzle printer is a per-*nozzle*
+ *     vector (an H2D carries two) round-robin-mapped to slots by nozzleCount(),
+ *     NOT a per-slot vector. Without this exclusion filamentSlotConfig() would
+ *     slice that array by slot index into each `filament-N.json` — reading a
+ *     nozzle-indexed value as if it were filament-indexed, and putting a
+ *     machine-only key on a filament preset besides.
+ *
+ * `withFilamentSlots()` writes all of these into `_passthrough` alongside the
+ * per-slot filament vectors, and the passthrough dump would otherwise copy them
+ * into every category file. A single-material filament preset carrying a whole
+ * `flush_volumes_matrix` or a `nozzle_diameter` is meaningless (and out of
+ * category), so they are skipped for every category except `machine`, where the
+ * full, un-sliced value is written from the complete config.
+ */
+const MACHINE_MULTI_MATERIAL_OPTIONS = new Set([
+  'filament_map',
+  'filament_map_mode',
+  'flush_volumes_matrix',
+  'flush_multiplier',
+  'nozzle_diameter',
+])
+
+/**
  * Serialize the current in-app config back into a single OrcaSlicer-
  * compatible profile JSON of one type (`process`/`filament`/`machine`) — the
  * mirror of parseOrcaProfileJson(). Only fields belonging to `category` are
@@ -1078,6 +1228,7 @@ export function exportOrcaProfileJson(config: OrcaConfig, name: string, category
   if (_passthrough) {
     for (const [field, value] of Object.entries(_passthrough)) {
       if (PASSTHROUGH_EXPORT_DENYLIST.has(field)) continue
+      if (category !== 'machine' && MACHINE_MULTI_MATERIAL_OPTIONS.has(field)) continue
       out[field] = value
     }
   }
@@ -1133,20 +1284,87 @@ export function exportOrcaProfileJson(config: OrcaConfig, name: string, category
 }
 
 /**
+ * Collapse a multi-slot config down to the single filament in slot `i` — the
+ * shape one filament preset file has to have.
+ *
+ * `withFilamentSlots()` stores every per-filament option in `_passthrough` as
+ * an N-long vector (`filament_type: ["PLA","PETG"]`, `nozzle_temperature:
+ * ["220","255"]`, …). A filament *preset* is single-material, so slot `i`'s
+ * file wants each of those flattened to its own entry. We index every array in
+ * the passthrough to `[i]`, not a curated subset: an imported multi-material
+ * profile carries per-slot vectors this app never names (flow ratio, max
+ * volumetric speed, …), and every one that actually reaches a filament file is
+ * per-filament — leaving any as a full array would make each of the N files
+ * read that vector's *first* entry (OrcaSlicer takes element 0 of an over-long
+ * filament vector), so slots 2..N would silently inherit slot 0's value. A
+ * shorter vector (a G-code hook padded to one entry, say) falls back to element
+ * 0, which is that hook for all slots.
+ *
+ * The machine-only passthrough options are indexed here too but never reach a
+ * filament file (exportOrcaProfileJson skips MACHINE_MULTI_MATERIAL_OPTIONS
+ * outside `machine`), so the slice is inert for them. That exclusion is what
+ * keeps a per-*nozzle* vector like `nozzle_diameter` — which is NOT per-slot —
+ * from being mis-sliced into each preset; `machine.json` gets the full array
+ * from the complete config instead.
+ */
+function filamentSlotConfig(config: OrcaConfig, i: number): OrcaConfig {
+  const pt = config._passthrough
+  if (!pt) return config
+  const slot: PassthroughConfig = {}
+  for (const [key, value] of Object.entries(pt)) {
+    slot[key] = Array.isArray(value) ? (value[i] ?? value[0]) : value
+  }
+  return { ...config, _passthrough: slot }
+}
+
+/**
  * Export the current settings as a full OrcaSlicer preset bundle — one file
  * per real preset type (process/filament/machine), matching how desktop
  * OrcaSlicer itself stores and imports presets (see exportOrcaProfileJson's
  * own doc comment for why a single flat file can't represent this). Used by
- * SettingsPanel's "Export" button, which zips the three files together so
- * the whole bundle downloads as one action.
+ * SettingsPanel's "Export" button, which zips the files together so the whole
+ * bundle downloads as one action.
+ *
+ * A multi-slot config emits one filament file *per slot* — `filament-1.json` …
+ * `filament-N.json`, each a normal single-material preset built from that
+ * slot's entries in the `_passthrough` vectors (see filamentSlotConfig).
+ * OrcaSlicer counts materials by the number of separate filament preset files
+ * (`--load-filaments "filament-1.json;filament-2.json"`), not by array length
+ * inside one file: a single `filament.json` whose `filament_type` is an array
+ * resolves back to a *single* filament, so a config sliced here as N materials
+ * would not round-trip through the bundle (#162). A single-slot config keeps
+ * emitting exactly one `filament.json`, unchanged.
  */
 export function exportOrcaProfileBundle(
   config: OrcaConfig,
   baseName: string,
 ): { filename: string; category: FieldCategory; json: string }[] {
-  return (['process', 'filament', 'machine'] as const).map((category) => ({
-    filename: `${category}.json`,
-    category,
-    json: exportOrcaProfileJson(config, `${baseName} (${category})`, category),
-  }))
+  const slots = declaredSlotCount(config)
+  const filamentFiles =
+    slots < 2
+      ? [
+          {
+            filename: 'filament.json',
+            category: 'filament' as const,
+            json: exportOrcaProfileJson(config, `${baseName} (filament)`, 'filament'),
+          },
+        ]
+      : Array.from({ length: slots }, (_, i) => ({
+          filename: `filament-${i + 1}.json`,
+          category: 'filament' as const,
+          json: exportOrcaProfileJson(filamentSlotConfig(config, i), `${baseName} (filament ${i + 1})`, 'filament'),
+        }))
+  return [
+    {
+      filename: 'process.json',
+      category: 'process' as const,
+      json: exportOrcaProfileJson(config, `${baseName} (process)`, 'process'),
+    },
+    ...filamentFiles,
+    {
+      filename: 'machine.json',
+      category: 'machine' as const,
+      json: exportOrcaProfileJson(config, `${baseName} (machine)`, 'machine'),
+    },
+  ]
 }

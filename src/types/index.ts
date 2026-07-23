@@ -57,6 +57,19 @@ export interface OrcaConfig {
   fuzzy_skin_point_dist?: number
   enable_ironing?: boolean
 
+  // Multi-material — prime (wipe) tower
+  /** Deposit each tool change's purged filament on a prime (a.k.a. wipe) tower.
+   *  Only meaningful once a config has more than one filament slot; the flush
+   *  volumes #160 configures need somewhere to go, and OrcaSlicer's own engine
+   *  default for this is *off* (PrintConfig.cpp `enable_prime_tower`), so
+   *  withFilamentSlots() turns it on by default for a multi-slot config — see
+   *  issue #163. Undefined = use that per-context default; an explicit value
+   *  (the Settings-panel toggle, or an imported profile) always wins. */
+  enable_prime_tower?: boolean
+  /** Footprint width of the prime tower in mm (OrcaSlicer `prime_tower_width`,
+   *  engine default 60). Only used while enable_prime_tower is on. */
+  prime_tower_width?: number
+
   // Machine
   printable_height?: number
 

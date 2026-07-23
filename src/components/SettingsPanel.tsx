@@ -10,6 +10,7 @@ import {
   FILAMENT_PRESETS,
   MAX_FILAMENT_SLOTS,
   PRESETS,
+  PRIME_TOWER_DEFAULT_ENABLED,
   PRINTER_PRESETS,
   parseOrcaProfileJson,
 } from '../lib/profiles'
@@ -118,6 +119,8 @@ const OVERRIDE_LABELS: Partial<Record<ConfigField, string>> = {
   support_type: 'Support type',
   fuzzy_skin_thickness: 'Fuzzy skin thickness',
   fuzzy_skin_point_dist: 'Fuzzy skin point distance',
+  enable_prime_tower: 'Prime tower',
+  prime_tower_width: 'Prime tower width',
 }
 
 function overrideLabel(field: ConfigField): string {
@@ -218,6 +221,16 @@ export function SettingsPanel({
     }
   }
   if (config.enable_support) visibleOverrideFields.add('support_type')
+  // The prime tower defaults on for a multi-slot config (see #163); an explicit
+  // toggle still wins. Drives both the control's rendered state and which of its
+  // override markers count as visible.
+  const primeTowerOn = config.enable_prime_tower ?? PRIME_TOWER_DEFAULT_ENABLED
+  // The prime-tower controls only render for a multi-slot config (see the
+  // Filament section); the width sub-field only while the tower is on.
+  if (selectedFilaments.length > 1) {
+    visibleOverrideFields.add('enable_prime_tower')
+    if (primeTowerOn) visibleOverrideFields.add('prime_tower_width')
+  }
   const hiddenOverrideKeys = overriddenKeys.filter((field) => !visibleOverrideFields.has(field))
 
   function handleProfileFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -253,11 +266,11 @@ export function SettingsPanel({
     reader.readAsText(file)
   }
 
-  // Real OrcaSlicer presets are three separate files (print/filament/printer)
-  // — a single flat JSON can't represent all three at once (see
-  // exportOrcaProfileBundle's doc comment), so the export is a small zip
-  // bundling all three, matching the multi-file zip download already used
-  // for G-code exports in SliceCards.tsx.
+  // Real OrcaSlicer presets are separate files (print/filament/printer) — a
+  // single flat JSON can't represent them at once, and a multi-material config
+  // needs one filament file per slot (see exportOrcaProfileBundle's doc
+  // comment) — so the export is a small zip bundling them all, matching the
+  // multi-file zip download already used for G-code exports in SliceCards.tsx.
   function handleExportProfile() {
     const name = `OrcaWeb — ${selectedPrinter} / ${selectedFilaments.join('+')} / ${selectedPreset}`
     const files = exportOrcaProfileBundle(config, name)
@@ -418,7 +431,7 @@ export function SettingsPanel({
             <button
               type="button"
               onClick={handleExportProfile}
-              title="Save the current settings as an OrcaSlicer-compatible preset bundle (print/filament/printer .json, zipped)"
+              title="Save the current settings as an OrcaSlicer-compatible preset bundle (print/filament/printer .json, one filament file per slot, zipped)"
               data-testid="export-profile-button"
               className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl border-2 border-dashed border-slate-200 text-sm text-slate-500 hover:border-orca-400 hover:text-orca-600 hover:bg-orca-50 transition-all"
             >
@@ -547,9 +560,37 @@ export function SettingsPanel({
             </button>
           )}
           {selectedFilaments.length > 1 && (
-            <p className="mt-2 text-xs text-slate-400">
-              Assign objects to slots on the Slice tab. Multiple slots make each plate slice a multi-material print.
-            </p>
+            <>
+              <p className="mt-2 text-xs text-slate-400">
+                Assign objects to slots on the Slice tab. Multiple slots make each plate slice a multi-material print.
+              </p>
+              {/* The prime (wipe) tower is where each tool change deposits its
+                  purged filament — a multi-material plate needs one, so it is
+                  on by default (see PRIME_TOWER_DEFAULT_ENABLED / #163). Only
+                  shown here because it is meaningless with a single slot. */}
+              <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+                <ToggleField
+                  label="Prime tower"
+                  field="enable_prime_tower"
+                  value={primeTowerOn}
+                  onChange={(v) => onChange({ enable_prime_tower: v })}
+                />
+                {primeTowerOn && (
+                  <div className="mt-3">
+                    <NumberField
+                      label="Tower width"
+                      field="prime_tower_width"
+                      unit="mm"
+                      value={config.prime_tower_width ?? DISPLAY_DEFAULTS.prime_tower_width}
+                      min={10}
+                      max={100}
+                      step={5}
+                      onChange={(v) => onChange({ prime_tower_width: v })}
+                    />
+                  </div>
+                )}
+              </div>
+            </>
           )}
           <div className="grid grid-cols-2 gap-3 mt-3">
             <NumberField

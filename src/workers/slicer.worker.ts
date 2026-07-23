@@ -1,5 +1,5 @@
 import { logError, logInfo, logWarn } from '../lib/log'
-import { toEngineConfig } from '../lib/profiles'
+import { flattenSliceConfig } from '../lib/profiles'
 import { cadToStl, OrcaSliceError, objToStl, read3mf, sliceMultiStl, sliceStl, write3mf } from '../lib/wasm-loader'
 import type { OrcaConfig, OrcaModule, OrcaModuleFactory, WorkerInMessage, WorkerOutMessage } from '../types'
 
@@ -440,10 +440,9 @@ function doSliceMulti(stls: ArrayBuffer[], config: OrcaConfig, extruderIds?: num
       `${summarizeConfig(config)}${extruderIds ? `, extruders [${extruderIds.join(',')}]` : ''}`,
   )
   try {
-    const { _passthrough, ...rest } = config
-    const engineRest = toEngineConfig(rest)
-    const flat = _passthrough ? { ...engineRest, ..._passthrough } : engineRest
-    const configJson = JSON.stringify(flat)
+    // A plate goes through orc_slice_multi, which clamps the prime tower onto
+    // the bed, so keep whatever the config declares (hasFilamentSlot = true).
+    const configJson = JSON.stringify(flattenSliceConfig(config, true))
 
     // Concatenate all STL buffers and build int32 offset table
     const totalLen = stls.reduce((sum, s) => sum + s.byteLength, 0)
@@ -493,10 +492,9 @@ function doWrite3mf(stl: ArrayBuffer, config: OrcaConfig, requestId: string) {
   const startedAt = performance.now()
   logInfo(`[OrcaWASM] 3mf export start — STL ${(stl.byteLength / 1e6).toFixed(2)} MB`)
   try {
-    const { _passthrough, ...rest } = config
-    const engineRest = toEngineConfig(rest)
-    const flat = _passthrough ? { ...engineRest, ..._passthrough } : engineRest
-    const configJson = JSON.stringify(flat)
+    // 3MF export preserves the profile as-is for a desktop round-trip, tower
+    // flag included (hasFilamentSlot = true).
+    const configJson = JSON.stringify(flattenSliceConfig(config, true))
     const data = write3mf(orcaModule, session, new Uint8Array(stl), configJson)
     const dataBuffer = data.buffer as ArrayBuffer
     logInfo(
@@ -548,10 +546,17 @@ function doSlice(stl: ArrayBuffer, config: OrcaConfig, extruderId?: number) {
       `${extruderId ? `, filament slot ${extruderId}` : ''}`,
   )
   try {
-    const { _passthrough, ...rest } = config
-    const engineRest = toEngineConfig(rest)
-    const flat = _passthrough ? { ...engineRest, ..._passthrough } : engineRest
-    const configJson = JSON.stringify(flat)
+    // A no-slot single object goes through orc_slice below, which prints the
+    // whole mesh with the default filament — there is no tool change, so a
+    // prime tower would have nothing to purge. Worse, orc_slice never runs
+    // clamp_wipe_tower_to_bed (only orc_slice_multi does), so a tower the
+    // engine builds from a still-multi-filament config would land at the raw,
+    // unclamped PrintConfig default — the exact off-bed placement #163 fixes,
+    // reached through a different call site. flattenSliceConfig forces the
+    // tower off when there is no slot so a preview slice of an unassigned
+    // object can't reintroduce it; the assigned-slot / plate paths keep it and
+    // get clamped in the bridge.
+    const configJson = JSON.stringify(flattenSliceConfig(config, Boolean(extruderId)))
     // Only orc_slice_multi takes a per-object filament assignment, so an item
     // that has one goes through it as a single-object plate. orc_slice would
     // silently print it with the default filament instead — the picker would
