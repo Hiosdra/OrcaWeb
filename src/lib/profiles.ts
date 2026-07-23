@@ -917,21 +917,31 @@ for (const [field, meta] of Object.entries(ORCA_FIELD_MAP)) {
 const PASSTHROUGH_EXPORT_DENYLIST = new Set(['compatible_printers', 'compatible_printers_condition'])
 
 /**
- * Multi-material options that are per-*machine*, not per-filament — they
- * describe how the printer routes and purges between slots, not any one
- * filament. `withFilamentSlots()` writes them into `_passthrough` alongside the
+ * Passthrough options that are per-*machine*, not per-filament, so they belong
+ * only in `machine.json`. Two kinds live here:
+ *   - multi-material routing/purge options (`filament_map`,
+ *     `flush_volumes_matrix`, …) that describe how the printer moves between
+ *     slots, not any one filament;
+ *   - `nozzle_diameter`, which on a multi-nozzle printer is a per-*nozzle*
+ *     vector (an H2D carries two) round-robin-mapped to slots by nozzleCount(),
+ *     NOT a per-slot vector. Without this exclusion filamentSlotConfig() would
+ *     slice that array by slot index into each `filament-N.json` — reading a
+ *     nozzle-indexed value as if it were filament-indexed, and putting a
+ *     machine-only key on a filament preset besides.
+ *
+ * `withFilamentSlots()` writes all of these into `_passthrough` alongside the
  * per-slot filament vectors, and the passthrough dump would otherwise copy them
- * into every category file. They belong only in `machine.json`: a single-
- * material filament preset carrying a whole `flush_volumes_matrix` or a
- * `filament_map` array is meaningless there, and duplicating them across the N
- * filament files (see exportOrcaProfileBundle) would just be noise OrcaSlicer
- * ignores as out-of-category. Skipped for every category except `machine`.
+ * into every category file. A single-material filament preset carrying a whole
+ * `flush_volumes_matrix` or a `nozzle_diameter` is meaningless (and out of
+ * category), so they are skipped for every category except `machine`, where the
+ * full, un-sliced value is written from the complete config.
  */
 const MACHINE_MULTI_MATERIAL_OPTIONS = new Set([
   'filament_map',
   'filament_map_mode',
   'flush_volumes_matrix',
   'flush_multiplier',
+  'nozzle_diameter',
 ])
 
 /**
@@ -1075,16 +1085,19 @@ export function exportOrcaProfileJson(config: OrcaConfig, name: string, category
  * file wants each of those flattened to its own entry. We index every array in
  * the passthrough to `[i]`, not a curated subset: an imported multi-material
  * profile carries per-slot vectors this app never names (flow ratio, max
- * volumetric speed, …), and every one of them is per-filament — leaving any as
- * a full array would make each of the N files read that vector's *first* entry
- * (OrcaSlicer takes element 0 of an over-long filament vector), so slots 2..N
- * would silently inherit slot 0's value. A shorter vector (a G-code hook padded
- * to one entry, say) falls back to element 0, which is that hook for all slots.
+ * volumetric speed, …), and every one that actually reaches a filament file is
+ * per-filament — leaving any as a full array would make each of the N files
+ * read that vector's *first* entry (OrcaSlicer takes element 0 of an over-long
+ * filament vector), so slots 2..N would silently inherit slot 0's value. A
+ * shorter vector (a G-code hook padded to one entry, say) falls back to element
+ * 0, which is that hook for all slots.
  *
- * The machine-level multi-material options are left untouched here; they never
- * reach a filament file anyway (exportOrcaProfileJson skips
- * MACHINE_MULTI_MATERIAL_OPTIONS outside `machine`), and flattening them would
- * be meaningless for a single-material preset.
+ * The machine-only passthrough options are indexed here too but never reach a
+ * filament file (exportOrcaProfileJson skips MACHINE_MULTI_MATERIAL_OPTIONS
+ * outside `machine`), so the slice is inert for them. That exclusion is what
+ * keeps a per-*nozzle* vector like `nozzle_diameter` — which is NOT per-slot —
+ * from being mis-sliced into each preset; `machine.json` gets the full array
+ * from the complete config instead.
  */
 function filamentSlotConfig(config: OrcaConfig, i: number): OrcaConfig {
   const pt = config._passthrough

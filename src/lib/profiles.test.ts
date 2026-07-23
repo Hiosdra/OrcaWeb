@@ -221,6 +221,26 @@ describe('exportOrcaProfileBundle multi-material (#162)', () => {
     expect(filaments[1].filament_max_volumetric_speed).toBe('12')
   })
 
+  it('keeps a per-nozzle nozzle_diameter in machine.json only, un-sliced (review #165)', () => {
+    // A multi-nozzle import carries nozzle_diameter as a per-NOZZLE vector (an
+    // H2D has two), round-robin-mapped to slots — it is NOT a per-slot vector.
+    // It must not be sliced by slot index into each filament file; it belongs
+    // to machine.json as the full array.
+    const imported: OrcaConfig = {
+      ...config,
+      _passthrough: { ...config._passthrough, nozzle_diameter: ['0.4', '0.4'] },
+    }
+    const byCategory = (cat: string) =>
+      exportOrcaProfileBundle(imported, 'test')
+        .filter((f) => f.category === cat)
+        .map((f) => JSON.parse(f.json) as Record<string, unknown>)
+
+    for (const file of [...byCategory('filament'), ...byCategory('process')]) {
+      expect(file.nozzle_diameter).toBeUndefined()
+    }
+    expect(byCategory('machine')[0].nozzle_diameter).toEqual(['0.4', '0.4'])
+  })
+
   it('names the compatible printer on every per-slot filament file', () => {
     const filaments = exportOrcaProfileBundle(config, 'test')
       .filter((f) => f.category === 'filament')
