@@ -30,6 +30,30 @@ jobs:
       - name: Build
         run: npm run build
 
+  wsl-build-script:
+    # orca-wasm/scripts/build-local-wsl.sh is generated from build-wasm.yml by
+    # scripts/gen-wsl-build-script.mjs. Editing the workflow without rerunning
+    # the generator leaves the committed script stale — the exact failure #168
+    # fixed. Regenerate here and fail if it drifts, and unit-test the parser so
+    # its edge cases don't regress silently. No npm deps: the generator is plain
+    # Node fs and the tests use the built-in node:test runner.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Parser unit tests
+        run: node --test scripts/*.test.mjs
+
+      - name: Regenerate the local WSL build script
+        run: node scripts/gen-wsl-build-script.mjs
+
+      - name: Fail if the committed script is out of date
+        run: git diff --exit-code -- orca-wasm/scripts/build-local-wsl.sh
+
   docs:
     runs-on: ubuntu-latest
     steps:
