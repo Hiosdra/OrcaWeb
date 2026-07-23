@@ -63,6 +63,7 @@
 #include "libslic3r/Format/STEP.hpp"
 #include "libslic3r/Format/bbs_3mf.hpp"
 #include "libslic3r/GCode.hpp"
+#include "libslic3r/GCode/WipeTower.hpp"
 #include "libslic3r/Exception.hpp"
 #include "libslic3r/Semver.hpp"
 
@@ -364,6 +365,110 @@ static void zero_plate_origin(Slic3r::Print& print) {
 // printer_model the JS layer already sends.
 static void set_is_bbl_printer(Slic3r::Print& print, const Slic3r::DynamicPrintConfig& config) {
     print.is_BBL_printer() = boost::starts_with(config.opt_string("printer_model"), "Bambu Lab");
+}
+
+// Place the prime (wipe) tower the way desktop OrcaSlicer does. Its
+// PartPlateList::set_default_wipe_tower_pos_for_plate — default anchor, size
+// estimate, then clamp into the plate — lives in the GUI and never runs
+// headless, so without this a slice uses the raw PrintConfig position (15, 220)
+// unchanged: fine on a ~256 mm bed, but off the back edge of a smaller one (a
+// 210 mm Prusa MK4) and, on a larger one (a 350 mm Voron), a different spot
+// than desktop picks. This ports that routine: anchor at the desktop default,
+// estimate the footprint from the loaded model's height — which the JS config
+// layer cannot, running before any mesh exists and with a height-driven depth —
+// and clamp. The result matches what desktop computes from the same config.
+// The multi-material config that turns the tower on is built in
+// withPrimeTowerAddressing()/multiFilamentPassthrough() in src/lib/profiles.ts
+// (#163); this is the placement half that has to live where the mesh does.
+static void clamp_wipe_tower_to_bed(Slic3r::DynamicPrintConfig& config,
+                                    const Slic3r::Model& model,
+                                    double bed_x, double bed_y) {
+    const auto* enable = config.option<Slic3r::ConfigOptionBool>("enable_prime_tower");
+    if (!enable || !enable->value) return;
+
+    // With fewer than two filaments there is no tool change to purge, so the
+    // engine builds no tower and there is nothing to place.
+    const auto* colours = config.option<Slic3r::ConfigOptionStrings>("filament_colour");
+    const int filaments = colours ? static_cast<int>(colours->values.size()) : 1;
+    if (filaments < 2) return;
+
+    const auto* nozzles = config.option<Slic3r::ConfigOptionFloats>("nozzle_diameter");
+    const int nozzle_count = (nozzles && !nozzles->values.empty())
+        ? static_cast<int>(nozzles->values.size()) : 1;
+
+    // Tallest object drives the tower's height-based minimum depth.
+    double max_height = 0.0;
+    for (const auto* obj : model.objects)
+        max_height = std::max(max_height, obj->bounding_box_exact().size().z());
+
+    auto opt_float = [&](const char* key, double dflt) -> double {
+        const auto* o = config.option(key);
+        return o ? o->getFloat() : dflt;
+    };
+
+    // Replicate PartPlate::estimate_wipe_tower_size for the default rib wall:
+    // the footprint is a square of side `depth`, and prime_tower_width does not
+    // enter it. One term is dropped: desktop adds a per-change filament-change
+    // volume for a 2-nozzle machine, which would slightly enlarge `depth` there.
+    // Omitting it only matters if a dual-nozzle machine slices on a bed shallow
+    // enough to clamp, and those ship deep beds (an H2D is 320 mm) where the
+    // tower never reaches the edge — so the simpler estimate is safe in practice.
+    const double layer_height  = opt_float("layer_height", 0.2);
+    const double wipe_volume   = opt_float("prime_volume", 45.0);
+    const double extra_spacing = opt_float("prime_tower_infill_gap", 150.0) / 100.0;
+    double       rib_width     = opt_float("wipe_tower_rib_width", 8.0);
+    const double extra_rib_len = opt_float("wipe_tower_extra_rib_length", 0.0);
+
+    const double volume = wipe_volume * (nozzle_count == 2 ? filaments : (filaments - 1));
+    double depth = std::sqrt(volume / layer_height * extra_spacing);
+    const double min_depth = Slic3r::WipeTower::get_limit_depth_by_height(static_cast<float>(max_height));
+    const double volume_depth = depth;
+    depth = std::max(min_depth, depth);
+    rib_width = std::min(rib_width, depth / 2.0);
+    // `max(depth + extra_rib_len, volume_depth)` always resolves to the first
+    // operand here — `depth` is already >= volume_depth from the max() above and
+    // extra_rib_len is non-negative. It is kept verbatim (rather than reduced to
+    // `depth + extra_rib_len`) to mirror desktop's estimate_wipe_tower_size line
+    // for line, so a future re-sync against upstream diffs cleanly.
+    depth = rib_width / std::sqrt(2.0) + std::max(depth + extra_rib_len, volume_depth);
+    const double size = depth; // rib tower footprint is square
+
+    double brim = opt_float("prime_tower_brim_width", 3.0);
+    if (brim < 0) brim = Slic3r::WipeTower::get_auto_brim_by_height(static_cast<float>(max_height));
+    const double margin = WIPE_TOWER_MARGIN + brim;
+
+    // Desktop OrcaSlicer's default tower position (set_default_wipe_tower_pos_
+    // for_plate): a top-left-ish anchor, or the i3/bed-slinger variant. The raw
+    // PrintConfig default (15, 220) is deliberately NOT used as the start — it
+    // is only an unplaced fallback, and since the tower is new here (#163) there
+    // is no prior placement to preserve. Our profiles never carry
+    // printer_structure (it stays psUndefine), so this resolves to the CoreXY
+    // anchor for every printer — exactly what desktop computes from the same
+    // config, so a bed the tower already fits (a 350 mm Voron) lands it in the
+    // same spot desktop would rather than a different-but-valid corner.
+    double x = 165.0; // WIPE_TOWER_DEFAULT_X_POS
+    double y = 250.0; // WIPE_TOWER_DEFAULT_Y_POS
+    const auto* structure = config.option<Slic3r::ConfigOptionEnum<Slic3r::PrinterStructure>>("printer_structure");
+    if (structure && structure->value == Slic3r::psI3) {
+        x = 0.0;   // I3_WIPE_TOWER_DEFAULT_X_POS
+        y = 250.0; // I3_WIPE_TOWER_DEFAULT_Y_POS
+    }
+
+    // Clamp into the plate, in plate-local coordinates (the bridge zeroes the
+    // plate origin, so the bed is [0,bed_x] x [0,bed_y]). Same if/else-if shape
+    // as set_default_wipe_tower_pos_for_plate: prefer clamping down from the far
+    // edge, only lift off the near edge when it wasn't already past the far one.
+    if (x + margin + size > bed_x) x = bed_x - size - margin;
+    else if (x < margin)           x = margin;
+    if (y + margin + size > bed_y) y = bed_y - size - margin;
+    else if (y < margin)           y = margin;
+    // A tower wider than the bed itself can't be satisfied; keep the origin on
+    // the bed rather than hand the engine a negative coordinate.
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+
+    config.option<Slic3r::ConfigOptionFloats>("wipe_tower_x", true)->values = { x };
+    config.option<Slic3r::ConfigOptionFloats>("wipe_tower_y", true)->values = { y };
 }
 
 // ── public API ────────────────────────────────────────────────────────────────
@@ -819,6 +924,10 @@ int orc_slice_multi(
             });
 
         // ── configure & slice ─────────────────────────────────────────────
+        // Fit the prime tower onto the bed before applying the config — the
+        // model is loaded and arranged now, so its height is known (see
+        // clamp_wipe_tower_to_bed). bed_cx/cy are half-extents.
+        clamp_wipe_tower_to_bed(session->config, model, 2.0 * session->bed_cx, 2.0 * session->bed_cy);
         Slic3r::Print print;
         print.apply(model, session->config);
         zero_plate_origin(print);

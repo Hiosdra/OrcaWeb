@@ -268,6 +268,44 @@ const DUAL_NOZZLE_CONFIG = {
   // 2 nozzles x 2 filaments squared; 0 to purge a filament into itself
   flush_volumes_matrix: ['0', '280', '280', '0', '0', '280', '280', '0'],
   flush_multiplier: ['1', '1'],
+  // The prime tower the flush volumes above flush into. The engine default is
+  // off, so a multi-material plate has to turn it on explicitly (#163) — this
+  // mirrors what withFilamentSlots() now emits, including its two companions:
+  // the wipe tower validates only under relative extruder addressing, and that
+  // addressing needs a per-layer "G92 E0" reset on a Marlin, non-Bambu printer
+  // (this config is one — no "Bambu Lab" printer_model) or Print::validate()
+  // hard-fails the slice. See withPrimeTowerAddressing() in src/lib/profiles.ts.
+  enable_prime_tower: '1',
+  use_relative_e_distances: '1',
+  before_layer_change_gcode: 'G92 E0',
+}
+
+// Single-nozzle AMS with two slots sharing the one nozzle, on a shallow 210 mm
+// bed (a Prusa MK4). Both slots are the same material so the engine's
+// mixed-nozzle-temperature guard (which fires only when filaments share a
+// nozzle) doesn't reject the slice — this scenario is about placement, not
+// temperature. The prime tower's engine-default position (15, 220) is off the
+// back of a 210 mm bed; clamp_wipe_tower_to_bed in bridge/slicer.cpp is what
+// keeps it on. See #163.
+const SMALL_BED_AMS_CONFIG = {
+  ...BASE_CONFIG,
+  bed_size_y: 210,
+  filament_type: ['PLA', 'PLA'],
+  filament_colour: ['#F5A623', '#4A90D9'],
+  filament_diameter: ['1.75', '1.75'],
+  nozzle_temperature: ['220', '220'],
+  nozzle_temperature_initial_layer: ['220', '220'],
+  hot_plate_temp: ['55', '55'],
+  hot_plate_temp_initial_layer: ['55', '55'],
+  filament_start_gcode: ['', ''],
+  filament_end_gcode: ['', ''],
+  filament_map: ['1', '1'],
+  filament_map_mode: 'Manual',
+  flush_volumes_matrix: ['0', '280', '280', '0'],
+  flush_multiplier: ['1'],
+  enable_prime_tower: '1',
+  use_relative_e_distances: '1',
+  before_layer_change_gcode: 'G92 E0',
 }
 
 // Both nozzles actually used. A config that silently collapsed to a single
@@ -282,6 +320,19 @@ function assertToolChanges(gcode, label) {
   }
   if (!tools.has('0') || !tools.has('1')) {
     throw new Error(`${label}: expected both T0 and T1 tool changes, saw [${[...tools].join(',') || 'none'}]`)
+  }
+}
+
+// The prime tower has to sit on the bed. OrcaSlicer's fit-and-clamp is GUI-only,
+// so the WASM bridge ports it (clamp_wipe_tower_to_bed in bridge/slicer.cpp);
+// without that a small bed keeps the engine default (15, 220) and the tower
+// hangs off the back edge. Reads the position the bridge wrote from the config
+// block the engine appends to the G-code.
+function assertWipeTowerOnBed(gcode, bedX, bedY, label) {
+  const x = parseFloat(gcode.match(/;\s*wipe_tower_x\s*=\s*([\-0-9.]+)/)?.[1])
+  const y = parseFloat(gcode.match(/;\s*wipe_tower_y\s*=\s*([\-0-9.]+)/)?.[1])
+  if (!(x >= 0 && x < bedX) || !(y >= 0 && y < bedY)) {
+    throw new Error(`${label}: prime tower origin (${x}, ${y}) is off a ${bedX}x${bedY} bed`)
   }
 }
 
@@ -380,6 +431,25 @@ async function main() {
       assertSaneGcode(gcode, dualLabel)
       assertRestsOnBed(gcode, dualLabel, BASE_CONFIG.initial_layer_height)
       assertToolChanges(gcode, dualLabel)
+      console.log(`PASS (${gcode.length} bytes)`)
+    } catch (err) {
+      failures++
+      console.log('FAIL')
+      console.error(`  ${err.message}`)
+    }
+
+    // Prime tower placement: a multi-material plate on a shallow bed whose
+    // engine-default tower position would hang off the back edge. Guards the
+    // bridge's clamp (#163) — without it the tower origin sits at y=220 on a
+    // 210 mm bed.
+    const towerLabel = `[${mesh.label}] plate: prime tower clamped onto a shallow bed`
+    process.stdout.write(`[smoke-test] ${towerLabel} ... `)
+    try {
+      initSession(module, session, JSON.stringify(SMALL_BED_AMS_CONFIG))
+      const gcode = sliceMultiOnce(module, session, [mesh.bytes, mesh.bytes], Int32Array.from([1, 2]))
+      assertSaneGcode(gcode, towerLabel)
+      assertToolChanges(gcode, towerLabel)
+      assertWipeTowerOnBed(gcode, SMALL_BED_AMS_CONFIG.bed_size_x, SMALL_BED_AMS_CONFIG.bed_size_y, towerLabel)
       console.log(`PASS (${gcode.length} bytes)`)
     } catch (err) {
       failures++
