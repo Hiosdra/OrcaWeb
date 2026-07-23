@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { OrcaConfig, PassthroughConfig } from '../types'
 import {
+  buildConfig,
   describeExportCompatibility,
   exportOrcaProfileBundle,
   exportOrcaProfileJson,
@@ -143,6 +144,90 @@ describe('exportOrcaProfileBundle', () => {
     const merged: Partial<OrcaConfig> = {}
     for (const f of bundle) Object.assign(merged, parseOrcaProfileJson(f.json))
     expect(merged).toMatchObject(config)
+  })
+
+  it('keeps a single filament.json for a single-slot config', () => {
+    const bundle = exportOrcaProfileBundle(config, 'test')
+    const filaments = bundle.filter((f) => f.category === 'filament')
+    expect(filaments.map((f) => f.filename)).toEqual(['filament.json'])
+  })
+})
+
+describe('exportOrcaProfileBundle multi-material (#162)', () => {
+  // The reproduction from the issue: a 2-slot PLA/PETG config. Before the fix
+  // this produced ONE filament.json whose filament_type/colour/temperature were
+  // per-slot arrays, which desktop OrcaSlicer reads back as a single filament.
+  const config = withFilamentSlots(buildConfig('Bambu Lab P1S', ['PLA', 'PETG'], 'standard'), ['PLA', 'PETG'])
+
+  it('emits one single-material filament file per slot', () => {
+    const bundle = exportOrcaProfileBundle(config, 'test')
+    const filaments = bundle
+      .filter((f) => f.category === 'filament')
+      .map((f) => ({ filename: f.filename, json: JSON.parse(f.json) as Record<string, unknown> }))
+
+    expect(filaments.map((f) => f.filename)).toEqual(['filament-1.json', 'filament-2.json'])
+    // Each file names its own single material — a scalar, not the array that
+    // collapses back to one filament on load.
+    expect(filaments[0].json.filament_type).toBe('PLA')
+    expect(filaments[1].json.filament_type).toBe('PETG')
+    for (const f of filaments) {
+      expect(Array.isArray(f.json.filament_type)).toBe(false)
+      expect(Array.isArray(f.json.filament_colour)).toBe(false)
+      expect(Array.isArray(f.json.nozzle_temperature)).toBe(false)
+    }
+    // Slots differ, so the flattened per-slot temperatures must too.
+    expect(filaments[0].json.nozzle_temperature).not.toBe(filaments[1].json.nozzle_temperature)
+    expect(filaments[0].json.filament_colour).not.toBe(filaments[1].json.filament_colour)
+  })
+
+  it('keeps the machine-level multi-material options in machine.json only', () => {
+    const bundle = exportOrcaProfileBundle(config, 'test')
+    const byCategory = (cat: string) =>
+      bundle.filter((f) => f.category === cat).map((f) => JSON.parse(f.json) as Record<string, unknown>)
+
+    const machine = byCategory('machine')[0]
+    expect(machine.filament_map).toBeDefined()
+    expect(machine.flush_volumes_matrix).toBeDefined()
+    expect(machine.flush_multiplier).toBeDefined()
+    expect(machine.filament_map_mode).toBe('Manual')
+
+    for (const file of [...byCategory('filament'), ...byCategory('process')]) {
+      expect(file.filament_map).toBeUndefined()
+      expect(file.flush_volumes_matrix).toBeUndefined()
+      expect(file.flush_multiplier).toBeUndefined()
+      expect(file.filament_map_mode).toBeUndefined()
+    }
+  })
+
+  it('indexes every per-slot vector — including ones this app never names — to its own slot', () => {
+    // An imported multi-material profile carries per-filament vectors with no UI
+    // here (flow ratio, max volumetric speed). Each filament file must take its
+    // own slot's entry, not all read slot 0's.
+    const imported: OrcaConfig = {
+      ...config,
+      _passthrough: {
+        ...config._passthrough,
+        filament_flow_ratio: ['0.98', '0.95'],
+        filament_max_volumetric_speed: ['21', '12'],
+      },
+    }
+    const filaments = exportOrcaProfileBundle(imported, 'test')
+      .filter((f) => f.category === 'filament')
+      .map((f) => JSON.parse(f.json) as Record<string, unknown>)
+
+    expect(filaments[0].filament_flow_ratio).toBe('0.98')
+    expect(filaments[1].filament_flow_ratio).toBe('0.95')
+    expect(filaments[0].filament_max_volumetric_speed).toBe('21')
+    expect(filaments[1].filament_max_volumetric_speed).toBe('12')
+  })
+
+  it('names the compatible printer on every per-slot filament file', () => {
+    const filaments = exportOrcaProfileBundle(config, 'test')
+      .filter((f) => f.category === 'filament')
+      .map((f) => JSON.parse(f.json) as Record<string, unknown>)
+    for (const f of filaments) {
+      expect(f.compatible_printers).toEqual(['Bambu Lab P1S 0.4 nozzle'])
+    }
   })
 })
 
