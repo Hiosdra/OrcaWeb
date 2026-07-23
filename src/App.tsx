@@ -15,6 +15,7 @@ import {
   DISPLAY_DEFAULTS,
   FILAMENT_PRESETS,
   filamentSlotLabels,
+  importedFilamentSlotLabels,
   PRESETS,
   PRINTER_PRESETS,
   withFilamentSlots,
@@ -163,6 +164,20 @@ function findPresetKeyByField(
   value: unknown,
 ): string | undefined {
   return Object.keys(presets).find((key) => presets[key][field] === value)
+}
+
+// Slot 0's filament type from an imported patch. A multi-material profile's
+// `filament_type` is collapsed by ORCA_FIELD_MAP to the joined "PLA,PETG",
+// which matches no FILAMENT_PRESETS key — so reach past it to the unflattened
+// array in `_passthrough` and take its first entry, the same way a
+// single-material import already matches on its lone scalar. Without this the
+// Material dropdown never re-points to slot 0's material and the panel keeps
+// describing whatever was selected before the import (#161).
+function firstFilamentType(patch: Partial<OrcaConfig>): string | undefined {
+  const declared = patch._passthrough?.filament_type
+  if (Array.isArray(declared)) return declared[0]
+  if (typeof declared === 'string') return declared
+  return typeof patch.filament_type === 'string' ? patch.filament_type : undefined
 }
 
 // Returns an array with the same File objects, in the same order, as `next`
@@ -362,8 +377,9 @@ export default function App() {
         const matched = findPresetKeyByField(PRINTER_PRESETS, 'printer_model', patch.printer_model)
         if (matched) setSelectedPrinter(matched)
       }
-      if (patch.filament_type !== undefined) {
-        const matched = findPresetKeyByField(FILAMENT_PRESETS, 'filament_type', patch.filament_type)
+      const importedType = firstFilamentType(patch)
+      if (importedType !== undefined) {
+        const matched = findPresetKeyByField(FILAMENT_PRESETS, 'filament_type', importedType)
         if (matched) setSelectedFilament(matched)
       }
       setImportNotice(`Imported print settings from ${filename}`)
@@ -400,6 +416,15 @@ export default function App() {
   // that no longer name a slot — the two must not disagree.
   const slotLabels = useMemo(() => filamentSlotLabels(config), [config])
 
+  // The name each panel slot shows when its material came from an imported
+  // profile rather than a dropdown pick — verbatim, read-only, the way
+  // importedPrinterLabel does for the printer. Derivation and the "don't label a
+  // bare preset key" rule live in the tested importedFilamentSlotLabels(). See #161.
+  const importedFilamentLabels = useMemo(
+    () => importedFilamentSlotLabels(importedProfile, selectedFilaments),
+    [importedProfile, selectedFilaments],
+  )
+
   // None of these three touch manualOverrides: they swap a layer *below* the
   // user's own edits, which outrank them and stay put (config-layers.ts).
   // Overrides go away only on an explicit revert / "Reset all", or when a
@@ -425,10 +450,9 @@ export default function App() {
         ? undefined
         : findPresetKeyByField(PRINTER_PRESETS, 'printer_model', profile.settings.printer_model)
     if (printer) setSelectedPrinter(printer)
+    const importedType = firstFilamentType(profile.settings)
     const filament =
-      profile.settings.filament_type === undefined
-        ? undefined
-        : findPresetKeyByField(FILAMENT_PRESETS, 'filament_type', profile.settings.filament_type)
+      importedType === undefined ? undefined : findPresetKeyByField(FILAMENT_PRESETS, 'filament_type', importedType)
     if (filament) setSelectedFilament(filament)
   }
 
@@ -647,6 +671,7 @@ export default function App() {
                 }
                 onPrinterChange={handlePrinterChange}
                 selectedFilaments={selectedFilaments}
+                importedFilamentLabels={importedFilamentLabels}
                 onFilamentsChange={handleFilamentsChange}
                 userPresets={userPresets}
                 onSaveUserPreset={saveUserPreset}

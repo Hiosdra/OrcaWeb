@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import type { OrcaConfig, PassthroughConfig } from '../types'
+import { resolveConfig } from './config-layers'
 import {
   buildConfig,
   describeExportCompatibility,
   exportOrcaProfileBundle,
   exportOrcaProfileJson,
+  FILAMENT_PRESETS,
   filamentSlotLabels,
   filamentSlots,
   flattenSliceConfig,
+  type ImportedFilamentSource,
+  importedFilamentSlotLabels,
   MAX_FILAMENT_SLOTS,
   parseOrcaProfileJson,
   withFilamentSlots,
@@ -816,6 +820,73 @@ describe('withFilamentSlots on an imported multi-material profile', () => {
   })
 })
 
+describe('a slot never describes two materials at once (#161)', () => {
+  // The exact pipeline the issue ran: buildConfig (panel material) -> resolveConfig
+  // (imported layer on top) -> withFilamentSlots. The import declares per-slot
+  // filament_type but *no* per-slot nozzle_temperature, so before the fix slot 0
+  // took its type from the import and its temperature from the panel's material.
+  const importPartial = () =>
+    parseOrcaProfileJson(JSON.stringify({ filament_type: ['PLA', 'PETG'], filament_colour: ['#FF0000', '#00FF00'] }))
+  const resolvedOn = (ui: string[], imported = importPartial()) =>
+    withFilamentSlots(resolveConfig({ preset: buildConfig('Bambu Lab X1C', ui, 'standard'), imported }), ui)
+
+  it('gives slot 0 the imported material its temperature, not the panel material with no preset match', () => {
+    // Panel on ABS (270 °C), import announces slot 0 as PLA. The assertion that
+    // failed today: slot 0's filament_type and nozzle_temperature must name the
+    // same material. Before the fix nozzle_temperature[0] was ABS's '270'.
+    const pt = resolvedOn(['ABS'])._passthrough
+    expect(pt?.filament_type?.[0]).toBe('PLA')
+    expect(pt?.nozzle_temperature?.[0]).toBe(String(FILAMENT_PRESETS.PLA.nozzle_temperature))
+    expect(pt?.hot_plate_temp?.[0]).toBe(String(FILAMENT_PRESETS.PLA.bed_temperature))
+    // Slot 1 was already PETG's own — check it stayed consistent too.
+    expect(pt?.filament_type?.[1]).toBe('PETG')
+    expect(pt?.nozzle_temperature?.[1]).toBe(String(FILAMENT_PRESETS.PETG.nozzle_temperature))
+  })
+
+  it('lets a per-slot temperature the import itself declared win over the material preset', () => {
+    // A profile that *does* declare slot 0's temperature keeps it, rather than
+    // being reset to the declared material's stock preset value.
+    const imported = parseOrcaProfileJson(
+      JSON.stringify({
+        filament_type: ['PLA', 'PETG'],
+        filament_colour: ['#FF0000', '#00FF00'],
+        nozzle_temperature: ['205', '250'],
+      }),
+    )
+    const pt = resolvedOn(['ABS'], imported)._passthrough
+    expect(pt?.filament_type?.[0]).toBe('PLA')
+    expect(pt?.nozzle_temperature?.[0]).toBe('205')
+  })
+
+  it('still lets the panel material and a manual edit win once they agree with the import', () => {
+    // Panel on PLA — the same material the import names for slot 0 — so slot 0
+    // reads the resolved config again and a hand-typed temperature stands
+    // (the #159 / #160 §7 behaviour must survive this fix).
+    const edited = withFilamentSlots(
+      resolveConfig({
+        preset: buildConfig('Bambu Lab X1C', ['PLA'], 'standard'),
+        imported: importPartial(),
+        manual: { nozzle_temperature: 208 },
+      }),
+      ['PLA'],
+    )
+    expect(edited._passthrough?.filament_type?.[0]).toBe('PLA')
+    expect(edited._passthrough?.nozzle_temperature?.[0]).toBe('208')
+  })
+
+  it('never inherits the panel material for a filament it ships no preset for', () => {
+    // "PLA-CF" is not a FILAMENT_PRESETS key, so the dropdown can't be re-pointed
+    // and slotSource has no preset to read — but slot 0 must still not be handed
+    // ABS's 270 °C. It falls back to a neutral default, not another material's.
+    const imported = parseOrcaProfileJson(
+      JSON.stringify({ filament_type: ['PLA-CF', 'PETG'], filament_colour: ['#FF0000', '#00FF00'] }),
+    )
+    const pt = resolvedOn(['ABS'], imported)._passthrough
+    expect(pt?.filament_type?.[0]).toBe('PLA-CF')
+    expect(pt?.nozzle_temperature?.[0]).not.toBe(String(FILAMENT_PRESETS.ABS.nozzle_temperature))
+  })
+})
+
 describe('filamentSlotLabels', () => {
   it('falls back to the display text for a single-slot config', () => {
     expect(filamentSlotLabels({ filament_type: 'PLA' })).toEqual(['PLA'])
@@ -852,6 +923,75 @@ describe('filamentSlotLabels', () => {
     // two, and withFilamentSlots() sizes for two — so both are offered.
     const imported = withFilamentSlots({ _passthrough: { filament_type: ['PLA', 'PETG'] } }, ['PLA'])
     expect(filamentSlotLabels(imported)).toEqual(['PLA', 'PETG'])
+  })
+})
+
+describe('importedFilamentSlotLabels', () => {
+  const src = (over: Partial<ImportedFilamentSource>): ImportedFilamentSource => ({
+    type: 'print',
+    name: 'file.3mf',
+    settings: {},
+    ...over,
+  })
+
+  it('is undefined without an import, or for one that carries no filament', () => {
+    expect(importedFilamentSlotLabels(null, ['PLA'])).toBeUndefined()
+    expect(importedFilamentSlotLabels(src({ type: 'machine' }), ['PLA'])).toBeUndefined()
+    expect(importedFilamentSlotLabels(src({ type: 'process' }), ['PLA'])).toBeUndefined()
+    expect(importedFilamentSlotLabels(src({ settings: { layer_height: 0.2 } }), ['PLA'])).toBeUndefined()
+  })
+
+  it('names a material with no preset verbatim so the dropdown stops lying', () => {
+    // The whole point: "PETG-CF" is not a FILAMENT_PRESETS key, so Fix 1 can't
+    // re-point the dropdown and it would keep showing the previous pick.
+    const imported = src({ settings: { _passthrough: { filament_type: ['PETG-CF', 'PLA'] } } })
+    // Slot 1's declared type is a bare preset key, so it stays a normal dropdown.
+    expect(importedFilamentSlotLabels(imported, ['ABS', 'PLA'])).toEqual(['PETG-CF', undefined])
+  })
+
+  it('prefers the descriptive per-slot id over the base type', () => {
+    const imported = src({
+      settings: {
+        _passthrough: { filament_settings_id: ['PETG-CF @Hotend X', 'PLA'], filament_type: ['PETG', 'PLA'] },
+      },
+    })
+    // Slot 0 shows the descriptive id; slot 1's id is a bare preset key, so it
+    // stays a normal dropdown (undefined).
+    expect(importedFilamentSlotLabels(imported, ['ABS', 'PLA'])).toEqual(['PETG-CF @Hotend X', undefined])
+  })
+
+  it('does not label a bare preset key — that slot is shown as a normal dropdown', () => {
+    // A real multi-material profile of stock materials: every declared name is a
+    // preset key, so nothing is labelled read-only (avoids a duplicate option).
+    const imported = src({ settings: { _passthrough: { filament_type: ['PLA', 'PETG'] } } })
+    expect(importedFilamentSlotLabels(imported, ['PLA', 'PETG'])).toEqual([undefined, undefined])
+    // Even when the panel pick differs from the declared preset, the declared
+    // name is still a preset key and must not be added as a duplicate option.
+    expect(importedFilamentSlotLabels(imported, ['ABS', 'ABS'])).toEqual([undefined, undefined])
+  })
+
+  it('uses a single-filament profile top-level name for slot 0', () => {
+    // A filament preset file names itself at the top level, not per slot.
+    const imported = src({ type: 'filament', name: 'PLA-CF @Voron', settings: { filament_type: 'PLA' } })
+    expect(importedFilamentSlotLabels(imported, ['ABS'])).toEqual(['PLA-CF @Voron'])
+    // …but only when it differs from what the dropdown already shows.
+    expect(
+      importedFilamentSlotLabels(src({ type: 'filament', name: 'PLA', settings: { filament_type: 'PLA' } }), ['PLA']),
+    ).toEqual([undefined])
+  })
+
+  it('never mistakes the joined multi-value scalar for a single slot name', () => {
+    // config.filament_type is the collapsed "PLA,PETG"; only the passthrough
+    // array is per-slot. A scalar containing a comma must not become a label.
+    const imported = src({ settings: { filament_type: 'PLA,PETG' } })
+    expect(importedFilamentSlotLabels(imported, ['ABS'])).toBeUndefined()
+  })
+
+  it('returns one entry per panel slot, not per declared slot', () => {
+    // The panel only renders its own slots; a declared slot it doesn't show has
+    // no dropdown to label.
+    const imported = src({ settings: { _passthrough: { filament_type: ['PLA-CF', 'PETG-CF', 'ABS-CF'] } } })
+    expect(importedFilamentSlotLabels(imported, ['ABS'])).toEqual(['PLA-CF'])
   })
 })
 
