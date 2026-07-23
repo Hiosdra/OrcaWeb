@@ -232,7 +232,7 @@ jobs:
       # *internal* implementation is itself thread-safe.
       - name: Build WASM deps — Boost
         run: |
-          source /opt/emsdk/emsdk_env.sh
+          source "$EMSDK/emsdk_env.sh"
           BOOST_VERSION="1.83.0"
           BOOST_UNDERSCORE="${BOOST_VERSION//./_}"
           INSTALL="$(pwd)/orca-wasm/deps-install"
@@ -324,7 +324,7 @@ jobs:
       # doesn't need this.
       - name: Build WASM deps — GMP / MPFR / CGAL
         run: |
-          source /opt/emsdk/emsdk_env.sh
+          source "$EMSDK/emsdk_env.sh"
           INSTALL="$(pwd)/orca-wasm/deps-install"
           STAMP="${INSTALL}/.math_built_${{ matrix.variant }}"
           [[ -f "${STAMP}" ]] && echo "[math] stamp exists — skip" && exit 0
@@ -393,7 +393,7 @@ jobs:
       # step's comment for the full explanation).
       - name: Build WASM deps — Eigen3 / nlohmann / EXPAT / NLopt
         run: |
-          source /opt/emsdk/emsdk_env.sh
+          source "$EMSDK/emsdk_env.sh"
           INSTALL="$(pwd)/orca-wasm/deps-install"
           # Stamp name is version-suffixed (like the OCCT step below) AND
           # variant-suffixed (new — EXPAT/NLopt's compiled objects now
@@ -474,7 +474,7 @@ jobs:
       # NLopt above (see the GMP step's comment for the full explanation).
       - name: Build WASM deps — libnoise
         run: |
-          source /opt/emsdk/emsdk_env.sh
+          source "$EMSDK/emsdk_env.sh"
           INSTALL="$(pwd)/orca-wasm/deps-install"
           STAMP="${INSTALL}/.libnoise_built_${{ matrix.variant }}"
           [[ -f "${STAMP}" ]] && echo "[libnoise] stamp exists — skip" && exit 0
@@ -504,7 +504,7 @@ jobs:
       # ~30-60 min first build; subsequent runs skip via stamp file.
       - name: Build WASM deps — OCCT
         run: |
-          source /opt/emsdk/emsdk_env.sh
+          source "$EMSDK/emsdk_env.sh"
           OCCT_VERSION="7.8.1"
           OCCT_TAG="V${OCCT_VERSION//./_}"
           INSTALL="$(pwd)/orca-wasm/deps-install"
@@ -629,7 +629,7 @@ jobs:
       - name: Patch Emscripten zlib/libjpeg ports for pthread (mt)
         if: matrix.variant == 'mt'
         run: |
-          source /opt/emsdk/emsdk_env.sh
+          source "$EMSDK/emsdk_env.sh"
           python3 - <<'PYEOF'
           import os
           import pathlib
@@ -746,7 +746,7 @@ jobs:
       # also reachable under both names.
       - name: Build WASM deps — emscripten ports (zlib/png/jpeg)
         run: |
-          source /opt/emsdk/emsdk_env.sh
+          source "$EMSDK/emsdk_env.sh"
           SYSROOT_LIB="$EMSDK/upstream/emscripten/cache/sysroot/lib/wasm32-emscripten"
           if [[ "${{ matrix.variant }}" == "mt" ]]; then
             echo "[emports] building zlib-mt, libpng-mt, libjpeg-mt via embuilder…"
@@ -766,7 +766,7 @@ jobs:
       - name: Build official oneTBB for WASM (mt)
         if: matrix.variant == 'mt'
         run: |
-          source /opt/emsdk/emsdk_env.sh
+          source "$EMSDK/emsdk_env.sh"
           INSTALL="$(pwd)/orca-wasm/deps-install"
           STAMP="${INSTALL}/.onetbb_${ONETBB_VERSION}"
           [[ -f "${STAMP}" ]] && echo "[oneTBB] cached" && exit 0
@@ -798,7 +798,7 @@ jobs:
       # All deps are in deps-install/ via CMAKE_PREFIX_PATH.
       - name: Configure WASM build
         run: |
-          source /opt/emsdk/emsdk_env.sh
+          source "$EMSDK/emsdk_env.sh"
           WORK="$(pwd)"
           DEP_INSTALL="${WORK}/orca-wasm/deps-install"
           mkdir -p orca-wasm/build-wasm
@@ -851,7 +851,7 @@ jobs:
       # ── Build WASM module ────────────────────────────────────────────
       - name: Build WASM module
         run: |
-          source /opt/emsdk/emsdk_env.sh
+          source "$EMSDK/emsdk_env.sh"
           emmake cmake --build orca-wasm/build-wasm --target slicer -j4
           echo "--- ccache stats ---"
           ccache -s || true
