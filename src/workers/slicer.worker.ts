@@ -1,6 +1,15 @@
 import { logError, logInfo, logWarn } from '../lib/log'
 import { flattenSliceConfig } from '../lib/profiles'
-import { cadToStl, OrcaSliceError, objToStl, read3mf, sliceMultiStl, sliceStl, write3mf } from '../lib/wasm-loader'
+import {
+  cadToStl,
+  humanizeSliceError,
+  OrcaSliceError,
+  objToStl,
+  read3mf,
+  sliceMultiStl,
+  sliceStl,
+  write3mf,
+} from '../lib/wasm-loader'
 import type { OrcaConfig, OrcaModule, OrcaModuleFactory, WorkerInMessage, WorkerOutMessage } from '../types'
 
 // A genuinely stalled connection (TCP connected but the server/proxy never
@@ -468,7 +477,7 @@ function doSliceMulti(stls: ArrayBuffer[], config: OrcaConfig, extruderIds?: num
     const ms = Math.round(performance.now() - startedAt)
     if (err instanceof OrcaSliceError) {
       logError(`[OrcaWASM] slice-multi failed after ${ms}ms — code ${err.code}: ${err.message}`)
-      send({ type: 'SLICE_MULTI_ERROR', code: err.code, message: err.message })
+      send({ type: 'SLICE_MULTI_ERROR', code: err.code, message: humanizeSliceError(err.message) })
     } else {
       logError(`[OrcaWASM] slice-multi failed after ${ms}ms:`, err)
       send({ type: 'SLICE_MULTI_ERROR', code: -1, message: String(err) })
@@ -588,7 +597,7 @@ function doSlice(stl: ArrayBuffer, config: OrcaConfig, extruderId?: number) {
     const ms = Math.round(performance.now() - startedAt)
     if (err instanceof OrcaSliceError) {
       logError(`[OrcaWASM] slice failed after ${ms}ms — code ${err.code}: ${err.message}`)
-      send({ type: 'SLICE_ERROR', code: err.code, message: err.message })
+      send({ type: 'SLICE_ERROR', code: err.code, message: humanizeSliceError(err.message) })
     } else {
       logError(`[OrcaWASM] slice failed after ${ms}ms:`, err)
       send({ type: 'SLICE_ERROR', code: -1, message: String(err) })

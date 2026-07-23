@@ -1021,4 +1021,16 @@ describe('flattenSliceConfig (#163 single-object slice path)', () => {
     expect(flattenSliceConfig({ layer_height: 0.2 }, false).enable_prime_tower).toBe('0')
     expect(flattenSliceConfig({ layer_height: 0.2 }, true).enable_prime_tower).toBeUndefined()
   })
+
+  // The mixed-temperature override (#164) is an OrcaConfig-only pseudo-key the
+  // WASM bridge reads to call Print::set_check_multi_filaments_compatibility.
+  // It has to reach the engine JSON untouched (not modeled/renamed) and only
+  // when set, so an unset config never disables the guard.
+  it('forwards remove_mixed_temp_restriction to the engine config only when set', () => {
+    expect(
+      flattenSliceConfig({ layer_height: 0.2, remove_mixed_temp_restriction: true }, true)
+        .remove_mixed_temp_restriction,
+    ).toBe(true)
+    expect('remove_mixed_temp_restriction' in flattenSliceConfig({ layer_height: 0.2 }, true)).toBe(false)
+  })
 })

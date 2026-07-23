@@ -121,6 +121,10 @@ const OVERRIDE_LABELS: Partial<Record<ConfigField, string>> = {
   fuzzy_skin_point_dist: 'Fuzzy skin point distance',
   enable_prime_tower: 'Prime tower',
   prime_tower_width: 'Prime tower width',
+  // Shown in the "Hidden settings" summary if the override is still set after
+  // the slot count drops back to one (its toggle stops rendering then); the
+  // raw key would otherwise read "remove mixed temp restriction" (#164).
+  remove_mixed_temp_restriction: 'Allow mixed-temperature filaments',
 }
 
 function overrideLabel(field: ConfigField): string {
@@ -230,6 +234,10 @@ export function SettingsPanel({
   if (selectedFilaments.length > 1) {
     visibleOverrideFields.add('enable_prime_tower')
     if (primeTowerOn) visibleOverrideFields.add('prime_tower_width')
+    // The mixed-temperature override (#164) renders in the same multi-slot
+    // block below, so count it as visible too — otherwise enabling it would
+    // wrongly list it under "Hidden settings" while its toggle sits on screen.
+    visibleOverrideFields.add('remove_mixed_temp_restriction')
   }
   const hiddenOverrideKeys = overriddenKeys.filter((field) => !visibleOverrideFields.has(field))
 
@@ -589,6 +597,25 @@ export function SettingsPanel({
                     />
                   </div>
                 )}
+              </div>
+              {/* Single-nozzle AMS with filaments whose recommended nozzle-temp
+                  ranges don't overlap (e.g. PLA + PETG on one nozzle) is
+                  rejected by the engine's safety guard. This mirrors desktop
+                  OrcaSlicer's "Remove mixed temperature restriction" preference
+                  — off by default because the guard prevents nozzle clogging /
+                  printer damage, so the user opts in knowingly (#164). */}
+              <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+                <ToggleField
+                  label="Allow mixed-temperature filaments"
+                  field="remove_mixed_temp_restriction"
+                  value={config.remove_mixed_temp_restriction ?? false}
+                  onChange={(v) => onChange({ remove_mixed_temp_restriction: v })}
+                />
+                <p className="mt-2 text-xs text-slate-400">
+                  Lets a single nozzle print filaments whose recommended temperature ranges don't overlap. Only affects
+                  slots that share a nozzle. Mismatched temperatures can cause clogging or damage — leave off unless you
+                  know the combination is safe.
+                </p>
               </div>
             </>
           )}
