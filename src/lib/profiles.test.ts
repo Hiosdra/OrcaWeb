@@ -247,6 +247,25 @@ describe('exportOrcaProfileJson', () => {
     const off = JSON.parse(exportOrcaProfileJson({ enable_ironing: false }, 'p', 'process')) as Record<string, unknown>
     expect(off.ironing_type).toBe('no ironing')
   })
+
+  it('round-trips the prime-tower fields through their real OrcaSlicer names (#163)', () => {
+    // Modeled (not passthrough) so the panel toggle/width drive them, which
+    // means they need a real export name and a matching parse — otherwise a
+    // saved profile would silently drop the tower, the same class of bug as
+    // the synthetic keys above.
+    const json = exportOrcaProfileJson({ enable_prime_tower: true, prime_tower_width: 48 }, 'p', 'process')
+    const raw = JSON.parse(json) as Record<string, unknown>
+    expect(raw.enable_prime_tower).toBe('1')
+    expect(raw.prime_tower_width).toBe('48')
+    const parsed = parseOrcaProfileJson(json)
+    expect(parsed.enable_prime_tower).toBe(true)
+    expect(parsed.prime_tower_width).toBe(48)
+  })
+
+  it('parses a prime tower explicitly turned off', () => {
+    const parsed = parseOrcaProfileJson(JSON.stringify({ enable_prime_tower: '0' }))
+    expect(parsed.enable_prime_tower).toBe(false)
+  })
 })
 
 describe('parseOrcaProfileJson ironing_type', () => {
@@ -408,6 +427,55 @@ describe('withFilamentSlots (#140)', () => {
     expect(pt?.flush_multiplier).toEqual(['1', '1'])
   })
 
+  it('turns the prime tower on for a multi-slot config — the engine default is off (#163)', () => {
+    // #160 configures the flush volumes; without a tower the purge they
+    // describe has nowhere to go, and OrcaSlicer defaults enable_prime_tower
+    // off, so withFilamentSlots has to turn it on.
+    expect(withFilamentSlots(singleNozzle, ['PLA', 'PETG'])._passthrough?.enable_prime_tower).toBe('1')
+  })
+
+  it('gives the prime tower the addressing + reset the engine hard-requires (#163)', () => {
+    // Print::validate() rejects a wipe tower unless use_relative_e_distances=1,
+    // and rejects relative addressing on a Marlin/non-Bambu printer unless the
+    // layer-change G-code resets the extruder. Both must ride along with the
+    // tower or the slice fails validation outright.
+    const pt = withFilamentSlots(singleNozzle, ['PLA', 'PETG'])._passthrough
+    expect(pt?.use_relative_e_distances).toBe('1')
+    expect(pt?.before_layer_change_gcode).toMatch(/^[ \t]*G92[ \t]*E0/m)
+  })
+
+  it('appends the E-reset to a profile’s existing layer G-code instead of dropping it', () => {
+    const withLayerGcode: OrcaConfig = { _passthrough: { before_layer_change_gcode: '; my layer hook' } }
+    const g = withFilamentSlots(withLayerGcode, ['PLA', 'PETG'])._passthrough?.before_layer_change_gcode as string
+    expect(g).toContain('; my layer hook')
+    expect(g).toMatch(/^[ \t]*G92[ \t]*E0/m)
+  })
+
+  it('does not duplicate an E-reset a profile already has', () => {
+    const already: OrcaConfig = { _passthrough: { before_layer_change_gcode: ';[layer_z]\nG92 E0\n' } }
+    const g = withFilamentSlots(already, ['PLA', 'PETG'])._passthrough?.before_layer_change_gcode as string
+    expect(g.match(/G92 E0/g)).toHaveLength(1)
+  })
+
+  it('honours an explicit prime-tower-off choice over the multi-slot default', () => {
+    const off: OrcaConfig = { enable_prime_tower: false }
+    const pt = withFilamentSlots(off, ['PLA', 'PETG'])._passthrough
+    expect(pt?.enable_prime_tower).toBe('0')
+    // With no tower there is nothing forcing relative addressing, so the plate
+    // keeps slicing under the bridge's absolute-addressing default as before.
+    expect(pt?.use_relative_e_distances).toBeUndefined()
+    expect(pt?.before_layer_change_gcode).toBeUndefined()
+  })
+
+  it('honours a prime-tower setting an older import left in passthrough', () => {
+    const imported: OrcaConfig = { _passthrough: { enable_prime_tower: '0' } }
+    expect(withFilamentSlots(imported, ['PLA', 'PETG'])._passthrough?.enable_prime_tower).toBe('0')
+  })
+
+  it('never adds a prime tower to a one-slot config — there is no tool change to purge on', () => {
+    expect(withFilamentSlots(singleNozzle, ['PLA'])._passthrough?.enable_prime_tower).toBeUndefined()
+  })
+
   it('purges nothing into the same filament and something into a different one', () => {
     const m = withFilamentSlots(singleNozzle, ['PLA', 'PETG'])._passthrough?.flush_volumes_matrix as string[]
     expect(m[0]).toBe('0') // slot 1 -> slot 1
@@ -475,6 +543,8 @@ describe('withFilamentSlots (#140)', () => {
     const pt = withFilamentSlots(dualNozzle, ['PLA', 'PETG'])._passthrough as PassthroughConfig
     expect(Object.keys(pt).sort()).toEqual(
       [
+        'before_layer_change_gcode',
+        'enable_prime_tower',
         'filament_colour',
         'filament_diameter',
         'filament_end_gcode',
@@ -489,6 +559,7 @@ describe('withFilamentSlots (#140)', () => {
         'nozzle_diameter',
         'nozzle_temperature',
         'nozzle_temperature_initial_layer',
+        'use_relative_e_distances',
       ].sort(),
     )
     // Every filament-indexed vector is N long; the engine reads them by

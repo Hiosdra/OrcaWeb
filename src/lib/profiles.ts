@@ -66,6 +66,14 @@ export const DISPLAY_DEFAULTS = {
   skirt_loops: 1,
   skirt_distance: 2,
   raft_layers: 0,
+  // Prime-tower width matches the engine default (PrintConfig.cpp
+  // prime_tower_width). enable_prime_tower is deliberately absent: its engine
+  // default is off, but withFilamentSlots() flips the *effective* default to
+  // on for a multi-slot config, and the panel toggle only ever shows in that
+  // context — so it reads PRIME_TOWER_DEFAULT_ENABLED, not this table. Putting
+  // false here would make the toggle render off while the slice ran with a
+  // tower.
+  prime_tower_width: 60,
 } as const satisfies OrcaConfig
 
 /**
@@ -106,6 +114,16 @@ export const MAX_FILAMENT_SLOTS = SLOT_COLOURS.length
 
 /** Volume purged when switching between two different filaments, in mm³. */
 const FLUSH_VOLUME = 280
+
+/**
+ * Whether a multi-slot config gets a prime (wipe) tower unless something says
+ * otherwise. OrcaSlicer's own engine default is *off* (PrintConfig.cpp
+ * `enable_prime_tower`), which is the #163 bug: #160 configures the per-filament
+ * flush volumes but, with no tower, the purge those volumes describe has nowhere
+ * to go. A multi-material plate wants one, so default it on — the settings-panel
+ * toggle and any imported profile still override this (see primeTowerEnabled).
+ */
+export const PRIME_TOWER_DEFAULT_ENABLED = true
 
 /**
  * Filament diameter for a slot nothing declares one for, in mm — the engine's
@@ -265,6 +283,23 @@ function slotColour(i: number): string {
   return `#${channel(1 / 3)}${channel(0)}${channel(2 / 3)}`
 }
 
+/**
+ * Whether this (multi-slot) config should slice with a prime tower. An explicit
+ * choice wins over the default in priority order: the modeled top-level field
+ * (the settings-panel toggle) first, then whatever an imported profile declared
+ * in `_passthrough`, then PRIME_TOWER_DEFAULT_ENABLED. `_passthrough` normally
+ * only carries this when a profile was imported *before* enable_prime_tower was
+ * modeled — a fresh import routes it to the top-level field via ORCA_FIELD_MAP —
+ * but reading both keeps either shape honoured.
+ */
+function primeTowerEnabled(config: OrcaConfig): boolean {
+  if (config.enable_prime_tower !== undefined) return config.enable_prime_tower
+  const declared = config._passthrough?.enable_prime_tower
+  const raw = Array.isArray(declared) ? declared[0] : declared
+  if (raw !== undefined) return raw === '1' || raw.toLowerCase() === 'true' || raw.toLowerCase() === 'yes'
+  return PRIME_TOWER_DEFAULT_ENABLED
+}
+
 function multiFilamentPassthrough(config: OrcaConfig, ui: string[], n: number, nozzles: number): PassthroughConfig {
   const sources = Array.from({ length: n }, (_, i) => slotSource(config, ui, i))
 
@@ -353,7 +388,9 @@ function multiFilamentPassthrough(config: OrcaConfig, ui: string[], n: number, n
   // engine index one that does not exist.
   const namesANozzle = (v: string) => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= nozzles
 
-  return {
+  const primeTower = primeTowerEnabled(config)
+
+  const base: PassthroughConfig = {
     filament_type: per('filament_type', (p) => p.filament_type, DISPLAY_DEFAULTS.filament_type),
     filament_colour: declaredOr('filament_colour', slotColour),
     // No FILAMENT_PRESETS entry carries a diameter, so there is nothing a UI
@@ -380,6 +417,63 @@ function multiFilamentPassthrough(config: OrcaConfig, ui: string[], n: number, n
     filament_map_mode: 'Manual',
     flush_volumes_matrix: declaredIfSized('flush_volumes_matrix', nozzles * n * n) ?? matrix,
     flush_multiplier: declaredIfSized('flush_multiplier', nozzles) ?? Array.from({ length: nozzles }, () => '1'),
+    // The structure the flush volumes above flush *into*. Without it a
+    // multi-material plate defines a purge with nowhere to deposit it — the
+    // engine's own default for this is off (see primeTowerEnabled), so it has
+    // to be turned on here rather than left to the engine. #163.
+    // prime_tower_width and the other tower dimensions have working engine
+    // defaults and reach the slice through toEngineConfig() / an import's own
+    // _passthrough, so they need no default injected here.
+    //
+    // Placement (wipe_tower_x/y) is intentionally NOT set here. It depends on
+    // the tower's footprint, which is driven by the *loaded model's height* —
+    // data this pre-slice config layer does not have. OrcaSlicer's own
+    // placement (PartPlateList::set_default_wipe_tower_pos_for_plate) lives in
+    // the GUI and never runs headless, so the WASM bridge ports it instead
+    // (clamp_wipe_tower_to_bed in orca-wasm/bridge/slicer.cpp): it anchors at
+    // desktop's default position and clamps the tower onto the bed once the mesh
+    // is loaded. That is the right place for it, not a mesh-blind heuristic here.
+    enable_prime_tower: primeTower ? '1' : '0',
+  }
+
+  // A wipe tower is only valid under relative extruder addressing, and the
+  // reset that addressing needs, or Print::validate() hard-fails the slice —
+  // see withPrimeTowerAddressing()'s doc for the exact engine checks. Only
+  // when the tower is actually on: a multi-material plate without one keeps the
+  // absolute addressing the bridge defaults to, exactly as it sliced before.
+  return primeTower ? { ...base, ...withPrimeTowerAddressing(config) } : base
+}
+
+/**
+ * The two companion options a prime tower cannot slice without, both enforced
+ * by Print::validate() in the engine (orca/src/libslic3r/Print.cpp):
+ *
+ *  - `use_relative_e_distances = 1`. The wipe tower is *only* supported under
+ *    relative extruder addressing ("The Wipe Tower is currently only supported
+ *    with the relative extruder addressing"). The WASM bridge otherwise forces
+ *    this off, because relative addressing itself needs the reset below and the
+ *    headless build ships no printer G-code to supply it (see slicer.cpp).
+ *  - a per-layer `G92 E0`. On a Marlin-flavour, non-Bambu printer, relative
+ *    addressing without an exact-uppercase "G92 E0" in the layer-change G-code
+ *    fails validation ("Relative extruder addressing requires resetting the
+ *    extruder position at each layer"). Bambu printers are exempt, but adding
+ *    it is harmless there, so it goes in unconditionally rather than depending
+ *    on which printer the config turns out to be.
+ *
+ * The reset is appended to whatever `before_layer_change_gcode` the config
+ * already carries rather than replacing it — an imported printer profile's own
+ * layer G-code (a real "G92 E0" line among it included) must survive. The
+ * engine matches "^[ \t]*G92[ \t]*E0…$" per line, so a value already carrying
+ * that line is left untouched and any other content keeps the reset on its own
+ * appended line.
+ */
+function withPrimeTowerAddressing(config: OrcaConfig): PassthroughConfig {
+  const raw = config._passthrough?.before_layer_change_gcode
+  const existing = (Array.isArray(raw) ? raw[0] : raw) ?? ''
+  const hasReset = /^[ \t]*G92[ \t]*E(0(\.0*)?|\.0+)[ \t]*(;.*)?$/m.test(existing)
+  return {
+    use_relative_e_distances: '1',
+    before_layer_change_gcode: hasReset ? existing : existing ? `${existing}\nG92 E0` : 'G92 E0',
   }
 }
 
@@ -641,6 +735,11 @@ const ORCA_FIELD_MAP: Record<
   fuzzy_skin: { key: 'fuzzy_skin', type: 'str', category: 'process' },
   fuzzy_skin_thickness: { key: 'fuzzy_skin_thickness', type: 'num', category: 'process' },
   fuzzy_skin_point_dist: { key: 'fuzzy_skin_point_dist', type: 'num', category: 'process' },
+  // Prime (wipe) tower — real OrcaSlicer process-preset options (#163). Mapped
+  // so an imported profile's tower setting drives the panel toggle/width field
+  // rather than landing in _passthrough unseen, and so both round-trip on export.
+  enable_prime_tower: { key: 'enable_prime_tower', type: 'bool', category: 'process' },
+  prime_tower_width: { key: 'prime_tower_width', type: 'num', category: 'process' },
   // filament fields
   filament_type: { key: 'filament_type', type: 'str', category: 'filament' },
   nozzle_temperature: { key: 'nozzle_temperature', type: 'num', category: 'filament' },
