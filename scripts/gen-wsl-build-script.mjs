@@ -5,6 +5,7 @@
 import { readFileSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
+import { envExportLine, ifCondToBash, substituteExpr } from './gen-wsl-build-lib.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const yml = join(__dirname, '../.github/workflows/build-wasm.yml')
@@ -51,33 +52,9 @@ const lines = allLines.slice(buildJob.line, nextJob ? nextJob.line : allLines.le
 // selected via $VARIANT (override with WASM_VARIANT=mt), and every
 // `${{ matrix.variant }}` / `${{ env.FOO }}` occurrence is rewritten to the
 // equivalent shell reference so the SAME script works for both variants.
-function ifCondToBash(cond) {
-  const m = cond.trim().match(/^matrix\.variant\s*(==|!=)\s*'(st|mt)'$/)
-  if (!m) {
-    throw new Error(
-      `gen-wsl-build-script: unrecognized step 'if:' condition ${JSON.stringify(cond)} — ` +
-        `teach ifCondToBash() how to translate it before regenerating.`,
-    )
-  }
-  const [, op, val] = m
-  return `[[ "$VARIANT" ${op} "${val}" ]]`
-}
-
-// Rewrites `${{ matrix.variant }}` and `${{ env.FOO }}` to shell references.
-// Anything else under `${{ }}` (github.*, secrets.*, ternaries inline in a
-// step body, etc.) has no local equivalent — fail loudly rather than emit
-// broken-looking-plausible bash, so a future workflow change that introduces
-// a new expression shape can't silently slip through un-translated again.
-function substituteExpr(text, context) {
-  let out = text
-    .replace(/\$\{\{\s*matrix\.variant\s*\}\}/g, '${VARIANT}')
-    .replace(/\$\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g, '${$1}')
-  if (out.includes('${{')) {
-    const snippet = out.match(/.{0,40}\$\{\{.{0,40}/)[0]
-    throw new Error(`gen-wsl-build-script: unhandled \${{ }} expression in ${context}: ${snippet}`)
-  }
-  return out
-}
+// ifCondToBash() and substituteExpr() do that rewriting; they live in
+// ./gen-wsl-build-lib.mjs so they can be unit-tested without running this
+// generator.
 
 // ── Job-level env: block ──────────────────────────────────────────────────
 // GitHub Actions exposes every `jobs.build.env` entry as a real shell env
@@ -90,49 +67,19 @@ const envBlockStepsLine = lines.findIndex((l) => /^\s{4}steps:\s*$/.test(l))
 if (envBlockStart === -1 || envBlockStepsLine === -1) {
   throw new Error('gen-wsl-build-script: could not find `env:`/`steps:` blocks under `build:` job')
 }
+// ENV_KEY_RE's `(.+)` capture is deliberately greedy and keeps any trailing
+// ` # comment`; envExportLine() strips that (via stripYamlComment) rather than
+// trimming here, so the comment can't be folded into the exported literal.
 const ENV_KEY_RE = /^\s{6}([A-Z_][A-Z0-9_]*):\s*(.+)$/
 const envEntries = []
 for (let idx = envBlockStart + 1; idx < envBlockStepsLine; idx++) {
   const m = lines[idx].match(ENV_KEY_RE)
-  if (m) envEntries.push({ key: m[1], value: m[2].trim() })
+  if (m) envEntries.push({ key: m[1], value: m[2] })
 }
-
-const TERNARY_RE = /^\$\{\{\s*matrix\.variant\s*==\s*'mt'\s*&&\s*'([^']*)'\s*\|\|\s*'([^']*)'\s*\}\}$/
-
-// A GitHub-context expression like ORCA_VERSION's
-//   ${{ github.event.inputs.orca_version || (…github.ref…) || 'v2.4.2' }}
-// has no local equivalent for the github.* terms — but its *trailing*
-// `|| 'literal'` fallback is exactly the value CI resolves to when there's no
-// dispatch input and no tag, i.e. the local-build case. Extract that literal
-// as the local default so a workflow version bump flows into this script on
-// the next regenerate instead of silently drifting from a hardcoded copy.
-const GITHUB_EXPR_FALLBACK_RE = /\|\|\s*'([^']*)'\s*\}\}$/
 
 let envExports = ''
 for (const { key, value } of envEntries) {
-  const ternary = value.match(TERNARY_RE)
-  if (ternary) {
-    const [, mtVal, stVal] = ternary
-    envExports += `if [[ "$VARIANT" == "mt" ]]; then\n  export ${key}="${mtVal}"\nelse\n  export ${key}="${stVal}"\nfi\n`
-    continue
-  }
-  let literal
-  if (/\$\{\{/.test(value)) {
-    const fallback = value.match(GITHUB_EXPR_FALLBACK_RE)
-    if (!fallback) {
-      throw new Error(
-        `gen-wsl-build-script: env.${key} = ${value} is a GitHub expression with no ` +
-          `trailing \`|| 'literal'\` fallback to use as the local default — teach the parser about it.`,
-      )
-    }
-    literal = fallback[1]
-  } else {
-    literal = value.replace(/^"(.*)"$/, '$1')
-  }
-  // `${KEY:-default}` — every env var doubles as a local override point
-  // (e.g. EMSDK=/opt/emsdk in CI, but a userspace emsdk install elsewhere
-  // locally), without needing a one-off special case.
-  envExports += `export ${key}="\${${key}:-${literal}}"\n`
+  envExports += `${envExportLine(key, value)}\n`
 }
 
 const steps = []
