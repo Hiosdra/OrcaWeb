@@ -157,6 +157,12 @@ interface Props {
   onPrinterChange: (name: string) => void
   /** One entry per filament slot; slot 0 drives the panel's scalar fields. */
   selectedFilaments: string[]
+  /**
+   * Per-slot read-only label to show instead of the preset dropdown value when
+   * that slot's material came from an imported profile — the import's own name,
+   * verbatim. `undefined` (or a shorter array) means "show the normal dropdown".
+   */
+  importedFilamentLabels?: (string | undefined)[]
   onFilamentsChange: (names: string[]) => void
   userPresets: UserPreset[]
   onSaveUserPreset: (name: string) => void
@@ -179,6 +185,7 @@ export function SettingsPanel({
   importedPrinterLabel,
   onPrinterChange,
   selectedFilaments,
+  importedFilamentLabels,
   onFilamentsChange,
   userPresets,
   onSaveUserPreset,
@@ -474,30 +481,43 @@ export function SettingsPanel({
 
         {/* Filament */}
         <Section title="Filament">
-          {selectedFilaments.map((slot, i) => (
-            // Slots are a positional list — index IS the identity, and the
-            // engine indexes its per-filament arrays the same way.
-            // biome-ignore lint/suspicious/noArrayIndexKey: slot index is the identity
-            <div key={i} className="flex items-end gap-2 mb-2">
-              <SelectField
-                className="flex-1"
-                label={selectedFilaments.length > 1 ? `Slot ${i + 1}` : 'Material'}
-                value={slot}
-                options={Object.keys(FILAMENT_PRESETS)}
-                onChange={(v) => onFilamentsChange(selectedFilaments.map((s, j) => (j === i ? v : s)))}
-              />
-              {selectedFilaments.length > 1 && (
-                <button
-                  type="button"
-                  aria-label={`Remove filament slot ${i + 1}`}
-                  onClick={() => onFilamentsChange(selectedFilaments.filter((_, j) => j !== i))}
-                  className="mb-1 px-2 py-1.5 rounded-lg border border-slate-200 text-slate-400 hover:border-red-300 hover:text-red-500 transition-colors"
-                >
-                  <XIcon className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          ))}
+          {selectedFilaments.map((slot, i) => {
+            // A slot whose material came from an import shows that import's own
+            // name as an extra option — mirroring importedPrinterLabel. Picking a
+            // real preset points the slot at it (handleFilamentsChange decides
+            // whether that sheds the import); re-picking the imported label
+            // itself is a no-op. See #161.
+            const importedLabel = importedFilamentLabels?.[i]
+            return (
+              // Slots are a positional list — index IS the identity, and the
+              // engine indexes its per-filament arrays the same way.
+              // biome-ignore lint/suspicious/noArrayIndexKey: slot index is the identity
+              <div key={i} className="flex items-end gap-2 mb-2">
+                <SelectField
+                  className="flex-1"
+                  label={selectedFilaments.length > 1 ? `Slot ${i + 1}` : 'Material'}
+                  value={importedLabel ?? slot}
+                  options={
+                    importedLabel ? [...Object.keys(FILAMENT_PRESETS), importedLabel] : Object.keys(FILAMENT_PRESETS)
+                  }
+                  onChange={(v) => {
+                    if (v === importedLabel) return
+                    onFilamentsChange(selectedFilaments.map((s, j) => (j === i ? v : s)))
+                  }}
+                />
+                {selectedFilaments.length > 1 && (
+                  <button
+                    type="button"
+                    aria-label={`Remove filament slot ${i + 1}`}
+                    onClick={() => onFilamentsChange(selectedFilaments.filter((_, j) => j !== i))}
+                    className="mb-1 px-2 py-1.5 rounded-lg border border-slate-200 text-slate-400 hover:border-red-300 hover:text-red-500 transition-colors"
+                  >
+                    <XIcon className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            )
+          })}
           {selectedFilaments.length < MAX_FILAMENT_SLOTS && (
             <button
               type="button"

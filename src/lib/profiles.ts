@@ -197,11 +197,26 @@ function declaredSlotCount(config: OrcaConfig): number {
  * display, so an imported multi-material profile leaves `config.filament_type`
  * as the joined "PLA,PETG" rather than this slot's own type. The unflattened
  * array is still in the passthrough, so take slot 0's entry from there.
+ *
+ * Reading the resolved config for slot 0 is only sound while the panel's
+ * material *is* the one this slot is named after. The resolved config's
+ * per-filament scalars (temperatures) describe `ui[0]`; if the import declared a
+ * different type for slot 0 they would describe a different material than the
+ * slot's own name — the #161 contradiction (slot announced PLA, extruded at
+ * ABS's temperature). When they disagree, rebuild slot 0 from the *declared*
+ * material's own preset instead, so its type and temperatures cannot describe
+ * different filaments. A material this app ships no preset for still cannot be
+ * given a real temperature, but it no longer inherits the panel material's.
  */
 function slotSource(config: OrcaConfig, ui: string[], i: number): Partial<OrcaConfig> {
   const declared = config._passthrough?.filament_type
   const perSlot = Array.isArray(declared) ? declared : undefined
-  if (i === 0) return perSlot?.[0] ? { ...config, filament_type: perSlot[0] } : config
+  if (i === 0) {
+    const type = perSlot?.[0]
+    if (!type) return config
+    if (type === ui[0]) return { ...config, filament_type: type }
+    return FILAMENT_PRESETS[type] ?? { filament_type: type }
+  }
   if (i < ui.length) return FILAMENT_PRESETS[ui[i]] ?? {}
   const type = perSlot?.[i]
   if (!type) return {}
@@ -268,6 +283,21 @@ function slotColour(i: number): string {
 function multiFilamentPassthrough(config: OrcaConfig, ui: string[], n: number, nozzles: number): PassthroughConfig {
   const sources = Array.from({ length: n }, (_, i) => slotSource(config, ui, i))
 
+  // Slot 0 is taken from the import rather than the panel when the import named
+  // a material for it that the panel isn't showing (slotSource rebuilds it from
+  // the declared material). In that state the resolved config describes a
+  // *different* material than slot 0, so its PANEL_EDITED options must prefer
+  // what the import declared for the slot over the resolved value — otherwise
+  // the temperature is read off the panel's material while the type is the
+  // import's. See slotSource() and #161.
+  const declaredType0 = Array.isArray(config._passthrough?.filament_type)
+    ? config._passthrough.filament_type[0]
+    : undefined
+  // `!!` and not `!== undefined`: an empty declared type is "no type" to
+  // slotSource (`if (!type) return config`), so it must stay the agree path here
+  // too or the two disagree on a degenerate entry.
+  const slot0FromImport = !!declaredType0 && declaredType0 !== ui[0]
+
   /** Whatever the config already carries for `key`, one entry per slot. */
   const declared = (key: string): (string | undefined)[] => {
     const raw = config._passthrough?.[key]
@@ -306,7 +336,13 @@ function multiFilamentPassthrough(config: OrcaConfig, ui: string[], n: number, n
     const own = declared(key)
     const derived = (i: number) => String(pick(sources[i]) ?? fallback)
     return Array.from({ length: n }, (_, i) => {
-      if (i === 0) return PANEL_EDITED_SLOT_OPTIONS.has(key) ? derived(0) : (own[0] ?? derived(0))
+      if (i === 0) {
+        // When slot 0 is the import's own material, prefer its declared value —
+        // `derived(0)` reads slotSource's rebuilt slot (the declared material's
+        // preset), which the import's own per-slot value still outranks.
+        if (slot0FromImport) return own[0] ?? derived(0)
+        return PANEL_EDITED_SLOT_OPTIONS.has(key) ? derived(0) : (own[0] ?? derived(0))
+      }
       if (i < ui.length) return derived(i)
       return own[i] ?? derived(i)
     })
@@ -411,6 +447,56 @@ export function filamentSlotLabels(config: OrcaConfig): string[] {
   if (count < 2) return filamentSlots(config).slice(0, 1)
   const fallback = String(config.filament_type ?? DISPLAY_DEFAULTS.filament_type)
   return Array.from({ length: count }, (_, i) => perSlot?.[i] || fallback)
+}
+
+/** The subset of an imported profile the Material dropdown needs to label it. */
+export interface ImportedFilamentSource {
+  type: 'machine' | 'filament' | 'process' | 'print'
+  name: string
+  settings: Partial<OrcaConfig>
+}
+
+/**
+ * What the settings panel's Material dropdown shows for each slot whose material
+ * came from an imported profile rather than a dropdown pick — the import's own
+ * name, verbatim, so a profile naming a material this app ships no preset for
+ * (e.g. "PETG-CF @Hotend") is displayed exactly rather than silently coerced or
+ * left describing whatever was selected before the import. One entry per panel
+ * slot; `undefined` for a slot means "show the normal preset dropdown", and a
+ * whole `undefined` result means no slot has an imported label.
+ *
+ * A bare FILAMENT_PRESETS key is deliberately *not* labelled: findPresetKeyByField
+ * already re-points such a slot to that preset (the dropdown shows it as a normal
+ * editable entry), and adding it as a read-only option would only duplicate one
+ * already in the list. Only a name the app can't represent as a preset is worth
+ * surfacing verbatim. See #161.
+ */
+export function importedFilamentSlotLabels(
+  imported: ImportedFilamentSource | null | undefined,
+  selectedFilaments: string[],
+): (string | undefined)[] | undefined {
+  if (!imported || imported.type === 'machine' || imported.type === 'process') return undefined
+  const pt = imported.settings._passthrough
+  // Real multi-material profiles carry a descriptive per-slot id
+  // (filament_settings_id) and a base type array; a single-filament profile
+  // declares a scalar type and carries its display name at the top level.
+  const ids = Array.isArray(pt?.filament_settings_id) ? pt.filament_settings_id : undefined
+  const types = Array.isArray(pt?.filament_type) ? pt.filament_type : undefined
+  const scalarType =
+    typeof imported.settings.filament_type === 'string' && !imported.settings.filament_type.includes(',')
+      ? imported.settings.filament_type
+      : undefined
+  if (!ids && !types && !scalarType) return undefined
+  const presetKeys = Object.keys(FILAMENT_PRESETS)
+  return selectedFilaments.map((slot, i) => {
+    const label =
+      ids?.[i] ??
+      (i === 0 && imported.type === 'filament' ? imported.name : undefined) ??
+      types?.[i] ??
+      (i === 0 ? scalarType : undefined)
+    if (label === undefined || label === slot || presetKeys.includes(label)) return undefined
+    return label
+  })
 }
 
 export function buildConfig(
