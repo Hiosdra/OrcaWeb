@@ -6,6 +6,7 @@ import {
   exportOrcaProfileJson,
   filamentSlotLabels,
   filamentSlots,
+  flattenSliceConfig,
   MAX_FILAMENT_SLOTS,
   parseOrcaProfileJson,
   withFilamentSlots,
@@ -746,5 +747,33 @@ describe('filamentSlotLabels', () => {
     // two, and withFilamentSlots() sizes for two — so both are offered.
     const imported = withFilamentSlots({ _passthrough: { filament_type: ['PLA', 'PETG'] } }, ['PLA'])
     expect(filamentSlotLabels(imported)).toEqual(['PLA', 'PETG'])
+  })
+})
+
+describe('flattenSliceConfig (#163 single-object slice path)', () => {
+  // A multi-material config as withFilamentSlots would produce it: the tower is
+  // on and its flag lives in _passthrough as the engine string '1'.
+  const multiMaterial = withFilamentSlots({ bed_size_x: 250, bed_size_y: 210 }, ['PLA', 'PETG'])
+
+  it('merges _passthrough over the modeled config, _passthrough winning', () => {
+    const flat = flattenSliceConfig({ layer_height: 0.2, _passthrough: { layer_height: '0.3' } }, true)
+    expect(flat.layer_height).toBe('0.3')
+  })
+
+  it('keeps the prime tower for a slice that carries a filament slot (orc_slice_multi clamps it)', () => {
+    expect(multiMaterial._passthrough?.enable_prime_tower).toBe('1')
+    expect(flattenSliceConfig(multiMaterial, true).enable_prime_tower).toBe('1')
+  })
+
+  it('forces the prime tower off for a no-slot single object (orc_slice never clamps it)', () => {
+    // The bug: this object prints with the default filament through orc_slice,
+    // which skips clamp_wipe_tower_to_bed — a leftover enable_prime_tower would
+    // build an unclamped, off-bed tower (#163's own bug via another call site).
+    expect(flattenSliceConfig(multiMaterial, false).enable_prime_tower).toBe('0')
+  })
+
+  it('leaves a single-material config alone (no tower flag either way)', () => {
+    expect(flattenSliceConfig({ layer_height: 0.2 }, false).enable_prime_tower).toBe('0')
+    expect(flattenSliceConfig({ layer_height: 0.2 }, true).enable_prime_tower).toBeUndefined()
   })
 })

@@ -425,6 +425,11 @@ static void clamp_wipe_tower_to_bed(Slic3r::DynamicPrintConfig& config,
     const double volume_depth = depth;
     depth = std::max(min_depth, depth);
     rib_width = std::min(rib_width, depth / 2.0);
+    // `max(depth + extra_rib_len, volume_depth)` always resolves to the first
+    // operand here — `depth` is already >= volume_depth from the max() above and
+    // extra_rib_len is non-negative. It is kept verbatim (rather than reduced to
+    // `depth + extra_rib_len`) to mirror desktop's estimate_wipe_tower_size line
+    // for line, so a future re-sync against upstream diffs cleanly.
     depth = rib_width / std::sqrt(2.0) + std::max(depth + extra_rib_len, volume_depth);
     const double size = depth; // rib tower footprint is square
 

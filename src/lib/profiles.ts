@@ -623,6 +623,29 @@ export function toEngineConfig(config: OrcaConfig): Record<string, unknown> {
 }
 
 /**
+ * Flatten an OrcaConfig into the single JSON object the WASM bridge consumes:
+ * toEngineConfig's modeled output with the `_passthrough` block (raw engine
+ * keys carried through unmodeled) merged over it, `_passthrough` winning on
+ * conflicts — the same shape every slice/export call sends today.
+ *
+ * `hasFilamentSlot` is true when the slice carries a per-object filament
+ * assignment, i.e. it goes through orc_slice_multi (which runs
+ * clamp_wipe_tower_to_bed). When false the caller uses plain orc_slice, which
+ * prints one object with the default filament and never clamps the tower — so
+ * the prime tower is forced off, otherwise a still-multi-filament config would
+ * build a tower at the raw, unclamped PrintConfig default, the exact off-bed
+ * placement #163 fixes reached through a different call site. Multi-object and
+ * 3MF-export paths pass true and keep whatever the profile declares.
+ */
+export function flattenSliceConfig(config: OrcaConfig, hasFilamentSlot: boolean): Record<string, unknown> {
+  const { _passthrough, ...rest } = config
+  const engineRest = toEngineConfig(rest)
+  const flat: Record<string, unknown> = _passthrough ? { ...engineRest, ..._passthrough } : engineRest
+  if (!hasFilamentSlot) flat.enable_prime_tower = '0'
+  return flat
+}
+
+/**
  * Why an exported bundle won't load in desktop OrcaSlicer, or null when
  * nothing is known to be wrong with it. For the export button to say so
  * instead of reporting a plain success.
