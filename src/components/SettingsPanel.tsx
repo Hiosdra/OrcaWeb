@@ -246,11 +246,11 @@ export function SettingsPanel({
     reader.readAsText(file)
   }
 
-  // Real OrcaSlicer presets are three separate files (print/filament/printer)
-  // — a single flat JSON can't represent all three at once (see
-  // exportOrcaProfileBundle's doc comment), so the export is a small zip
-  // bundling all three, matching the multi-file zip download already used
-  // for G-code exports in SliceCards.tsx.
+  // Real OrcaSlicer presets are separate files (print/filament/printer) — a
+  // single flat JSON can't represent them at once, and a multi-material config
+  // needs one filament file per slot (see exportOrcaProfileBundle's doc
+  // comment) — so the export is a small zip bundling them all, matching the
+  // multi-file zip download already used for G-code exports in SliceCards.tsx.
   function handleExportProfile() {
     const name = `OrcaWeb — ${selectedPrinter} / ${selectedFilaments.join('+')} / ${selectedPreset}`
     const files = exportOrcaProfileBundle(config, name)
@@ -411,7 +411,7 @@ export function SettingsPanel({
             <button
               type="button"
               onClick={handleExportProfile}
-              title="Save the current settings as an OrcaSlicer-compatible preset bundle (print/filament/printer .json, zipped)"
+              title="Save the current settings as an OrcaSlicer-compatible preset bundle (print/filament/printer .json, one filament file per slot, zipped)"
               data-testid="export-profile-button"
               className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl border-2 border-dashed border-slate-200 text-sm text-slate-500 hover:border-orca-400 hover:text-orca-600 hover:bg-orca-50 transition-all"
             >

@@ -917,6 +917,34 @@ for (const [field, meta] of Object.entries(ORCA_FIELD_MAP)) {
 const PASSTHROUGH_EXPORT_DENYLIST = new Set(['compatible_printers', 'compatible_printers_condition'])
 
 /**
+ * Passthrough options that are per-*machine*, not per-filament, so they belong
+ * only in `machine.json`. Two kinds live here:
+ *   - multi-material routing/purge options (`filament_map`,
+ *     `flush_volumes_matrix`, …) that describe how the printer moves between
+ *     slots, not any one filament;
+ *   - `nozzle_diameter`, which on a multi-nozzle printer is a per-*nozzle*
+ *     vector (an H2D carries two) round-robin-mapped to slots by nozzleCount(),
+ *     NOT a per-slot vector. Without this exclusion filamentSlotConfig() would
+ *     slice that array by slot index into each `filament-N.json` — reading a
+ *     nozzle-indexed value as if it were filament-indexed, and putting a
+ *     machine-only key on a filament preset besides.
+ *
+ * `withFilamentSlots()` writes all of these into `_passthrough` alongside the
+ * per-slot filament vectors, and the passthrough dump would otherwise copy them
+ * into every category file. A single-material filament preset carrying a whole
+ * `flush_volumes_matrix` or a `nozzle_diameter` is meaningless (and out of
+ * category), so they are skipped for every category except `machine`, where the
+ * full, un-sliced value is written from the complete config.
+ */
+const MACHINE_MULTI_MATERIAL_OPTIONS = new Set([
+  'filament_map',
+  'filament_map_mode',
+  'flush_volumes_matrix',
+  'flush_multiplier',
+  'nozzle_diameter',
+])
+
+/**
  * Serialize the current in-app config back into a single OrcaSlicer-
  * compatible profile JSON of one type (`process`/`filament`/`machine`) — the
  * mirror of parseOrcaProfileJson(). Only fields belonging to `category` are
@@ -992,6 +1020,7 @@ export function exportOrcaProfileJson(config: OrcaConfig, name: string, category
   if (_passthrough) {
     for (const [field, value] of Object.entries(_passthrough)) {
       if (PASSTHROUGH_EXPORT_DENYLIST.has(field)) continue
+      if (category !== 'machine' && MACHINE_MULTI_MATERIAL_OPTIONS.has(field)) continue
       out[field] = value
     }
   }
@@ -1047,20 +1076,87 @@ export function exportOrcaProfileJson(config: OrcaConfig, name: string, category
 }
 
 /**
+ * Collapse a multi-slot config down to the single filament in slot `i` — the
+ * shape one filament preset file has to have.
+ *
+ * `withFilamentSlots()` stores every per-filament option in `_passthrough` as
+ * an N-long vector (`filament_type: ["PLA","PETG"]`, `nozzle_temperature:
+ * ["220","255"]`, …). A filament *preset* is single-material, so slot `i`'s
+ * file wants each of those flattened to its own entry. We index every array in
+ * the passthrough to `[i]`, not a curated subset: an imported multi-material
+ * profile carries per-slot vectors this app never names (flow ratio, max
+ * volumetric speed, …), and every one that actually reaches a filament file is
+ * per-filament — leaving any as a full array would make each of the N files
+ * read that vector's *first* entry (OrcaSlicer takes element 0 of an over-long
+ * filament vector), so slots 2..N would silently inherit slot 0's value. A
+ * shorter vector (a G-code hook padded to one entry, say) falls back to element
+ * 0, which is that hook for all slots.
+ *
+ * The machine-only passthrough options are indexed here too but never reach a
+ * filament file (exportOrcaProfileJson skips MACHINE_MULTI_MATERIAL_OPTIONS
+ * outside `machine`), so the slice is inert for them. That exclusion is what
+ * keeps a per-*nozzle* vector like `nozzle_diameter` — which is NOT per-slot —
+ * from being mis-sliced into each preset; `machine.json` gets the full array
+ * from the complete config instead.
+ */
+function filamentSlotConfig(config: OrcaConfig, i: number): OrcaConfig {
+  const pt = config._passthrough
+  if (!pt) return config
+  const slot: PassthroughConfig = {}
+  for (const [key, value] of Object.entries(pt)) {
+    slot[key] = Array.isArray(value) ? (value[i] ?? value[0]) : value
+  }
+  return { ...config, _passthrough: slot }
+}
+
+/**
  * Export the current settings as a full OrcaSlicer preset bundle — one file
  * per real preset type (process/filament/machine), matching how desktop
  * OrcaSlicer itself stores and imports presets (see exportOrcaProfileJson's
  * own doc comment for why a single flat file can't represent this). Used by
- * SettingsPanel's "Export" button, which zips the three files together so
- * the whole bundle downloads as one action.
+ * SettingsPanel's "Export" button, which zips the files together so the whole
+ * bundle downloads as one action.
+ *
+ * A multi-slot config emits one filament file *per slot* — `filament-1.json` …
+ * `filament-N.json`, each a normal single-material preset built from that
+ * slot's entries in the `_passthrough` vectors (see filamentSlotConfig).
+ * OrcaSlicer counts materials by the number of separate filament preset files
+ * (`--load-filaments "filament-1.json;filament-2.json"`), not by array length
+ * inside one file: a single `filament.json` whose `filament_type` is an array
+ * resolves back to a *single* filament, so a config sliced here as N materials
+ * would not round-trip through the bundle (#162). A single-slot config keeps
+ * emitting exactly one `filament.json`, unchanged.
  */
 export function exportOrcaProfileBundle(
   config: OrcaConfig,
   baseName: string,
 ): { filename: string; category: FieldCategory; json: string }[] {
-  return (['process', 'filament', 'machine'] as const).map((category) => ({
-    filename: `${category}.json`,
-    category,
-    json: exportOrcaProfileJson(config, `${baseName} (${category})`, category),
-  }))
+  const slots = declaredSlotCount(config)
+  const filamentFiles =
+    slots < 2
+      ? [
+          {
+            filename: 'filament.json',
+            category: 'filament' as const,
+            json: exportOrcaProfileJson(config, `${baseName} (filament)`, 'filament'),
+          },
+        ]
+      : Array.from({ length: slots }, (_, i) => ({
+          filename: `filament-${i + 1}.json`,
+          category: 'filament' as const,
+          json: exportOrcaProfileJson(filamentSlotConfig(config, i), `${baseName} (filament ${i + 1})`, 'filament'),
+        }))
+  return [
+    {
+      filename: 'process.json',
+      category: 'process' as const,
+      json: exportOrcaProfileJson(config, `${baseName} (process)`, 'process'),
+    },
+    ...filamentFiles,
+    {
+      filename: 'machine.json',
+      category: 'machine' as const,
+      json: exportOrcaProfileJson(config, `${baseName} (machine)`, 'machine'),
+    },
+  ]
 }
