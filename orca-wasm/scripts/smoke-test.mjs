@@ -209,6 +209,28 @@ function assertRestsOnBed(gcode, label, firstLayerHeight) {
   if (minZ > firstLayerHeight + 0.05) throw new Error(`${label}: minimum Z is ${minZ}, expected ~${firstLayerHeight} — model appears to be floating above the bed`)
 }
 
+// Adaptive (variable) layer height (#138) must actually vary the layer
+// thickness — a fixed-height slice emits one repeated ;Z: step (plus at most a
+// thin top-cap remainder), an adaptive one emits many. Parse the engine's own
+// ;Z:<height> layer-change markers (the authoritative per-layer Z, unlike a raw
+// G1 Z scan which also picks up the start-gcode nozzle lift and travel Z-hops)
+// and require several distinct steps. The >=3 threshold cleanly separates a
+// fixed slice (<=2 distinct: the nominal height + maybe the remainder) from an
+// adaptive one (both smoke meshes yield well over a dozen).
+function assertVariableLayerHeights(gcode, label) {
+  const zs = []
+  for (const line of gcode.split('\n')) {
+    const m = /^;Z:(-?[0-9.]+)/.exec(line)
+    if (m) zs.push(parseFloat(m[1]))
+  }
+  if (zs.length < 5) throw new Error(`${label}: only ${zs.length} ;Z: layer markers — expected a real multi-layer slice`)
+  const steps = new Set()
+  for (let i = 1; i < zs.length; i++) steps.add((zs[i] - zs[i - 1]).toFixed(3))
+  if (steps.size < 3) {
+    throw new Error(`${label}: ${steps.size} distinct layer height(s) — adaptive layer height did not vary the thickness`)
+  }
+}
+
 // ── real base config (Generic-ish printer + PLA + Standard) ───────────────────
 // Deliberately not importing src/lib/profiles.ts (TS + depends on the bundled
 // orca-profiles.json shape); a minimal but real, representative config is
@@ -410,6 +432,16 @@ async function main() {
       name: 'classic wall generator (regression control vs. Arachne default)',
       config: { ...BASE_CONFIG, wall_generator: 'classic' },
     },
+    {
+      // Adaptive layer height is a bridge pseudo-key (#138) — the engine
+      // computes each object's layer_height_profile before slicing. The extra
+      // assert confirms the layer thickness actually varies, not just that the
+      // slice succeeds (the pseudo-key being silently ignored would still emit
+      // valid, uniform-height G-code).
+      name: 'adaptive (variable) layer height',
+      config: { ...BASE_CONFIG, adaptive_layer_height: true, adaptive_layer_height_quality: 0.5 },
+      assert: assertVariableLayerHeights,
+    },
   ]
 
   let failures = 0
@@ -422,6 +454,7 @@ async function main() {
         const gcode = sliceOnce(module, session, mesh.bytes)
         assertSaneGcode(gcode, label)
         assertRestsOnBed(gcode, label, scenario.config.initial_layer_height)
+        scenario.assert?.(gcode, label)
         console.log(`PASS (${gcode.length} bytes)`)
       } catch (err) {
         failures++

@@ -1033,4 +1033,18 @@ describe('flattenSliceConfig (#163 single-object slice path)', () => {
     ).toBe(true)
     expect('remove_mixed_temp_restriction' in flattenSliceConfig({ layer_height: 0.2 }, true)).toBe(false)
   })
+
+  // Variable (adaptive) layer height (#138) is likewise an OrcaConfig-only
+  // pseudo-key pair the WASM bridge reads to compute each object's
+  // layer_height_profile. Both must reach the engine JSON untouched (not
+  // modeled/renamed) so the bridge's orc_init can pick them up.
+  it('forwards adaptive layer height fields to the engine config verbatim', () => {
+    const flat = flattenSliceConfig(
+      { layer_height: 0.2, adaptive_layer_height: true, adaptive_layer_height_quality: 0.3 },
+      true,
+    )
+    expect(flat.adaptive_layer_height).toBe(true)
+    expect(flat.adaptive_layer_height_quality).toBe(0.3)
+    expect('adaptive_layer_height' in flattenSliceConfig({ layer_height: 0.2 }, true)).toBe(false)
+  })
 })

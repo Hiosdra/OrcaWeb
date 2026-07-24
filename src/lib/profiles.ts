@@ -59,6 +59,10 @@ export const DISPLAY_DEFAULTS = {
   fuzzy_skin: 'none',
   fuzzy_skin_thickness: 0.3,
   fuzzy_skin_point_dist: 0.8,
+  // Adaptive-layer-height quality/speed factor (see OrcaConfig). The toggle
+  // itself has no entry — like enable_ironing / remove_mixed_temp_restriction
+  // it defaults off via an inline `?? false`; only the slider needs a value.
+  adaptive_layer_height_quality: 0.5,
   enable_support: false,
   support_type: 'normal(auto)',
   brim_width: 0,

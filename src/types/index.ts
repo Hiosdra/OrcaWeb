@@ -57,6 +57,19 @@ export interface OrcaConfig {
   fuzzy_skin_point_dist?: number
   enable_ironing?: boolean
 
+  /** Variable (adaptive) layer height — vary layer thickness across Z from the
+   *  model's geometry, matching desktop OrcaSlicer's Adaptive tool: thinner
+   *  layers on detailed/sloped regions, thicker on flat ones. Not a native
+   *  engine option — the WASM bridge reads it as a pseudo-key and computes each
+   *  object's layer_height_profile with layer_height_profile_adaptive() before
+   *  slicing (see orca-wasm/bridge/slicer.cpp). Default (undefined / false)
+   *  keeps a fixed layer_height. See issue #138. */
+  adaptive_layer_height?: boolean
+  /** Quality/speed factor for adaptive_layer_height, 0..1 (engine range;
+   *  default 0.5). Lower = finer detail (thinner layers); higher = faster
+   *  (thicker layers). Only used while adaptive_layer_height is on. */
+  adaptive_layer_height_quality?: number
+
   // Multi-material — prime (wipe) tower
   /** Deposit each tool change's purged filament on a prime (a.k.a. wipe) tower.
    *  Only meaningful once a config has more than one filament slot; the flush

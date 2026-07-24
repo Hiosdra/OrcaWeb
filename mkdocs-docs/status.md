@@ -2,7 +2,7 @@
 
 This page describes the current state of the project: implemented features and known limitations. Planned-but-not-yet-implemented work lives in GitHub issues, linked below, instead of an in-page roadmap.
 
-Last updated: **2026-07-23** · engine version: **OrcaSlicer v2.4.2** (self-built, live in production) · app version: **v0.8.9**
+Last updated: **2026-07-24** · engine version: **OrcaSlicer v2.4.2** (self-built, live in production) · app version: **v0.8.9**
 
 ---
 
@@ -20,6 +20,7 @@ Last updated: **2026-07-23** · engine version: **OrcaSlicer v2.4.2** (self-buil
 | Bed grid — dynamic size | Bed size read from the printer preset or machine profile |
 | Bed shape (`bed_shape`) | Rectangular or circular (e.g. Bambu Lab P1S); visualised in both the 3D preview and G-code viewer |
 | Fuzzy skin (surface roughness) | Modes: none / external (outer walls only) / all; thickness 0.05–2 mm, point spacing 0.1–5 mm; libnoise compiled for WASM (Perlin/Billow/RidgedMulti/Voronoi) — since PR #32 |
+| Variable (adaptive) layer height | Toggle + quality slider (0–1) under Quality; the engine varies layer thickness across Z from the model's geometry — thinner layers on detailed/sloped regions, thicker on flat ones — bounded by the printer's min/max layer height. Matches desktop OrcaSlicer's Adaptive tool ([#138](https://github.com/Hiosdra/OrcaWeb/issues/138)) |
 | Multi-file — sequential queue | Drag & drop multiple files → each sliced separately, own G-code to download |
 | Multi-file — one plate | "One plate (N)" button — all STLs auto-arranged via `arrange_objects()` (libnest2d), one G-code |
 | Model / Settings / Slice tabs | Smooth navigation, tabs locked until a file is loaded |
@@ -49,6 +50,7 @@ Last updated: **2026-07-23** · engine version: **OrcaSlicer v2.4.2** (self-buil
 | `orc_obj_to_stl` | WASM export: OBJ → binary STL conversion without needing `orc_init`; result returned as an `ArrayBuffer` to the worker |
 | `orc_slice_multi` | Multiple STLs → one G-code: auto-arrange via `arrange_objects()` (libnest2d + NLopt); output identical in shape to `orc_slice` |
 | Multi-material + real multi-nozzle printers | Filament slots are defined in the Settings panel and assigned per object on the Slice tab, reaching the engine as `orc_slice_multi`'s `extruder_ids` (OrcaSlicer's per-object `"extruder"` key, normalised to `*_filament_id` by `normalize_fdm()`). `filament_map` decides whether slots share one nozzle (AMS-style) or drive genuine T0/T1 tool changes on a real dual-nozzle machine such as a Bambu Lab H2D — see `withFilamentSlots()` in `src/lib/profiles.ts`. Unblocked in [#160](https://github.com/Hiosdra/OrcaWeb/pull/160): the crash that had gated real multi-nozzle profiles off was the bridge joining every multi-value option with `,` regardless of its type, not the engine |
+| Variable (adaptive) layer height | `orc_init` reads two pseudo-keys — `adaptive_layer_height` (bool) + `adaptive_layer_height_quality` (0–1) — and, when on, the bridge computes each object's `layer_height_profile` with `layer_height_profile_adaptive()` after `print.apply()` and before `print.process()`, exactly as desktop OrcaSlicer's Adaptive button does ([#138](https://github.com/Hiosdra/OrcaWeb/issues/138)) |
 | `orc_write_3mf` | WASM export: writes the mesh + embedded config as `.3mf` via `Slic3r::store_bbs_3mf()` — no plate/G-code/thumbnail data (no `PartPlateList` in the headless bridge); verified by the smoke test (ZIP unpacks, `3D/3dmodel.model` + `Metadata/*.config` present) |
 | `orc_read_3mf` | WASM import: reads `.3mf` via `Slic3r::load_bbs_3mf()` — merged binary STL (per-instance/volume transforms applied by `ModelObject::mesh()`) + config JSON (same keys as OrcaSlicer's native `.config`, parsed by the existing `parseOrcaProfileJson()`); verified by the smoke test (round-trip: triangle count + config keys) |
 | No `slicer.data` | The headless flat-config slicer never reads `orca/resources` → data file reduced **200 MB → 0** |
@@ -117,7 +119,6 @@ OrcaSlicer's C++ source is patched in place (`orca-wasm/patches/apply.py`) for W
 
 Tracked in GitHub issues rather than listed here, so this page doesn't drift into a stale roadmap:
 
-- [#138](https://github.com/Hiosdra/OrcaWeb/issues/138) — Variable layer height
 - [#139](https://github.com/Hiosdra/OrcaWeb/issues/139) — Support enforcement / blocking
 - [#108](https://github.com/Hiosdra/OrcaWeb/issues/108) — Full "sliced project" 3MF export (per-plate G-code, plate thumbnails); `orc_write_3mf`/`orc_read_3mf` intentionally cover mesh + embedded config only, since the headless bridge has no `PartPlateList` to source that from — this is a documented non-goal for the current bridge shape, not a plain backlog item
 

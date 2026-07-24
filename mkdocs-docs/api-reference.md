@@ -57,6 +57,7 @@ Initialise the slicer with a JSON configuration object. Must be called before `o
 - Starts from OrcaSlicer's built-in defaults so all required fields are always present.
 - Unknown JSON keys are silently ignored.
 - The special keys `bed_size_x`, `bed_size_y`, and `bed_shape` are extracted for model centering and are **not** forwarded to the OrcaSlicer config engine.
+- The pseudo-keys `remove_mixed_temp_restriction` (bool), `adaptive_layer_height` (bool), and `adaptive_layer_height_quality` (0–1 float) are likewise read here rather than forwarded as engine options: the first toggles the mixed-nozzle-temperature guard before `validate()`, and the latter two drive per-object variable layer height computed at slice time (see `orc_slice`). Each accepts a JSON bool/number or its `"1"`/`"0"`/`"true"`/`"false"` string form.
 - On success the configuration persists for all subsequent `orc_slice` / `orc_slice_multi` calls on the same session until `orc_init` is called again.
 
 ---
@@ -545,6 +546,8 @@ interface OrcaConfig {
   top_shell_layers?: number
   bottom_shell_layers?: number
   wall_loops?: number
+  adaptive_layer_height?: boolean            // variable layer height (pseudo-key)
+  adaptive_layer_height_quality?: number     // 0–1, default 0.5; lower = finer
 
   // Infill
   sparse_infill_density?: number   // 0–100
