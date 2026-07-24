@@ -386,6 +386,8 @@ See [API Reference → Config JSON schema](api-reference.md#config-json-schema) 
   // Layer
   layer_height: 0.2,        // mm
   initial_layer_height: 0.2,
+  adaptive_layer_height: false,        // variable layer height (pseudo-key, #138)
+  adaptive_layer_height_quality: 0.5,  // 0–1, lower = finer; only used when the toggle is on
 
   // Filament
   filament_type: 'PLA',

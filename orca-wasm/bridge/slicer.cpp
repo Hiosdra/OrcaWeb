@@ -57,6 +57,7 @@
 #include "libslic3r/ModelArrange.hpp"
 #include "libslic3r/Print.hpp"
 #include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/Slicing.hpp"
 #include "libslic3r/Preset.hpp"
 #include "libslic3r/Format/STL.hpp"
 #include "libslic3r/Format/OBJ.hpp"
@@ -118,6 +119,20 @@ struct OrcSession {
     // Print::set_check_multi_filaments_compatibility(false) before validate().
     // See issue #164.
     bool remove_mixed_temp_restriction = false;
+    // Variable (adaptive) layer height, matching desktop OrcaSlicer's Adaptive
+    // tool: when on, orc_slice / orc_slice_multi compute a per-object layer
+    // height profile from the mesh geometry (layer_height_profile_adaptive)
+    // before slicing, so detailed regions get thinner layers and flat regions
+    // thicker ones. Off by default (a fixed layer height is the engine default
+    // and what every preset expects). Not native engine config keys — read
+    // here as pseudo-keys (like bed_size_* above) and applied in
+    // apply_adaptive_layer_height(). See issue #138.
+    bool  adaptive_layer_height = false;
+    // Quality/speed factor forwarded verbatim to layer_height_profile_adaptive
+    // (0..1, engine's own range; desktop's slider default is 0.5). Lower =
+    // finer detail (thinner layers, smaller cusp error); higher = faster
+    // (thicker layers).
+    float adaptive_layer_height_quality = 0.5f;
 };
 
 // Slicing blocks the worker's event loop. MAIN_THREAD_EM_ASM delivers this
@@ -277,6 +292,20 @@ static std::string json_val_to_string(const nlohmann::json& v) {
     return "";
 }
 
+// Read a pseudo-key boolean flag out of the config JSON (the bridge's own
+// keys — remove_mixed_temp_restriction, adaptive_layer_height — that never
+// reach the engine config). Accepts a JSON bool, a number (non-zero = true),
+// or the "1"/"true" strings the JS config layer serializes booleans as;
+// anything else (including a missing key) yields `dflt`.
+static bool json_flag(const nlohmann::json& j, const char* key, bool dflt = false) {
+    if (!j.contains(key)) return dflt;
+    const auto& v = j[key];
+    if (v.is_boolean()) return v.get<bool>();
+    if (v.is_number())  return v.get<double>() != 0.0;
+    if (v.is_string())  { const std::string s = v.get<std::string>(); return s == "1" || s == "true"; }
+    return dflt;
+}
+
 /**
  * Serialize a JSON array into the single string OrcaSlicer's deserializer
  * expects for that specific option — the separator is a property of the
@@ -372,6 +401,30 @@ static void zero_plate_origin(Slic3r::Print& print) {
 // printer_model the JS layer already sends.
 static void set_is_bbl_printer(Slic3r::Print& print, const Slic3r::DynamicPrintConfig& config) {
     print.is_BBL_printer() = boost::starts_with(config.opt_string("printer_model"), "Bambu Lab");
+}
+
+// Compute a per-object adaptive layer height profile and store it on each
+// object, matching what desktop OrcaSlicer's "Adaptive" button does before a
+// slice (GLCanvas3D::LayersEditing::adaptive_layer_height_profile). Must run
+// after print.apply() — that's what populates each PrintObject's slicing
+// parameters (update_slicing_parameters), and layer_height_profile_adaptive
+// needs them — but before print.process(), which reads the profile back off
+// the model object (PrintObject::update_layer_height_profile, via slice()).
+//
+// The profile is set on print.objects()' model objects, which are the copies
+// Print owns after apply() (Print::apply → m_model.assign_copy), so this is
+// the same object process() later reads. Using the PrintObject's own
+// slicing_parameters() guarantees the profile's Z samples line up exactly with
+// what update_layer_height_profile validates against, so it is not discarded.
+// The const_cast mirrors the desktop code, which casts away model_object()'s
+// constness for exactly this assignment.
+static void apply_adaptive_layer_height(Slic3r::Print& print, float quality_factor) {
+    for (Slic3r::PrintObject* obj : print.objects_mutable()) {
+        const Slic3r::SlicingParameters& sp = obj->slicing_parameters();
+        if (!sp.valid) continue;
+        std::vector<double> profile = Slic3r::layer_height_profile_adaptive(sp, *obj->model_object(), quality_factor);
+        const_cast<Slic3r::ModelObject*>(obj->model_object())->layer_height_profile.set(std::move(profile));
+    }
 }
 
 // Place the prime (wipe) tower the way desktop OrcaSlicer does. Its
@@ -553,20 +606,28 @@ int orc_init(void* session_ptr, const char* json_data, int json_len) {
         // matching desktop's "Remove mixed temperature restriction". Not a
         // native engine config key — read here as a pseudo-key (like bed_size_*
         // above) and applied via Print::set_check_multi_filaments_compatibility
-        // before validate() in the slice functions. Accepts a JSON bool, or the
-        // "1"/"0" / "true"/"false" strings the config layer serializes it as.
+        // before validate() in the slice functions.
+        session->remove_mixed_temp_restriction = json_flag(j, "remove_mixed_temp_restriction");
+
+        // Variable (adaptive) layer height (issue #138), matching desktop's
+        // Adaptive tool. Pseudo-keys like the two above — not native engine
+        // config options — applied to the model's layer_height_profile in
+        // apply_adaptive_layer_height() rather than through the config.
         {
-            session->remove_mixed_temp_restriction = false;
-            if (j.contains("remove_mixed_temp_restriction")) {
-                const auto& v = j["remove_mixed_temp_restriction"];
-                if (v.is_boolean())
-                    session->remove_mixed_temp_restriction = v.get<bool>();
-                else if (v.is_number())
-                    session->remove_mixed_temp_restriction = v.get<double>() != 0.0;
+            session->adaptive_layer_height = json_flag(j, "adaptive_layer_height");
+            session->adaptive_layer_height_quality = 0.5f;
+            if (j.contains("adaptive_layer_height_quality")) {
+                const auto& v = j["adaptive_layer_height_quality"];
+                double q = 0.5;
+                if (v.is_number())
+                    q = v.get<double>();
                 else if (v.is_string()) {
-                    const std::string s = v.get<std::string>();
-                    session->remove_mixed_temp_restriction = (s == "1" || s == "true");
+                    try { q = std::stod(v.get<std::string>()); } catch (...) { q = 0.5; }
                 }
+                // Clamp to the engine's expected 0..1 range; next_layer_height()
+                // lerps against it and an out-of-range value would extrapolate
+                // past min/max layer height.
+                session->adaptive_layer_height_quality = static_cast<float>(std::min(1.0, std::max(0.0, q)));
             }
         }
 
@@ -674,6 +735,10 @@ int orc_slice(void* session_ptr, const void* stl_data, int stl_len,
         // rather than as a fatal error.
         if (session->remove_mixed_temp_restriction)
             print.set_check_multi_filaments_compatibility(false);
+        // Variable (adaptive) layer height (issue #138) — compute after apply()
+        // (slicing parameters are populated), before validate()/process().
+        if (session->adaptive_layer_height)
+            apply_adaptive_layer_height(print, session->adaptive_layer_height_quality);
         attach_progress_callback(print);
 
         {
@@ -977,6 +1042,13 @@ int orc_slice_multi(
         // for single-nozzle multi-material plates (issue #164).
         if (session->remove_mixed_temp_restriction)
             print.set_check_multi_filaments_compatibility(false);
+        // Variable (adaptive) layer height (issue #138); see orc_slice. With a
+        // multi-object plate the engine requires all objects share the same
+        // layering when a prime tower is on (Print::validate), so an adaptive
+        // multi-material plate with a tower surfaces that as a -6 validation
+        // error rather than silently ignoring the setting.
+        if (session->adaptive_layer_height)
+            apply_adaptive_layer_height(print, session->adaptive_layer_height_quality);
         attach_progress_callback(print);
 
         {

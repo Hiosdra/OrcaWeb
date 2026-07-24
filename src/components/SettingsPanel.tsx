@@ -88,6 +88,7 @@ const BASIC_SETTING_FIELDS: ConfigField[] = [
   'nozzle_temperature',
   'bed_temperature',
   'layer_height',
+  'adaptive_layer_height',
   'wall_loops',
   'initial_layer_print_height',
   'top_shell_layers',
@@ -121,6 +122,11 @@ const OVERRIDE_LABELS: Partial<Record<ConfigField, string>> = {
   fuzzy_skin_point_dist: 'Fuzzy skin point distance',
   enable_prime_tower: 'Prime tower',
   prime_tower_width: 'Prime tower width',
+  adaptive_layer_height: 'Variable layer height',
+  // Shown in the "Hidden settings" summary if the quality override survives the
+  // toggle being turned back off (its slider stops rendering then); the raw key
+  // would otherwise read "adaptive layer height quality".
+  adaptive_layer_height_quality: 'Variable layer height quality',
   // Shown in the "Hidden settings" summary if the override is still set after
   // the slot count drops back to one (its toggle stops rendering then); the
   // raw key would otherwise read "remove mixed temp restriction" (#164).
@@ -205,6 +211,7 @@ export function SettingsPanel({
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const densityId = useId()
+  const adaptiveQualityId = useId()
   const [savingPresetName, setSavingPresetName] = useState<string | null>(null)
 
   const overriddenKeys = overriddenFields(overrides)
@@ -216,7 +223,11 @@ export function SettingsPanel({
     [overrides, onRevertField],
   )
   const densityOverride = overrideMarker(overrideContext, 'sparse_infill_density')
+  const adaptiveQualityOverride = overrideMarker(overrideContext, 'adaptive_layer_height_quality')
   const visibleOverrideFields = new Set<ConfigField>(BASIC_SETTING_FIELDS)
+  // The adaptive-quality slider only renders while the toggle is on, so its
+  // override only counts as visible then (mirrors the prime-tower width field).
+  if (config.adaptive_layer_height) visibleOverrideFields.add('adaptive_layer_height_quality')
   if (showAdvanced) {
     const fuzzySkinEnabled = (config.fuzzy_skin ?? DISPLAY_DEFAULTS.fuzzy_skin) !== 'none'
     for (const field of ADVANCED_SETTING_FIELDS) {
@@ -732,6 +743,61 @@ export function SettingsPanel({
             Arachne gives better wall quality but can take much longer (even minutes) on models with lots of small, thin
             features. Switch to Classic if a slice seems stuck.
           </p>
+
+          {/* Variable (adaptive) layer height (#138) — the engine varies layer
+              thickness across Z from the model's geometry, so the quality
+              sub-slider only means anything once the toggle is on. */}
+          <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+            <ToggleField
+              label="Variable layer height"
+              field="adaptive_layer_height"
+              value={config.adaptive_layer_height ?? false}
+              onChange={(v) => onChange({ adaptive_layer_height: v })}
+            />
+            {config.adaptive_layer_height && (
+              <div className="mt-3">
+                {/* A range input has no border to tint, so the override marker
+                    rides on the label — same treatment as the infill slider. */}
+                <div className="flex items-center justify-between gap-1 mb-1">
+                  {/* "Quality / Speed" verbatim from desktop OrcaSlicer's own
+                      adaptive slider — the value is a tradeoff axis, not a
+                      "more is better" quality score (0 = finest, 1 = fastest),
+                      so a plain "Quality" label would read backwards. */}
+                  <label
+                    htmlFor={adaptiveQualityId}
+                    className={clsx(
+                      'block text-xs font-medium',
+                      adaptiveQualityOverride.overridden ? 'text-amber-700' : 'text-slate-600',
+                    )}
+                  >
+                    Quality / Speed:{' '}
+                    {(config.adaptive_layer_height_quality ?? DISPLAY_DEFAULTS.adaptive_layer_height_quality).toFixed(
+                      2,
+                    )}
+                  </label>
+                  {adaptiveQualityOverride.revertButton}
+                </div>
+                <input
+                  id={adaptiveQualityId}
+                  data-testid="setting-adaptive_layer_height_quality"
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={config.adaptive_layer_height_quality ?? DISPLAY_DEFAULTS.adaptive_layer_height_quality}
+                  onChange={(e) => onChange({ adaptive_layer_height_quality: Number(e.target.value) })}
+                  className={clsx(
+                    'w-full',
+                    adaptiveQualityOverride.overridden ? 'accent-amber-500' : 'accent-orca-500',
+                  )}
+                />
+                <p className="mt-1 text-xs text-slate-400">
+                  Lower = finer detail (thinner layers, slower); higher = faster (thicker layers). Layer thickness stays
+                  within the printer's min/max layer height.
+                </p>
+              </div>
+            )}
+          </div>
         </Section>
 
         {/* Infill */}
