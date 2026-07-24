@@ -1,0 +1,2534 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="OrcaSlicer running in the browser via WebAssembly">
+      
+      
+      
+        <link rel="canonical" href="https://hiosdra.github.io/OrcaWeb/docs/gcode-compression-benchmark/">
+      
+      
+        <link rel="prev" href="../st-mt-benchmark/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Benchmark: G-code Compression - OrcaWeb</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#g-code-compression-benchmark-plan" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="OrcaWeb" class="md-header__button md-logo" aria-label="OrcaWeb" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            OrcaWeb
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Benchmark: G-code Compression
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Hiosdra/OrcaWeb" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Hiosdra/OrcaWeb
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../getting-started/" class="md-tabs__link">
+          
+  
+  
+  Users
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../architecture/" class="md-tabs__link">
+          
+  
+  
+  Developers
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../status/" class="md-tabs__link">
+          
+  
+  
+  Project
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../st-mt-benchmark/" class="md-tabs__link">
+          
+  
+  
+  Internals & Reports
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="OrcaWeb" class="md-nav__button md-logo" aria-label="OrcaWeb" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    OrcaWeb
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Hiosdra/OrcaWeb" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Hiosdra/OrcaWeb
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Users
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Users
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Profiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developers
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developers
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../wasm-build/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building WASM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../status/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_2" id="__nav_4_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture Decisions
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture Decisions
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-001-client-side-wasm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-001: Client-Side WASM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-002-tech-stack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-002: Technology Stack
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-003-web-worker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-003: Web Worker + Singleton
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-004-self-built-wasm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-004: Self-Built WASM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-005-no-slicer-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-005: No slicer.data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-006-patch-strategy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-006: Engine Patch Strategy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-007-tbb-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-007: Sequential TBB Stubs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-008-session-handle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-008: Session-Scoped Engine State
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-009-wasm-smoke-test/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-009: WASM Build Smoke Test
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-010-e2e-smoke-test/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-010: E2E UI Smoke Test
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-011-multithreaded-engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-011: Multithreaded Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internals & Reports
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Internals & Reports
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../st-mt-benchmark/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmark: ST vs MT Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmark: G-code Compression
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmark: G-code Compression
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#motivation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Motivation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#candidates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Candidates
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Candidates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#base-formats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Base formats
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#general-purpose-compressors-applied-on-top-of-f1f4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        General-purpose compressors (applied on top of F1–F4)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#matrix-pruning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Matrix pruning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#domain-specific-preprocessing-phase-2-exploratory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Domain-specific preprocessing (phase 2, exploratory)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test-corpus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test corpus
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Test corpus">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#run-1-corpus-procedural-actually-generated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 1 corpus (procedural, actually generated)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metrics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deviations-from-the-original-plan-run-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deviations from the original plan (Run 1)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#methodology" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Methodology
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hypotheses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hypotheses
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#size-bytes-ratio-vs-that-files-ascii-baseline-in-parentheses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Size (bytes, ratio vs that file's ASCII baseline in parentheses)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compression-time-cpu-cost-proxy-large_functionalgcode-14463825-bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compression time (CPU-cost proxy, large_functional.gcode, 14,463,825 bytes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pi-decompression-large-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pi decompression (large file)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproducing-this-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproducing this run
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision-criteria" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision criteria
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decision criteria">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#provisional-recommendation-phase-1-only-not-final" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provisional recommendation (Phase 1 only — not final)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#motivation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Motivation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#candidates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Candidates
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Candidates">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#base-formats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Base formats
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#general-purpose-compressors-applied-on-top-of-f1f4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        General-purpose compressors (applied on top of F1–F4)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#matrix-pruning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Matrix pruning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#domain-specific-preprocessing-phase-2-exploratory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Domain-specific preprocessing (phase 2, exploratory)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test-corpus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test corpus
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Test corpus">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#run-1-corpus-procedural-actually-generated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 1 corpus (procedural, actually generated)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metrics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deviations-from-the-original-plan-run-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deviations from the original plan (Run 1)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#methodology" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Methodology
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hypotheses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hypotheses
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#size-bytes-ratio-vs-that-files-ascii-baseline-in-parentheses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Size (bytes, ratio vs that file's ASCII baseline in parentheses)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compression-time-cpu-cost-proxy-large_functionalgcode-14463825-bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compression time (CPU-cost proxy, large_functional.gcode, 14,463,825 bytes)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pi-decompression-large-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pi decompression (large file)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproducing-this-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproducing this run
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision-criteria" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision criteria
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Decision criteria">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#provisional-recommendation-phase-1-only-not-final" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provisional recommendation (Phase 1 only — not final)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="g-code-compression-benchmark-plan">G-code Compression Benchmark Plan</h1>
+<p><strong>Status: Phase 1 (offline size benchmark) executed on a procedurally generated corpus — see <a href="#results">Results</a> and <a href="#deviations-from-the-original-plan-run-1">Deviations from the original plan</a> below. Phases 2–3 (browser and Raspberry Pi timing) are not yet run.</strong></p>
+<h2 id="motivation">Motivation</h2>
+<p>The target pipeline sends slicer output over the network:</p>
+<pre class="mermaid"><code>flowchart LR
+    A[Browser&lt;br/&gt;OrcaWeb WASM slicer] --&gt;|upload| B[Proxy server]
+    B --&gt;|forward| C[Raspberry Pi&lt;br/&gt;at the printer]
+    C --&gt; D[Printer]</code></pre>
+<p>G-code is compressed <strong>in the browser</strong> right after slicing, travels through the proxy as opaque bytes, and is decompressed <strong>on the Raspberry Pi</strong>. The primary optimisation target is <strong>bandwidth</strong> (bytes on the wire); browser CPU cost and Pi decompression cost are secondary constraints.</p>
+<p>Plain ASCII G-code is extremely redundant (repeated <code>G1 X.. Y.. E..</code> tokens, monotonic coordinates, fixed decimal precision), so both domain-specific formats and general-purpose compressors should yield large wins. This benchmark quantifies which combination wins for our pipeline.</p>
+<h2 id="candidates">Candidates</h2>
+<h3 id="base-formats">Base formats</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Format</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>F1</td>
+<td>ASCII G-code</td>
+<td><strong>Baseline.</strong> Output of the OrcaWeb engine as-is</td>
+</tr>
+<tr>
+<td>F2</td>
+<td>ASCII G-code, comments stripped</td>
+<td>Slicer comments are large (<code>; feature</code>, config block); strip everything except the header/config needed by the firmware or ship metadata out-of-band</td>
+</tr>
+<tr>
+<td>F3</td>
+<td><a href="https://github.com/scottmudge/OctoPrint-MeatPack">MeatPack</a></td>
+<td>4-bit packing of the 15 most common G-code characters; used by PrusaLink/OctoPrint; streams trivially</td>
+</tr>
+<tr>
+<td>F4</td>
+<td><a href="https://github.com/prusa3d/libbgcode">Prusa Binary G-code</a> (<code>.bgcode</code>)</td>
+<td>Block-structured binary container. Per-block compression: <code>none</code> / <code>deflate</code> / <code>heatshrink 11,4</code> / <code>heatshrink 12,4</code>; G-code blocks additionally MeatPack-encoded. Test the default profile <strong>and</strong> a variant with internal compression disabled (F4-raw) to allow an external compressor to work on raw blocks</td>
+</tr>
+</tbody>
+</table>
+<h3 id="general-purpose-compressors-applied-on-top-of-f1f4">General-purpose compressors (applied on top of F1–F4)</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Compressor</th>
+<th>Levels to test</th>
+<th>Browser-side encoder</th>
+<th>Pi-side decoder</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>C1</td>
+<td>gzip (deflate)</td>
+<td>1, 6, 9</td>
+<td><strong>native</strong> <code>CompressionStream('gzip')</code> for the default level (no level parameter in the API, ~6); levels 1/9 via WASM/JS (<a href="https://github.com/101arrowz/fflate">fflate</a> or pako) and offline</td>
+<td>zlib (everywhere)</td>
+</tr>
+<tr>
+<td>C2</td>
+<td>Brotli</td>
+<td>5, 9, 11</td>
+<td>WASM (<a href="https://github.com/httptoolkit/brotli-wasm">brotli-wasm</a>)</td>
+<td><code>brotli</code> package</td>
+</tr>
+<tr>
+<td>C3</td>
+<td>Zstandard</td>
+<td>3, 12, 19, 22 (<code>--ultra</code>)</td>
+<td>WASM (<a href="https://github.com/OneIdentity/zstd-js">fzstd/zstd-wasm</a> or similar)</td>
+<td><code>zstd</code> (apt)</td>
+</tr>
+<tr>
+<td>C4</td>
+<td>Zstandard + trained dictionary</td>
+<td>19 + 64 KB dict</td>
+<td>WASM, dict shipped with the app</td>
+<td><code>zstd -D</code></td>
+</tr>
+<tr>
+<td>C5</td>
+<td>XZ / LZMA2 (the 7-Zip algorithm)</td>
+<td>6, 9e</td>
+<td>WASM (<a href="https://github.com/SteveSanderson/xz-wasm">xz-wasm</a>)</td>
+<td><code>xz</code> (apt)</td>
+</tr>
+<tr>
+<td>C6</td>
+<td>7z PPMd</td>
+<td><code>-m0=PPMd</code></td>
+<td><em>reference only</em> (no practical browser encoder)</td>
+<td><code>7zip</code> (apt)</td>
+</tr>
+<tr>
+<td>C7</td>
+<td>bzip2</td>
+<td>9</td>
+<td><em>reference only</em></td>
+<td>bzip2</td>
+</tr>
+</tbody>
+</table>
+<p>C6/C7 are measured offline for the size table only — they set the "how much is left on the table" bound, not deployment candidates.</p>
+<h3 id="matrix-pruning">Matrix pruning</h3>
+<p>The full cross-product is 4 formats × ~15 compressor configs. Prune it:</p>
+<ul>
+<li><strong>F4 (bgcode with internal heatshrink/deflate) × C1–C5</strong> — expect near-zero gains (already-compressed data); run one config (zstd-19) just to confirm and then drop.</li>
+<li>MeatPack (F3) and bgcode (F4) exist mainly so firmware/MCU can decode them cheaply. Our decoder is a Raspberry Pi running Linux, so they only stay in the race if they <em>stack</em> well with a general compressor (F3×C2, F3×C3).</li>
+<li>Main contenders expected: <strong>F1/F2 × C2 (brotli-11), C3 (zstd-19/22), C5 (xz-9e)</strong> vs <strong>F4 default</strong> vs <strong>F4-raw × C3/C5</strong>.</li>
+</ul>
+<h3 id="domain-specific-preprocessing-phase-2-exploratory">Domain-specific preprocessing (phase 2, exploratory)</h3>
+<p>Only worth exploring if general compressors leave a big gap to C6/PPMd:</p>
+<ul>
+<li><strong>Columnar/token transform</strong> — split the G-code into per-field streams (opcodes, X, Y, Z, E, F values), delta-encode numeric streams, compress each with zstd. This is essentially what makes domain formats win; measure whether it beats brotli-11 by enough to justify a custom format.</li>
+<li><strong>Arc fitting (G2/G3)</strong> and <strong>coordinate precision</strong> are <em>slicer settings</em>, not transport encodings — they change the toolpath itself. Note their effect once (arc fitting on/off on one model) but keep them out of the main comparison; the transport must not alter what gets printed.</li>
+</ul>
+<h2 id="test-corpus">Test corpus</h2>
+<p>All files generated by the <strong>OrcaWeb engine itself</strong> (pinned WASM build version, pinned profiles), committed as a manifest (model + settings hash), not as raw G-code:</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>Purpose</th>
+<th>Expected size</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Calibration cube</td>
+<td>small-file overhead / dictionary win</td>
+<td>~100 KB</td>
+</tr>
+<tr>
+<td>3DBenchy</td>
+<td>canonical mid-size print</td>
+<td>~3–5 MB</td>
+</tr>
+<tr>
+<td>Voron cube</td>
+<td>mixed features (already a repo smoke-test model)</td>
+<td>~1–3 MB</td>
+</tr>
+<tr>
+<td>Large functional part (e.g. scaled Benchy 250%, supports + 3 walls)</td>
+<td>multi-hour print, the case where bandwidth actually hurts</td>
+<td>≥50 MB</td>
+</tr>
+<tr>
+<td>Spiral vase mode model</td>
+<td>long continuous moves, atypical redundancy profile</td>
+<td>~1–2 MB</td>
+</tr>
+</tbody>
+</table>
+<p>Each sliced in <strong>two flavors</strong>: Marlin and Klipper (different verbosity), giving 10 corpus files. <code>.bgcode</code> variants exported for the same slices.</p>
+<h3 id="run-1-corpus-procedural-actually-generated">Run 1 corpus (procedural, actually generated)</h3>
+<p>No access to a user's local <code>Downloads</code> folder or a vendored third-party STL set was available for this run (see <a href="#deviations-from-the-original-plan-run-1">Deviations</a>). Instead, <code>scripts/generate-corpus.mjs</code> procedurally generates five meshes spanning the same size/shape intent as the aspirational corpus above and slices them with the real OrcaWeb WASM engine (<code>wasm-v2.4.0-patch5</code>, default profile from <code>orca-wasm/scripts/smoke-test.mjs</code>, single G-code flavor):</p>
+<table>
+<thead>
+<tr>
+<th>id</th>
+<th>Stand-in for</th>
+<th>Mesh</th>
+<th>Profile deltas</th>
+<th>Triangles</th>
+<th>G-code size</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>calibration_cube</code></td>
+<td>Calibration cube</td>
+<td>20 mm cube</td>
+<td>— (2 walls, 15% grid infill, 0.2 mm layers)</td>
+<td>12</td>
+<td>177,797 B</td>
+</tr>
+<tr>
+<td><code>small_organic</code></td>
+<td>— (extra small-file data point)</td>
+<td>icosphere, subdiv 2, r=12 mm</td>
+<td>same as above</td>
+<td>320</td>
+<td>578,809 B</td>
+</tr>
+<tr>
+<td><code>medium_organic</code></td>
+<td>3DBenchy / Voron cube</td>
+<td>icosphere, subdiv 3, r=30 mm</td>
+<td>same as above</td>
+<td>1,280</td>
+<td>2,675,996 B</td>
+</tr>
+<tr>
+<td><code>vase_mode</code></td>
+<td>Spiral vase model</td>
+<td>open-top truncated cone, r=35→15mm, h=120mm</td>
+<td>1 wall, 0 top / 1 bottom shell, 0% infill, <code>spiral_mode: true</code></td>
+<td>128</td>
+<td>1,711,358 B</td>
+</tr>
+<tr>
+<td><code>large_functional</code></td>
+<td>Large functional part</td>
+<td>icosphere, subdiv 4, r=45 mm</td>
+<td>3 walls, 5/5 shells, 30% infill, 0.12 mm layers</td>
+<td>5,120</td>
+<td>14,463,825 B</td>
+</tr>
+</tbody>
+</table>
+<p><code>large_functional</code> landed at ~14.5 MB rather than the ≥50 MB originally targeted (procedural meshes and the time budget for this run made a multi-hour-print-scale file impractical); see the deviations note on what that means for the results below.</p>
+<h2 id="metrics">Metrics</h2>
+<ol>
+<li><strong>Compressed size</strong> (bytes) → ratio vs F1 baseline. <em>Primary metric.</em></li>
+<li><strong>Browser compression time &amp; peak memory</strong> — measured inside a Web Worker on a mid-range laptop (Chrome, stable version pinned in the report) for deployable candidates only. Reported as absolute time and as % of the slicing time for the same model.</li>
+<li><strong>Pi decompression time &amp; memory</strong> — measured on a Raspberry Pi Zero 2 W (worst case) and Pi 4. Must comfortably beat the print-start latency budget (&lt; 2 s for the 50 MB file, or streamable).</li>
+<li><strong>Streamability</strong> — can encoding/decoding run incrementally so upload starts before slicing finishes and printing state doesn't need the whole file in RAM? (gzip/brotli/zstd/xz: yes; bgcode: per-block; 7z container: no.)</li>
+<li><strong>Implementation complexity</strong> — native vs WASM in the browser, package availability on the Pi, licensing, extra payload the app must ship (WASM codec size, dictionary size — count these against the first-transfer cost).</li>
+</ol>
+<h2 id="deviations-from-the-original-plan-run-1">Deviations from the original plan (Run 1)</h2>
+<p>This run executed inside an isolated cloud container with no access to a user's local machine (no <code>Downloads</code> folder to pull real-world models from) and no physical Raspberry Pi. To still produce real, trustworthy numbers rather than leave the whole plan as placeholders, the following substitutions were made — each is called out inline next to the affected result:</p>
+<ul>
+<li><strong>Corpus</strong>: procedurally generated meshes (cube, icospheres, an open-top cone) instead of downloaded/vendored STLs (3DBenchy, Voron cube). This mirrors <code>orca-wasm/scripts/smoke-test.mjs</code>'s own policy of never vendoring a third-party STL in this repo. Absolute G-code sizes will differ from a real Benchy/Voron slice, but the sizes span the same ~150 KB–15 MB range the aspirational corpus targeted, which is what matters for how compression ratio scales with file size.</li>
+<li><strong>Single G-code flavor</strong>: the Marlin/Klipper verbosity split was descoped — no verified config key for G-code flavor was found in the current WASM bridge (<code>orca-wasm/bridge/slicer.cpp</code> takes a generic key/value config; flavor selection isn't exposed there yet) and guessing one risked silently no-op'ing. All files use the engine's default flavor.</li>
+<li><strong><code>large_functional</code> is ~14.5 MB, not ≥50 MB</strong>: procedural mesh complexity and this run's time budget made a true multi-hour-print-scale file impractical. Ratios are already stable between the 2.7 MB and 14.5 MB corpus entries (within ~0.1:1 of each other for every candidate), which is evidence — not proof — that they hold at larger sizes too.</li>
+<li><strong>MeatPack (F3)</strong> is re-implemented from scratch as an <em>adaptive</em> 4-bit packer: it builds its 15-symbol table from each file's own byte-frequency histogram, rather than reciting upstream's fixed table from memory (a wrong fixed table would silently produce plausible-looking but bogus numbers). The encoder round-trips every file through a decoder and asserts byte-exact equality before reporting a size, so a broken implementation fails loudly rather than misreporting. This measures the <em>mechanism</em> MeatPack uses (byte-level 4-bit packing tuned to the data), not upstream's exact bit-for-bit output.</li>
+<li><strong>Prusa bgcode (F4)</strong> is approximated by running the real <code>heatshrink2</code> library (the actual heatshrink C implementation, via its Python binding) directly on the raw G-code text, at both window/lookahead profiles <code>libbgcode</code> documents (<code>11,4</code> and <code>12,4</code>). This is a real, accurate measurement of bgcode's compression <em>backend</em>, just without the container framing (block headers, CRC32 checksums, thumbnail/metadata blocks) — fixed overhead of a few hundred bytes total, negligible at these file sizes. It does not require building <code>libbgcode</code> itself.</li>
+<li><strong>Phases 2 and 3 (browser Worker timing, physical Raspberry Pi decompression timing) were not run</strong> — no browser and no Pi hardware in this environment. As a partial, clearly-labeled substitute, wall-clock CLI compression time was measured on the container's CPU (Intel Xeon @ 2.10GHz, 4 vCPU) for the largest corpus file — see <a href="#results">Results</a>. This is a <em>relative CPU-cost proxy across algorithms</em>, not an absolute browser-JS/WASM number; a JS/WASM brotli or zstd encoder will have different constants (typically slower than native CLI binaries), so treat only the <em>ordering</em> between candidates as informative, not the absolute seconds.</li>
+</ul>
+<h2 id="methodology">Methodology</h2>
+<ul>
+<li><strong>Phase 0 — corpus generation.</strong> Node script <code>scripts/generate-corpus.mjs</code>: slices a set of models headlessly with the pinned OrcaWeb WASM engine into a local <code>corpus/</code> directory (gitignored) plus a <code>manifest.json</code> recording each model's generation parameters and the resulting profile/size. <strong>Run 1</strong> uses procedurally generated meshes (see <a href="#run-1-corpus-procedural-actually-generated">above</a>) defined inline in the script; a future run with access to real STLs should extend it to read a manifest of model source URL + SHA-256 instead, keeping the rest of the pipeline unchanged.</li>
+<li><strong>Phase 1 — offline size benchmark.</strong> Node script <code>scripts/benchmark-gcode-compression.mjs</code>: takes the <code>corpus/</code> directory produced by phase 0, runs every (format × compressor × level) cell via CLI tools (versions pinned in output), emits a markdown results table. Sizes are deterministic — one run each.</li>
+<li><strong>Phase 2 — browser timing.</strong> Minimal harness page (dev-only route or standalone HTML in <code>scripts/</code>) that loads each corpus file, compresses in a Worker with the deployable codecs, reports median of 5 runs.</li>
+<li><strong>Phase 3 — Pi timing.</strong> Shell script run over SSH on both Pi models; median of 5 runs, <code>time -v</code> for peak RSS.</li>
+<li><strong>Phase 4 — report + decision.</strong> Fill the tables below, write an ADR with the chosen wire format.</li>
+</ul>
+<p>Environment (browser version, Node version, CPU, Pi model/OS, tool versions) is recorded at the top of the results.</p>
+<h2 id="hypotheses">Hypotheses</h2>
+<p>Original hypotheses, checked against the Run 1 data in <a href="#results">Results</a> (ratios below are medians across the 5-file corpus unless noted):</p>
+<ul>
+<li>~~gzip at the native default level ≈ 3.5–4:1~~ — <strong>confirmed</strong>, median 3.47:1 (range 3.14–9.62:1; the 9.62:1 outlier is the tiny calibration cube, a small-file effect).</li>
+<li>~~zstd-19 ≈ 4–4.5:1, brotli-11 ≈ 4.5–5:1, xz-9e ≈ 5:1+~~ — <strong>directionally confirmed but all three ran higher than predicted</strong>: zstd-19 median 5.33:1, brotli-11 median 5.98:1, xz-9e median 5.75:1. xz-9e and brotli-11 are close, with brotli-11 slightly ahead on 3 of 5 files.</li>
+<li>~~bgcode default ≈ 2.5–3:1, expected to lose to F1×brotli-11~~ — <strong>confirmed</strong>: heatshrink(11,4) proxy median 2.31:1, heatshrink(12,4) median 2.56:1, both clearly behind every general compressor tested (worst general-purpose result was gzip -1 at 2.78:1 median, still ahead of both heatshrink profiles).</li>
+<li>~~MeatPack + zstd ≈ zstd alone~~ — <strong>refuted in the negative direction</strong>: MeatPack-adaptive + zstd-19 (median 4.04:1) is <em>worse</em> than zstd-19 on raw text alone (5.33:1), not merely equal. Nibble-packing measurably destroys byte-aligned redundancy the LZ77 stage would otherwise exploit — MeatPack-family encodings and general compressors are alternatives, not a stack.</li>
+<li>~~zstd dictionary only matters for the small-file case~~ — <strong>not tested this run</strong> (C4, a trained dictionary, needs a training corpus larger than 5 files to be meaningful; descoped, see <a href="#deviations-from-the-original-plan-run-1">Deviations</a>).</li>
+<li><strong>New finding (not an original hypothesis)</strong>: comments-stripping (F2) stacked with brotli-11 beats F1×brotli-11 on every file, dramatically on small ones (23.74:1 vs 13.46:1 on the calibration cube) and modestly on large ones (4.44:1 vs 4.39:1 on <code>large_functional</code>) — see the caveat in <a href="#results">Results</a> before adopting it.</li>
+<li><strong>New finding</strong>: 7z/PPMd, included only as a reference bound, is <em>not</em> strictly better than xz-9e — it wins on the largest file (4.22:1 vs 4.14:1) but loses on 3 of the other 4. PPMd's higher-order context modeling seems to pay off more as file size grows; not worth chasing given it has no practical browser encoder.</li>
+<li><strong>New finding</strong>: brotli-11's encode cost is severe — 37s for the 14.5 MB file on this run's CPU vs 9.8s for zstd-19 and 11.6s for xz-9e, while the model that produced that G-code took only 21.6s to slice. See <a href="#results">Results</a> for the full timing table and its caveats.</li>
+</ul>
+<h2 id="results">Results</h2>
+<p><strong>Run 1</strong> — Node v22.22.2, <code>gzip</code> 1.12, <code>brotli</code> 1.1.0, <code>zstd</code> 1.5.5, <code>xz</code> 5.4.5, <code>bzip2</code> 1.0.8, <code>7-Zip</code> 23.01, <code>heatshrink2</code> 0.14.0 (Python), on a 4-vCPU Intel Xeon @ 2.10GHz container. Corpus: see <a href="#run-1-corpus-procedural-actually-generated">Run 1 corpus</a>. Raw JSON: <code>results.json</code> from <code>scripts/benchmark-gcode-compression.mjs</code> (not committed — regenerate with the commands in <a href="#reproducing-this-run">Reproducing this run</a>).</p>
+<h3 id="size-bytes-ratio-vs-that-files-ascii-baseline-in-parentheses">Size (bytes, ratio vs that file's ASCII baseline in parentheses)</h3>
+<table>
+<thead>
+<tr>
+<th>Candidate</th>
+<th>calibration_cube</th>
+<th>small_organic</th>
+<th>medium_organic</th>
+<th>vase_mode</th>
+<th>large_functional</th>
+<th>median ratio</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>F1 raw (baseline)</td>
+<td>177,797 (1.00)</td>
+<td>578,809 (1.00)</td>
+<td>2,675,996 (1.00)</td>
+<td>1,711,358 (1.00)</td>
+<td>14,463,825 (1.00)</td>
+<td>1.00</td>
+</tr>
+<tr>
+<td>F1 × gzip (native default, ~lvl6)</td>
+<td>18,491 (9.62)</td>
+<td>166,666 (3.47)</td>
+<td>805,055 (3.32)</td>
+<td>477,645 (3.58)</td>
+<td>4,600,718 (3.14)</td>
+<td>3.47</td>
+</tr>
+<tr>
+<td>F1 × gzip -1</td>
+<td>24,789 (7.17)</td>
+<td>208,271 (2.78)</td>
+<td>986,914 (2.71)</td>
+<td>574,712 (2.98)</td>
+<td>5,554,498 (2.60)</td>
+<td>2.78</td>
+</tr>
+<tr>
+<td>F1 × gzip -9</td>
+<td>18,018 (9.87)</td>
+<td>165,982 (3.49)</td>
+<td>797,783 (3.35)</td>
+<td>480,575 (3.56)</td>
+<td>4,573,091 (3.16)</td>
+<td>3.49</td>
+</tr>
+<tr>
+<td>F1 × brotli -q5</td>
+<td>15,490 (11.48)</td>
+<td>139,855 (4.14)</td>
+<td>758,256 (3.53)</td>
+<td>473,485 (3.61)</td>
+<td>4,642,265 (3.12)</td>
+<td>3.61</td>
+</tr>
+<tr>
+<td>F1 × brotli -q9</td>
+<td>15,115 (11.76)</td>
+<td>127,309 (4.55)</td>
+<td>604,580 (4.43)</td>
+<td>478,740 (3.57)</td>
+<td>4,433,526 (3.26)</td>
+<td>4.43</td>
+</tr>
+<tr>
+<td><strong>F1 × brotli -q11</strong></td>
+<td><strong>13,211 (13.46)</strong></td>
+<td><strong>96,306 (6.01)</strong></td>
+<td><strong>447,444 (5.98)</strong></td>
+<td><strong>297,664 (5.75)</strong></td>
+<td><strong>3,292,321 (4.39)</strong></td>
+<td><strong>5.98</strong></td>
+</tr>
+<tr>
+<td>F1 × zstd -3</td>
+<td>19,364 (9.18)</td>
+<td>148,746 (3.89)</td>
+<td>786,168 (3.40)</td>
+<td>546,884 (3.13)</td>
+<td>4,924,594 (2.94)</td>
+<td>3.40</td>
+</tr>
+<tr>
+<td>F1 × zstd -19</td>
+<td>14,539 (12.23)</td>
+<td>106,431 (5.44)</td>
+<td>501,761 (5.33)</td>
+<td>354,023 (4.83)</td>
+<td>3,831,730 (3.77)</td>
+<td>5.33</td>
+</tr>
+<tr>
+<td>F1 × zstd --ultra -22</td>
+<td>14,366 (12.38)</td>
+<td>106,429 (5.44)</td>
+<td>502,005 (5.33)</td>
+<td>353,989 (4.83)</td>
+<td>3,831,767 (3.77)</td>
+<td>5.33</td>
+</tr>
+<tr>
+<td>F1 × xz -6</td>
+<td>14,112 (12.60)</td>
+<td>99,080 (5.84)</td>
+<td>470,124 (5.69)</td>
+<td>320,488 (5.34)</td>
+<td>3,506,404 (4.12)</td>
+<td>5.69</td>
+</tr>
+<tr>
+<td><strong>F1 × xz -9e</strong></td>
+<td><strong>13,720 (12.96)</strong></td>
+<td><strong>98,640 (5.87)</strong></td>
+<td><strong>465,268 (5.75)</strong></td>
+<td><strong>318,200 (5.38)</strong></td>
+<td><strong>3,497,212 (4.14)</strong></td>
+<td><strong>5.75</strong></td>
+</tr>
+<tr>
+<td>F1 × bzip2 -9 <em>(ref bound)</em></td>
+<td>15,446 (11.51)</td>
+<td>123,102 (4.70)</td>
+<td>629,107 (4.25)</td>
+<td>442,851 (3.86)</td>
+<td>3,631,532 (3.98)</td>
+<td>4.25</td>
+</tr>
+<tr>
+<td>F1 × 7z PPMd <em>(ref bound)</em></td>
+<td>12,543 (14.17)</td>
+<td>106,040 (5.46)</td>
+<td>518,297 (5.16)</td>
+<td>437,661 (3.91)</td>
+<td>3,425,754 (4.22)</td>
+<td>5.16</td>
+</tr>
+<tr>
+<td>F2 comments-stripped (raw)</td>
+<td>133,186 (1.33)</td>
+<td>497,000 (1.16)</td>
+<td>2,483,019 (1.08)</td>
+<td>1,602,138 (1.07)</td>
+<td>14,167,551 (1.02)</td>
+<td>1.08</td>
+</tr>
+<tr>
+<td><strong>F2 × brotli -q11</strong></td>
+<td><strong>7,488 (23.74)</strong></td>
+<td><strong>86,356 (6.70)</strong></td>
+<td><strong>426,522 (6.27)</strong></td>
+<td><strong>286,028 (5.98)</strong></td>
+<td><strong>3,258,138 (4.44)</strong></td>
+<td><strong>6.27</strong></td>
+</tr>
+<tr>
+<td>F2 × zstd -19</td>
+<td>8,044 (22.10)</td>
+<td>95,033 (6.09)</td>
+<td>481,507 (5.56)</td>
+<td>342,633 (4.99)</td>
+<td>3,803,068 (3.80)</td>
+<td>5.56</td>
+</tr>
+<tr>
+<td>F3 MeatPack-adaptive (raw)</td>
+<td>133,030 (1.34)</td>
+<td>377,063 (1.54)</td>
+<td>1,631,707 (1.64)</td>
+<td>1,053,853 (1.62)</td>
+<td>8,439,682 (1.71)</td>
+<td>1.62</td>
+</tr>
+<tr>
+<td>F3 × zstd -19 (stacking check)</td>
+<td>19,159 (9.28)</td>
+<td>143,290 (4.04)</td>
+<td>680,226 (3.93)</td>
+<td>423,243 (4.04)</td>
+<td>4,277,394 (3.38)</td>
+<td>4.04</td>
+</tr>
+<tr>
+<td>F4proxy heatshrink(11,4) (bgcode default)</td>
+<td>41,669 (4.27)</td>
+<td>250,115 (2.31)</td>
+<td>1,173,939 (2.28)</td>
+<td>669,723 (2.56)</td>
+<td>6,640,596 (2.18)</td>
+<td>2.31</td>
+</tr>
+<tr>
+<td>F4proxy heatshrink(12,4) (bgcode alt)</td>
+<td>37,831 (4.70)</td>
+<td>226,049 (2.56)</td>
+<td>1,106,413 (2.42)</td>
+<td>593,361 (2.88)</td>
+<td>6,170,802 (2.34)</td>
+<td>2.56</td>
+</tr>
+<tr>
+<td>F4proxy heatshrink(11,4) × zstd-19 <em>(confirm-and-drop)</em></td>
+<td>32,592 (5.46)</td>
+<td>231,415 (2.50)</td>
+<td>1,081,347 (2.47)</td>
+<td>557,455 (3.07)</td>
+<td>6,096,487 (2.37)</td>
+<td>2.50</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Reading this table:</strong> the two bolded rows (F1×brotli-11, F1×xz-9e) are the strongest <em>format-preserving</em> candidates (no assumption that comments can be dropped); F2×brotli-11 is the strongest candidate overall but depends on comments being safe to discard downstream (see caveat below).</p>
+<h3 id="compression-time-cpu-cost-proxy-large_functionalgcode-14463825-bytes">Compression time (CPU-cost proxy, <code>large_functional.gcode</code>, 14,463,825 bytes)</h3>
+<p>Not a browser/WASM measurement — see the caveat in <a href="#deviations-from-the-original-plan-run-1">Deviations</a>. Native CLI, single run, this run's 4-vCPU container:</p>
+<table>
+<thead>
+<tr>
+<th>Candidate</th>
+<th>time</th>
+<th>output size</th>
+<th>For reference</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>zstd -3</td>
+<td>0.13 s</td>
+<td>4,924,594 B</td>
+<td>fastest by far, weakest ratio</td>
+</tr>
+<tr>
+<td>gzip -6 (≈ native default)</td>
+<td>1.19 s</td>
+<td>4,656,322 B (differs slightly from the Node-<code>zlib</code> figure above — native CLI vs Node binding)</td>
+<td></td>
+</tr>
+<tr>
+<td>brotli -q5</td>
+<td>1.08 s</td>
+<td>4,542,770 B</td>
+<td></td>
+</tr>
+<tr>
+<td>bzip2 -9</td>
+<td>1.13 s</td>
+<td>3,631,532 B</td>
+<td></td>
+</tr>
+<tr>
+<td>gzip -9</td>
+<td>3.19 s</td>
+<td>4,573,114 B</td>
+<td></td>
+</tr>
+<tr>
+<td>brotli -q9</td>
+<td>3.68 s</td>
+<td>4,368,498 B</td>
+<td></td>
+</tr>
+<tr>
+<td>zstd -19</td>
+<td>9.81 s</td>
+<td>3,831,734 B</td>
+<td>good ratio/cost balance</td>
+</tr>
+<tr>
+<td>zstd --ultra -22</td>
+<td>10.11 s</td>
+<td>3,831,799 B</td>
+<td>no gain over -19 at this size, same cost</td>
+</tr>
+<tr>
+<td>xz -6</td>
+<td>10.66 s</td>
+<td>3,506,404 B</td>
+<td></td>
+</tr>
+<tr>
+<td><strong>xz -9e</strong></td>
+<td><strong>11.57 s</strong></td>
+<td><strong>3,497,212 B</strong></td>
+<td>best ratio for the cost, of the practical candidates</td>
+</tr>
+<tr>
+<td><strong>brotli -q11</strong></td>
+<td><strong>36.97 s</strong></td>
+<td><strong>3,294,188 B</strong></td>
+<td>best ratio overall, but <strong>exceeds the 21.6 s it took to slice this model</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The model slicing that produced <code>large_functional.gcode</code> took 21.6 s end-to-end (<code>scripts/generate-corpus.mjs</code> log). Under the plan's decision criterion of compression adding <strong>&lt; 10 % of slicing time</strong>, brotli-11's 37 s fails that budget outright on a native CPU — a JS/WASM brotli encoder in a browser Worker would need to be dramatically faster than this native binary to qualify, which is unlikely. zstd-19 (9.8 s, ~45% of slice time) and xz-9e (11.6 s, ~54%) also miss the original 10% target as measured here, though both are far closer, and this is CLI-on-server-CPU timing, not the real browser number the decision criterion is meant to use. <strong>Phase 2 (real browser Worker timing) is required before finalizing</strong> — this table only orders the candidates by relative cost, it doesn't validate the 10% threshold either way.</p>
+<h3 id="pi-decompression-large-file">Pi decompression (large file)</h3>
+<p><strong>Not run</strong> — no physical Raspberry Pi in this environment. <code>zstd</code>, <code>xz</code>, <code>brotli</code> decompression is well-documented to be an order of magnitude+ faster than encoding at these ratios/levels for all four candidates above, so this is not expected to be the bottleneck, but it must still be measured on real Pi Zero 2 W / Pi 4 hardware (Phase 3) before this plan can close.</p>
+<h3 id="reproducing-this-run">Reproducing this run</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>npm<span class="w"> </span>run<span class="w"> </span>setup<span class="w">                     </span><span class="c1"># downloads slicer.js/slicer.wasm into public/wasm/</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>npm<span class="w"> </span>run<span class="w"> </span>generate-corpus<span class="w"> </span>--<span class="w"> </span>--out-dir<span class="w"> </span>corpus
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>npm<span class="w"> </span>run<span class="w"> </span>benchmark-gcode<span class="w"> </span>--<span class="w"> </span>--corpus-dir<span class="w"> </span>corpus<span class="w"> </span>--out<span class="w"> </span>corpus/results.json
+</code></pre></div>
+<p>Requires <code>gzip</code>, <code>brotli</code>, <code>zstd</code>, <code>xz</code>, <code>bzip2</code>, <code>7z</code> on <code>PATH</code> and Python 3 with <code>heatshrink2</code> (<code>pip install heatshrink2</code>) installed.</p>
+<h2 id="decision-criteria">Decision criteria</h2>
+<p>Pick the wire format that:</p>
+<ol>
+<li>achieves the best ratio among candidates whose browser compression adds <strong>&lt; 10 % of slicing time</strong> for the large model,</li>
+<li>decompresses the large model on a Pi Zero 2 W in <strong>&lt; 2 s</strong> or fully streams,</li>
+<li>streams end-to-end (upload may begin before slicing completes),</li>
+<li>needs no custom decoder maintenance on the Pi (apt/pip-installable) unless a custom transform wins by <strong>&gt; 15 %</strong> over the best off-the-shelf option.</li>
+</ol>
+<h3 id="provisional-recommendation-phase-1-only-not-final">Provisional recommendation (Phase 1 only — not final)</h3>
+<p>Based only on the size and CPU-cost-proxy data above, <strong>not</strong> on real browser/Pi timing:</p>
+<ul>
+<li><strong>Primary candidate: <code>F1 × xz-9e</code> or <code>F1 × zstd-19</code>.</strong> Both keep the G-code text unmodified (no downstream-compatibility risk), land at a 5.3–5.75:1 median ratio — a clear step above gzip (3.47:1) — and cost roughly half of brotli-11's CPU time for nearly the same ratio. <code>zstd</code> additionally has mature WASM encoders and by far the best decode speed, which matters more on a Pi Zero 2 W than on the browser side.</li>
+<li><strong>brotli-11 is the best ratio (5.98:1 median) but is the riskiest on the compression-time budget</strong> — its native CLI time already exceeds this run's slicing time for the largest file. Worth keeping in Phase 2's browser timing harness rather than ruling out now (a WASM brotli encoder's real-world speed vs. this native benchmark is unverified), but don't default to it without that data.</li>
+<li><strong><code>F2</code> (comments stripped) is not recommended yet despite its best-in-corpus ratio (6.27:1 with brotli-11).</strong> It assumes no downstream consumer depends on G-code comments — Klipper/Marlin UIs (Mainsail, Fluidd, OctoPrint) commonly parse structured comments for layer-change tracking, thumbnails, and print-time estimates. Before adopting F2, audit what the Raspberry Pi-side client actually reads from comments; if nothing does, it's a strictly-better drop-in reduction on top of whichever compressor wins.</li>
+<li><strong>MeatPack and Prusa bgcode's compression backend (heatshrink) both lose outright to every general-purpose compressor tested</strong>, confirming the hypothesis that they're optimized for MCU decode cost, not bandwidth. Neither is worth adopting purely for bandwidth on a Raspberry Pi (a full Linux machine, not an 8-bit MCU) decoder.</li>
+<li>gzip via the browser's native <code>CompressionStream</code> remains the right <strong>zero-dependency fallback</strong> (no WASM codec to ship, ubiquitous decode) if the WASM codec payload cost for brotli/zstd/xz turns out to not be worth it for a given deployment — 3.47:1 median is still a 3.5x bandwidth win for free.</li>
+</ul>
+<p><strong>This is not final.</strong> Phase 2 (real browser Worker timing per codec) and Phase 3 (real Pi Zero 2 W / Pi 4 decompression timing) are required to check criteria 1–2 for real before locking in a choice, and Phase 0 should be redone with a real STL corpus (3DBenchy, Voron cube, an actual ≥50 MB multi-hour print) once one is available, to replace the procedural stand-ins used in this run.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../st-mt-benchmark/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Benchmark: ST vs MT Engine">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Benchmark: ST vs MT Engine
+              </div>
+            </div>
+          </a>
+        
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.footer", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

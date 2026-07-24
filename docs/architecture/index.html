@@ -1,0 +1,2666 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="OrcaSlicer running in the browser via WebAssembly">
+      
+      
+      
+        <link rel="canonical" href="https://hiosdra.github.io/OrcaWeb/docs/architecture/">
+      
+      
+        <link rel="prev" href="../profiles/">
+      
+      
+        <link rel="next" href="../integration/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Architecture - OrcaWeb</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#architecture" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="OrcaWeb" class="md-header__button md-logo" aria-label="OrcaWeb" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            OrcaWeb
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Architecture
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Hiosdra/OrcaWeb" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Hiosdra/OrcaWeb
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../getting-started/" class="md-tabs__link">
+          
+  
+  
+  Users
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+  Developers
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../status/" class="md-tabs__link">
+          
+  
+  
+  Project
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../st-mt-benchmark/" class="md-tabs__link">
+          
+  
+  
+  Internals & Reports
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="OrcaWeb" class="md-nav__button md-logo" aria-label="OrcaWeb" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    OrcaWeb
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Hiosdra/OrcaWeb" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Hiosdra/OrcaWeb
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Users
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Users
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Profiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developers
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developers
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#project-vision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project vision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#system-diagram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        System diagram
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wasm-loading-sequence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WASM loading sequence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#blob-url-trick" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Blob URL trick
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#singleton-worker-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Singleton worker pattern
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#engine-clean-layer-override-approach" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Engine clean layer (override approach)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Engine clean layer (override approach)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#header-shims-orca-wasmwasmshims" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Header shims (orca-wasm/wasm/shims/)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Header shims (orca-wasm/wasm/shims/)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tbb-sequential-stubs-st-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TBB — sequential stubs (ST engine)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#openvdb-minimal-type-stub" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenVDB — minimal type stub
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#freetype-minimal-type-stub" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FreeType — minimal type stub
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#openssl-md5-minimal-stub" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenSSL MD5 — minimal stub
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#c-override-stubs-orca-wasmoverrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        C++ override stubs (orca-wasm/overrides/)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#boostlog-disabled-at-runtime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Boost.Log — disabled at runtime
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#libnoise" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        libnoise
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-orcaslicer-version" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading OrcaSlicer version
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session-scoped-engine-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session-scoped engine state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worker-crash-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worker crash recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slice-queue-state-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Slice queue state machine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wasm-build-smoke-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WASM build smoke test
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#e2e-ui-smoke-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        E2E UI smoke test
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coordinate-systems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coordinate systems
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data flow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#config-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config layers
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-deploy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build &amp; deploy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stack
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../wasm-build/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building WASM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../status/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_2" id="__nav_4_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture Decisions
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture Decisions
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-001-client-side-wasm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-001: Client-Side WASM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-002-tech-stack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-002: Technology Stack
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-003-web-worker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-003: Web Worker + Singleton
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-004-self-built-wasm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-004: Self-Built WASM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-005-no-slicer-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-005: No slicer.data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-006-patch-strategy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-006: Engine Patch Strategy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-007-tbb-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-007: Sequential TBB Stubs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-008-session-handle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-008: Session-Scoped Engine State
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-009-wasm-smoke-test/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-009: WASM Build Smoke Test
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-010-e2e-smoke-test/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-010: E2E UI Smoke Test
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-011-multithreaded-engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-011: Multithreaded Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internals & Reports
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Internals & Reports
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../st-mt-benchmark/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmark: ST vs MT Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gcode-compression-benchmark/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmark: G-code Compression
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#project-vision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project vision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#system-diagram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        System diagram
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wasm-loading-sequence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WASM loading sequence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#blob-url-trick" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Blob URL trick
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#singleton-worker-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Singleton worker pattern
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#engine-clean-layer-override-approach" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Engine clean layer (override approach)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Engine clean layer (override approach)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#header-shims-orca-wasmwasmshims" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Header shims (orca-wasm/wasm/shims/)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Header shims (orca-wasm/wasm/shims/)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tbb-sequential-stubs-st-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TBB — sequential stubs (ST engine)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#openvdb-minimal-type-stub" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenVDB — minimal type stub
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#freetype-minimal-type-stub" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FreeType — minimal type stub
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#openssl-md5-minimal-stub" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenSSL MD5 — minimal stub
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#c-override-stubs-orca-wasmoverrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        C++ override stubs (orca-wasm/overrides/)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#boostlog-disabled-at-runtime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Boost.Log — disabled at runtime
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#libnoise" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        libnoise
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upgrading-orcaslicer-version" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upgrading OrcaSlicer version
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session-scoped-engine-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session-scoped engine state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worker-crash-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worker crash recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slice-queue-state-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Slice queue state machine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wasm-build-smoke-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WASM build smoke test
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#e2e-ui-smoke-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        E2E UI smoke test
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coordinate-systems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coordinate systems
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data flow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#config-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config layers
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-deploy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build &amp; deploy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stack
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="architecture">Architecture</h1>
+<h2 id="project-vision">Project vision</h2>
+<p>The main product of this repository is the <strong>WASM slicer engine</strong> — OrcaSlicer compiled to WebAssembly with full feature parity (fuzzy skin, infill, supports, all slicer parameters). The goal is a fully working OrcaSlicer that runs without a native binary, embeddable in any environment that can execute WASM. A Node CLI wrapper existed early on and was deliberately removed (<code>chore: remove CLI</code> — frontend → bridge → engine only); it is not a project goal.</p>
+<p>The React web UI is a temporary proof-of-concept to demonstrate the engine. It is not the end goal and is not the primary focus of development effort.</p>
+<h2 id="system-diagram">System diagram</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>┌─────────────────────────────────────────────────────────┐
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>│                       Browser                            │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│                                                          │
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│   main thread                                            │
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│   ┌────────────────────────────────────────────────┐    │
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│   │  React 19 + TypeScript + Tailwind CSS v4        │    │
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│   │                                                │    │
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│   │  App.tsx            layout, tabs, settings     │    │
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│   │  ├── FileUpload     drag &amp; drop STL/3MF/STEP/OBJ│    │
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│   │  ├── ModelViewer    Three.js, real mm scale    │    │
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│   │  ├── SettingsPanel  presets + profile import   │    │
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│   │  ├── GcodeViewer    toolpaths, layer slider    │    │
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│   │  └── SliceCards     SliceHeader, QueueItemCard,│    │
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>│   │       PlateResultCard, ConfigSummary           │    │
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>│   │                                                │    │
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>│   │  hooks/useSliceQueue.ts (queue state machine:  │    │
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>│   │    reducer + worker protocol + cancel/stale +  │    │
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>│   │    engine progress)                            │    │
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>│   │  worker-singleton.ts (module-level singleton)  │    │
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>│   └──────────────────┬─────────────────────────────┘    │
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>│                      │ postMessage (ArrayBuffer)         │
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>│   ┌──────────────────▼─────────────────────────────┐    │
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>│   │  Web Worker: slicer.worker.ts                  │    │
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>│   │  └── wasm-loader.ts                            │    │
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>│   │      ├── _orc_session_create/destroy()          │    │
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>│   │      ├── _orc_init(session, configJson)         │    │
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>│   │      ├── _orc_slice(session, stl) → gcode       │    │
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>│   │      │   + SLICE_PROGRESS { percent, stage }    │    │
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>│   │      ├── _orc_slice_multi(session, stls,        │    │
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a>│   │      │       extruderIds) → gcode string        │    │
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a>│   │      ├── _orc_obj_to_stl(obj) → stl bytes      │    │
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a>│   │      └── _orc_cad_to_stl(step) → stl bytes     │    │
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a>│   └──────────────────┬─────────────────────────────┘    │
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a>│                      │ fetch                             │
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>│   ┌──────────────────▼─────────────────────────────┐    │
+<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a>│   │  GitHub Releases: wasm-v2.4.2                  │    │
+<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a>│   │  ├── slicer.js    ~210 KB  Emscripten glue     │    │
+<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a>│   │  └── slicer.wasm  ~29 MB   OrcaSlicer v2.4.2   │    │
+<a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a>│   │                   (incl. OCCT STEP engine)      │    │
+<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a>│   └────────────────────────────────────────────────┘    │
+<a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a>└─────────────────────────────────────────────────────────┘
+</code></pre></div>
+<p>No <code>slicer.data</code> — the headless flat-config slicer never reads <code>orca/resources</code> at runtime, so the 200 MB preload file was eliminated entirely.</p>
+<h2 id="wasm-loading-sequence">WASM loading sequence</h2>
+<pre class="mermaid"><code>sequenceDiagram
+    participant M as main.tsx
+    participant S as worker-singleton.ts
+    participant W as slicer.worker.ts
+    participant R as GitHub Releases
+
+    M-&gt;&gt;S: preloadWasm()
+    S-&gt;&gt;W: new Worker(slicer.worker.ts)
+    S-&gt;&gt;W: postMessage(LOAD_WASM, url)
+    W-&gt;&gt;R: fetch + WebAssembly.compileStreaming(slicer.wasm ~29 MB)
+    W-&gt;&gt;R: fetch slicer.js (~210 KB) [parallel]
+    W-&gt;&gt;W: blob URL trick (add ES default export)
+    W-&gt;&gt;W: import(blobUrl) → factory({ instantiateWasm })
+    W-&gt;&gt;S: postMessage(WASM_LOADED)
+    S--&gt;&gt;M: listener → wasmStatus = 'ready'</code></pre>
+<p><code>slicer.wasm</code> is compiled with <code>WebAssembly.compileStreaming</code> while it downloads
+(and while <code>slicer.js</code> is still being fetched), overlapping download and
+compilation; the compiled module is handed to Emscripten through the
+<code>instantiateWasm</code> hook. When the server mislabels the Content-Type the worker
+falls back to buffered <code>WebAssembly.compile</code>.</p>
+<p>Total cold load: ~29 MB (down from ~152 MB with the old v2.3.1 + slicer.data engine). The increase over the original ~9 MB comes from OCCT being compiled directly into <code>slicer.wasm</code> — no separate download, no extra WASM file, no third-party dependency.</p>
+<h2 id="blob-url-trick">Blob URL trick</h2>
+<p>Emscripten compiles OrcaSlicer to a CommonJS IIFE (<code>var OrcaModule = ...</code>), not an ES module. The worker needs to <code>import()</code> it dynamically:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kd">const</span><span class="w"> </span><span class="nx">jsText</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">fetch</span><span class="p">(</span><span class="nx">url</span><span class="p">).</span><span class="nx">then</span><span class="p">(</span><span class="nx">r</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nx">r</span><span class="p">.</span><span class="nx">text</span><span class="p">())</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kd">const</span><span class="w"> </span><span class="nx">blob</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nx">Blob</span><span class="p">(</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="p">[</span><span class="sb">`</span><span class="si">${</span><span class="nx">jsText</span><span class="si">}</span><span class="sb">\nexport default OrcaModule;`</span><span class="p">],</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="kr">type</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;application/javascript&#39;</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="p">)</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="kd">const</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">default</span><span class="o">:</span><span class="w"> </span><span class="kt">factory</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="k">import</span><span class="p">(</span><span class="nx">URL</span><span class="p">.</span><span class="nx">createObjectURL</span><span class="p">(</span><span class="nx">blob</span><span class="p">))</span>
+</code></pre></div>
+<h2 id="singleton-worker-pattern">Singleton worker pattern</h2>
+<p>React StrictMode mounts components twice in development, which would create two workers and trigger two downloads. The solution: a module-level singleton in <code>worker-singleton.ts</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kd">let</span><span class="w"> </span><span class="nx">worker</span><span class="o">:</span><span class="w"> </span><span class="kt">Worker</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="kc">null</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">null</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="k">export</span><span class="w"> </span><span class="kd">function</span><span class="w"> </span><span class="nx">getWorker</span><span class="p">()</span><span class="o">:</span><span class="w"> </span><span class="nx">Worker</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">worker</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nx">worker</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nx">worker</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nx">Worker</span><span class="p">(...)</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="nx">worker</span><span class="p">.</span><span class="nx">postMessage</span><span class="p">({</span><span class="w"> </span><span class="kr">type</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;LOAD_WASM&#39;</span><span class="p">,</span><span class="w"> </span><span class="nx">url</span><span class="o">:</span><span class="w"> </span><span class="kt">wasmUrl</span><span class="w"> </span><span class="p">})</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="nx">worker</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>preloadWasm()</code> is called in <code>main.tsx</code> before React renders, so WASM loading starts immediately.</p>
+<h2 id="engine-clean-layer-override-approach">Engine clean layer (override approach)</h2>
+<p>OrcaSlicer C++ source is never modified. The WASM build uses a three-layer strategy to strip out dependencies that are unavailable in a browser:</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Location</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Header shims</td>
+<td><code>orca-wasm/wasm/shims/</code></td>
+<td>Replace system library headers (TBB, OpenVDB, FreeType, OpenSSL) with minimal stubs so the compiler sees the right types</td>
+</tr>
+<tr>
+<td>C++ override stubs</td>
+<td><code>orca-wasm/overrides/</code></td>
+<td>Replace OrcaSlicer <code>.cpp</code>/<code>.hpp</code> files whose implementation depends on missing libraries</td>
+</tr>
+<tr>
+<td>In-place patches</td>
+<td><code>orca-wasm/patches/apply.py</code></td>
+<td>Fix C++ compatibility issues in OrcaSlicer source (narrowing, ABI, platform guards)</td>
+</tr>
+</tbody>
+</table>
+<p><code>apply.py</code> runs before <code>cmake</code> and is idempotent. CI applies all three layers automatically.</p>
+<h3 id="header-shims-orca-wasmwasmshims">Header shims (<code>orca-wasm/wasm/shims/</code>)</h3>
+<p>Added to the compiler search path before all other include paths (<code>BEFORE PUBLIC</code> in CMake), so these stubs shadow the real system headers.</p>
+<h4 id="tbb-sequential-stubs-st-engine">TBB — sequential stubs (ST engine)</h4>
+<p>This section describes the single-threaded (ST) engine build, which is what GitHub Pages always serves and what the Cloudflare mirror falls back to. Every TBB parallel algorithm is replaced by a sequential equivalent that runs in the same thread. A separate multithreaded (MT) build links real oneTBB instead of these stubs and is served only where cross-origin isolation is available — see <a href="../adr/adr-011-multithreaded-engine/">ADR-011</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Shim</th>
+<th>Sequential equivalent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tbb/parallel_for.h</code></td>
+<td>plain <code>for</code> loop</td>
+</tr>
+<tr>
+<td><code>tbb/parallel_for_each.h</code></td>
+<td><code>std::for_each</code></td>
+</tr>
+<tr>
+<td><code>tbb/parallel_reduce.h</code></td>
+<td>sequential iterate + merge</td>
+</tr>
+<tr>
+<td><code>tbb/parallel_invoke.h</code></td>
+<td>call each functor in order</td>
+</tr>
+<tr>
+<td><code>tbb/parallel_pipeline.h</code></td>
+<td>sequential <code>flow_control</code> / <code>filter_t</code> / <code>make_filter</code> pipeline</td>
+</tr>
+<tr>
+<td><code>tbb/task_arena.h</code></td>
+<td><code>max_concurrency()</code> → 1; <code>execute()</code> calls functor directly</td>
+</tr>
+<tr>
+<td><code>tbb/task_group.h</code></td>
+<td><code>run()</code> calls functor immediately; <code>wait()</code> is a no-op</td>
+</tr>
+<tr>
+<td><code>tbb/spin_mutex.h</code></td>
+<td>no-op mutex (single-threaded — no contention possible)</td>
+</tr>
+<tr>
+<td><code>tbb/partitioner.h</code></td>
+<td>empty <code>simple/auto/static/affinity_partitioner</code> types</td>
+</tr>
+<tr>
+<td><code>tbb/global_control.h</code></td>
+<td>no-op</td>
+</tr>
+<tr>
+<td><code>tbb/concurrent_vector.h</code></td>
+<td>alias for <code>std::vector</code></td>
+</tr>
+<tr>
+<td><code>tbb/concurrent_unordered_map.h</code></td>
+<td>alias for <code>std::unordered_map</code></td>
+</tr>
+<tr>
+<td><code>tbb/concurrent_unordered_set.h</code></td>
+<td>alias for <code>std::unordered_set</code></td>
+</tr>
+<tr>
+<td><code>tbb/blocked_range.h</code> + <code>blocked_range2d.h</code></td>
+<td>lightweight range containers</td>
+</tr>
+<tr>
+<td><code>tbb/tbb.h</code></td>
+<td>umbrella include — pulls in all of the above</td>
+</tr>
+<tr>
+<td><code>tbb/version.h</code></td>
+<td>version constants</td>
+</tr>
+<tr>
+<td><code>oneapi/tbb/…</code></td>
+<td>re-exports → <code>tbb/…</code> (same headers, dual include path; also includes <code>scalable_allocator.h</code>)</td>
+</tr>
+</tbody>
+</table>
+<h4 id="openvdb-minimal-type-stub">OpenVDB — minimal type stub</h4>
+<p><code>openvdb/openvdb.h</code> defines only the types referenced by OrcaSlicer headers: <code>Index32</code>, <code>Index64</code>, <code>math::Transform</code>, <code>initialize()</code>, and the <code>math</code>/<code>tools</code>/<code>util</code> sub-namespaces. No linking to libopenvdb is needed because the <code>.cpp</code> files that would use it are replaced by overrides (see below).</p>
+<h4 id="freetype-minimal-type-stub">FreeType — minimal type stub</h4>
+<p><code>ft2build.h</code> + <code>freetype/*.h</code> provide the types and constants required by <code>Shape/TextShape.hpp</code>. The stub is needed because <code>TextShape.cpp</code> is compiled as a no-op override and the compiler still needs to parse its header.</p>
+<h4 id="openssl-md5-minimal-stub">OpenSSL MD5 — minimal stub</h4>
+<p><code>openssl/md5.h</code> — minimal stub; MD5 is not used on the FDM slicing path. Emscripten does not bundle OpenSSL.</p>
+<h3 id="c-override-stubs-orca-wasmoverrides">C++ override stubs (<code>orca-wasm/overrides/</code>)</h3>
+<p>These replace OrcaSlicer <code>.cpp</code> (and some <code>.hpp</code>) files whose implementation depends on a library unavailable in WASM. The original files are excluded from compilation; the overrides are compiled in their place. Override <code>.hpp</code> headers are physically copied into the OrcaSlicer source tree at CI time so that <code>#include</code> from neighbouring files resolves to the stub.</p>
+<table>
+<thead>
+<tr>
+<th>Override file</th>
+<th>Replaces</th>
+<th>Missing library</th>
+<th>What the stub does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Format/DRC.cpp</code></td>
+<td>Draco mesh import</td>
+<td><strong>Draco</strong></td>
+<td>Empty no-op</td>
+</tr>
+<tr>
+<td><code>Format/svg.cpp</code></td>
+<td>SVG export</td>
+<td><strong>OCCT</strong></td>
+<td>Empty no-op (SVG export feature unused; not wired to the in-engine OCCT)</td>
+</tr>
+<tr>
+<td><code>OpenVDBUtils.cpp</code> + <code>OpenVDBUtils.hpp</code></td>
+<td>VDB volume operations used by FDM infill</td>
+<td><strong>OpenVDB</strong></td>
+<td>Empty header; empty <code>.cpp</code></td>
+</tr>
+<tr>
+<td><code>SLA/Hollowing.cpp</code></td>
+<td>SLA model hollowing</td>
+<td><strong>OpenVDB</strong></td>
+<td>Empty no-op (SLA not used)</td>
+</tr>
+<tr>
+<td><code>ObjColorUtils.cpp</code> + <code>ObjColorUtils.hpp</code></td>
+<td>OBJ colour calibration</td>
+<td><strong>OpenCV</strong></td>
+<td>Empty header; empty <code>.cpp</code></td>
+</tr>
+<tr>
+<td><code>Shape/TextShape.cpp</code></td>
+<td>3D text extrusion</td>
+<td><strong>FreeType</strong> + <strong>OCCT</strong></td>
+<td>Empty no-op</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">STEP support — in-engine OCCT</p>
+<p>OCCT (Open CASCADE Technology 7.8.1) is compiled directly into <code>slicer.wasm</code> as part of the dependency build (see <code>.github/workflows/build-wasm.yml</code>'s "Build WASM deps — OCCT" step, or <code>orca-wasm/scripts/build-local-wsl.sh</code> for local builds). The engine exposes <code>_orc_cad_to_stl()</code> which reads a STEP file from MEMFS via OrcaSlicer's <code>Model::read_from_step()</code> (which runs <code>Step::load()</code> + <code>Step::mesh()</code> under the hood), tessellates the BRep geometry, and returns binary STL bytes.</p>
+<ul>
+<li><strong>Browser</strong>: <code>CAD_TO_STL</code> message is sent to the slicer worker; the worker calls <code>_orc_cad_to_stl()</code> and replies with <code>CAD_STL_COMPLETE { stl }</code>.</li>
+</ul>
+<p>No separate OCCT WASM download or third-party library is required.</p>
+<p><strong>IGES is not supported</strong> — OrcaSlicer's STEP reader (<code>STEPCAFControl_Reader</code>) does not read IGES, so <code>.iges</code>/<code>.igs</code> are not accepted by the UI.</p>
+</div>
+<h3 id="boostlog-disabled-at-runtime">Boost.Log — disabled at runtime</h3>
+<p>The logging core is disabled outright (<code>boost::log::core::get()-&gt;set_logging_enabled(false)</code>) by a static initializer in <code>orca-wasm/bridge/slicer.cpp</code>. No sink is ever registered in this headless build (the file sink in <code>utils.cpp</code> requires <code>set_logging_file()</code>, which only the desktop CLI calls), so any record passing the default <code>warning</code> filter went to Boost.Log's <em>default</em> sink — which, under this single-threaded (<code>BOOST_LOG_NO_THREADS</code>) Emscripten build, non-deterministically traps with "memory access out of bounds" in <code>core::push_record_move()</code> and is extremely slow. This bit twice: the <code>nozzle_info.json</code> incident (a single <code>BOOST_LOG_TRIVIAL(error)</code> trapped every slice), and the Voron Design Cube hang — Arachne's per-edge warning storm during Voronoi-diagram repair either trapped mid-slice or spent most of the slice's CPU formatting log records nobody could see, turning a multi-second slice into a multi-minute-plus one.</p>
+<h3 id="libnoise">libnoise</h3>
+<p>libnoise (Perlin / Billow / RidgedMulti / Voronoi noise) <strong>is</strong> compiled into the WASM engine and linked normally. <code>Feature/FuzzySkin/FuzzySkin.cpp</code> is not stubbed — it is patched in-place by <code>apply.py</code>: <code>thread_local</code> storage (unsupported by Emscripten in single-threaded mode) is rewritten to <code>static</code>, and the seed-fallback expression <code>std::hash&lt;std::thread::id&gt;()(std::this_thread::get_id())</code> is replaced with <code>rd()</code> (the <code>std::random_device</code> already in scope). Fuzzy skin effect is therefore <strong>active</strong> in the engine when <code>fuzzy_skin ≠ none</code>.</p>
+<h3 id="upgrading-orcaslicer-version">Upgrading OrcaSlicer version</h3>
+<p>Change <code>ORCA_VERSION</code> in <code>build-wasm.yml</code> and re-run CI. Only changes to the signatures of overridden functions require stub updates.</p>
+<h3 id="session-scoped-engine-state">Session-scoped engine state</h3>
+<p><code>orca-wasm/bridge/slicer.cpp</code> scopes the active config, bed geometry, and last
+error behind an opaque <code>orc_session_create()</code>/<code>orc_session_destroy()</code> handle
+rather than process-wide C++ statics — see <a href="../adr/adr-008-session-handle/">ADR-008</a>.
+<code>slicer.worker.ts</code> creates one session right after the module loads and reuses
+it for the worker's entire lifetime, so this is behaviour-equivalent to the
+old global-state bridge today; it only removes the structural blocker to a
+future caller (Node CLI, worker pool) holding more than one session safely in
+the same WASM instance.</p>
+<h3 id="worker-crash-recovery">Worker crash recovery</h3>
+<p>If the WASM module aborts at runtime (an unreachable trap, OOM), <code>onAbort</code>
+reports a <code>WASM_ERROR</code> to the main thread and the worker refuses further work
+instead of calling into the dead module. <code>worker-singleton.ts</code> terminates and
+drops that worker on any <code>WASM_ERROR</code> (load failure or runtime crash alike);
+the next <code>getWorker()</code> call spawns a fresh worker and reloads the engine from
+scratch, so a mid-session crash is recoverable without a full page reload.
+On <code>WASM_ERROR</code> the queue (<code>useSliceQueue</code>) fails every in-flight item —
+the current slice, queued OBJ/STEP conversions, and a running plate slice —
+so nothing is left spinning on work the dead worker can no longer deliver.</p>
+<h3 id="slice-queue-state-machine">Slice queue state machine</h3>
+<p><code>src/hooks/useSliceQueue.ts</code> owns all queue/slicing state in a single
+<code>useReducer</code> state machine. Worker responses are correlated explicitly: each
+OBJ/STEP conversion carries a <code>requestId</code> (the queue item id) echoed back on
+the matching <code>*_COMPLETE</code>/<code>*_ERROR</code>, and single slices are gated by a
+<code>currentId</code> so only one <code>SLICE</code> is ever in flight. A <code>configEpoch</code> counter
+marks finished results <strong>stale</strong> when the settings change after they were
+sliced — the UI flags them and the Slice button becomes <em>Re-slice</em>.
+User-initiated <strong>cancel</strong> terminates the worker (the synchronous WASM slice
+loop cannot be interrupted any other way), re-posts any queued conversions
+from their retained source <code>File</code>s to the fresh worker, and lets the engine
+reload lazily on the next request.</p>
+<h3 id="wasm-build-smoke-test">WASM build smoke test</h3>
+<p><code>build-wasm.yml</code> runs <code>orca-wasm/scripts/smoke-test.mjs</code> after packaging and
+before publishing a release — real <code>orc_init</code>/<code>orc_slice(_multi)</code> calls against
+the freshly built engine, not just a successful compile. See
+<a href="../adr/adr-009-wasm-smoke-test/">ADR-009</a>.</p>
+<h3 id="e2e-ui-smoke-test">E2E UI smoke test</h3>
+<p><code>.github/workflows/e2e-smoke.yml</code> runs a Playwright test (<code>e2e/slice.spec.ts</code>)
+against the real UI on every PR: upload the real Voron Design Cube v7 STL
+(<code>e2e/fixtures/voron-design-cube-v7.stl</code>, vendored under GPL-3.0 — see
+<code>NOTICE.md</code> — the same model that historically triggered two production
+crashes in the Arachne wall generator), slice it through the actual
+<code>FileUpload</code> → worker → WASM path, and assert the result reaches <code>Done</code>.
+Downloads the latest <em>published</em> engine release rather than building one,
+since engine-source correctness is already gated by the WASM build smoke
+test above. See <a href="../adr/adr-010-e2e-smoke-test/">ADR-010</a>.</p>
+<h2 id="coordinate-systems">Coordinate systems</h2>
+<p>Both viewers use a <strong>Z-up</strong> scene to match the slicer engine — G-code axes map directly to Three.js axes with no permutation.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>G-code</th>
+<th>Three.js</th>
+<th>In app</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Horizontal 1</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+</tr>
+<tr>
+<td>Horizontal 2</td>
+<td>Y</td>
+<td>Y</td>
+<td>Y</td>
+</tr>
+<tr>
+<td>Vertical</td>
+<td>Z</td>
+<td>Z</td>
+<td>Z (up)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>ModelViewer</strong> positions the STL with its bottom face at Z=0, centered on X/Y.</p>
+<p><strong>GcodeViewer</strong> sends G-code to its dedicated <code>gcode-parser.worker.ts</code> (separate from the slicer worker), which returns typed-array buffers as transferables so large previews never parse on the UI thread. It parses G1 extrusion moves and G0/G1 travel moves, computes centroid of all X/Y toolpath points, subtracts it, and uses G-code axes directly (<code>gcodeX → x</code>, <code>gcodeY → y</code>, <code>gcodeZ → z</code>). Reads OrcaSlicer <code>;TYPE:</code> comments to colour extrusion segments by feature type; falls back to a blue→orange height gradient. All extrusion segments are merged into one <code>LineSegments2</code> geometry and all travels into one <code>LineSegments</code> geometry; the layer slider adjusts their draw ranges, preserving two draw calls irrespective of layer count.</p>
+<h2 id="data-flow">Data flow</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>File drop
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  │
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>  ├─ .stl ──────────► File state
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>  │                       │
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>  │               ModelViewer (Three.js STLLoader)
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>  │
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>  ├─ .3mf ───────────► worker.postMessage(READ_3MF, mf bytes, requestId)
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>  │                       │
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>  │               [worker] _orc_read_3mf() [OrcaSlicer&#39;s own reader —
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>  │                        ModelObject::mesh() bakes in instance/volume
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>  │                        transforms; config JSON re-parsed by the existing
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>  │                        parseOrcaProfileJson()]
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>  │                       │
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>  │               READ_3MF_COMPLETE { stl, configJson }
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>  │                       ├─► onSettingsImported(patch, filename)
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>  │                       └─► synthetic .stl File → File state
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>  │                  (on engine failure: item marked &#39;error&#39; — no JS-side
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>  │                   fallback parser)
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>  │
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>  ├─ .step / .stp ──► worker.postMessage(CAD_TO_STL, cad bytes)
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>  │                       │
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>  │               [worker] _orc_cad_to_stl() [OCCT in-engine]
+<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>  │                       │
+<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>  │               CAD_STL_COMPLETE { stl }
+<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>  │                       └─► synthetic .stl File → File state
+<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>  │
+<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>  └─ .obj ──────────► worker.postMessage(OBJ_TO_STL, obj bytes)
+<a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a>                           │
+<a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a>                   [worker] _orc_obj_to_stl()
+<a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a>                           │
+<a id="__codelineno-3-31" name="__codelineno-3-31" href="#__codelineno-3-31"></a>                   OBJ_STL_COMPLETE { stl }
+<a id="__codelineno-3-32" name="__codelineno-3-32" href="#__codelineno-3-32"></a>                           └─► synthetic .stl File → File state
+<a id="__codelineno-3-33" name="__codelineno-3-33" href="#__codelineno-3-33"></a>
+<a id="__codelineno-3-34" name="__codelineno-3-34" href="#__codelineno-3-34"></a>  │ config = resolveConfig({ preset, imported, manual })  [see below]
+<a id="__codelineno-3-35" name="__codelineno-3-35" href="#__codelineno-3-35"></a>  │
+<a id="__codelineno-3-36" name="__codelineno-3-36" href="#__codelineno-3-36"></a>  ├─ Sequential mode (one G-code per file)
+<a id="__codelineno-3-37" name="__codelineno-3-37" href="#__codelineno-3-37"></a>  │  handleSliceAll() → startNextSlice() for each ready item
+<a id="__codelineno-3-38" name="__codelineno-3-38" href="#__codelineno-3-38"></a>  │      │
+<a id="__codelineno-3-39" name="__codelineno-3-39" href="#__codelineno-3-39"></a>  │      └─► worker.postMessage(SLICE, stl, config)
+<a id="__codelineno-3-40" name="__codelineno-3-40" href="#__codelineno-3-40"></a>  │               │
+<a id="__codelineno-3-41" name="__codelineno-3-41" href="#__codelineno-3-41"></a>  │          SLICE_PROGRESS { percent, stage } → current item UI
+<a id="__codelineno-3-42" name="__codelineno-3-42" href="#__codelineno-3-42"></a>  │          SLICE_COMPLETE { gcode }  →  item.status = &#39;done&#39;
+<a id="__codelineno-3-43" name="__codelineno-3-43" href="#__codelineno-3-43"></a>  │          startNextSlice() continues queue
+<a id="__codelineno-3-44" name="__codelineno-3-44" href="#__codelineno-3-44"></a>  │
+<a id="__codelineno-3-45" name="__codelineno-3-45" href="#__codelineno-3-45"></a>  └─ Plate mode (all files → one G-code)
+<a id="__codelineno-3-46" name="__codelineno-3-46" href="#__codelineno-3-46"></a>     handleSlicePlate() → reads all ready stlFiles
+<a id="__codelineno-3-47" name="__codelineno-3-47" href="#__codelineno-3-47"></a>         │
+<a id="__codelineno-3-48" name="__codelineno-3-48" href="#__codelineno-3-48"></a>         └─► worker.postMessage(SLICE_MULTI, stls[], config)
+<a id="__codelineno-3-49" name="__codelineno-3-49" href="#__codelineno-3-49"></a>                  │
+<a id="__codelineno-3-50" name="__codelineno-3-50" href="#__codelineno-3-50"></a>             [worker] concatenate + build int32 offset table
+<a id="__codelineno-3-51" name="__codelineno-3-51" href="#__codelineno-3-51"></a>                  │
+<a id="__codelineno-3-52" name="__codelineno-3-52" href="#__codelineno-3-52"></a>             _orc_slice_multi() → arrange_objects() + slice
+<a id="__codelineno-3-53" name="__codelineno-3-53" href="#__codelineno-3-53"></a>             SLICE_PROGRESS { percent, stage } → plate UI
+<a id="__codelineno-3-54" name="__codelineno-3-54" href="#__codelineno-3-54"></a>                  │
+<a id="__codelineno-3-55" name="__codelineno-3-55" href="#__codelineno-3-55"></a>             SLICE_MULTI_COMPLETE { gcode }
+<a id="__codelineno-3-56" name="__codelineno-3-56" href="#__codelineno-3-56"></a>                  │
+<a id="__codelineno-3-57" name="__codelineno-3-57" href="#__codelineno-3-57"></a>         plateGcode → PlateResultCard (eye / download)
+<a id="__codelineno-3-58" name="__codelineno-3-58" href="#__codelineno-3-58"></a>                  │
+<a id="__codelineno-3-59" name="__codelineno-3-59" href="#__codelineno-3-59"></a>          ┌───────┴────────┐
+<a id="__codelineno-3-60" name="__codelineno-3-60" href="#__codelineno-3-60"></a>          ▼                ▼
+<a id="__codelineno-3-61" name="__codelineno-3-61" href="#__codelineno-3-61"></a>    ModelViewer       GcodeViewer
+<a id="__codelineno-3-62" name="__codelineno-3-62" href="#__codelineno-3-62"></a> (STL, white bg)  (toolpaths, dark bg)
+<a id="__codelineno-3-63" name="__codelineno-3-63" href="#__codelineno-3-63"></a>
+<a id="__codelineno-3-64" name="__codelineno-3-64" href="#__codelineno-3-64"></a>  └─ Export .3mf (per queue item, on a done card)
+<a id="__codelineno-3-65" name="__codelineno-3-65" href="#__codelineno-3-65"></a>     export3mf(item) → worker.postMessage(WRITE_3MF, stl, config, requestId)
+<a id="__codelineno-3-66" name="__codelineno-3-66" href="#__codelineno-3-66"></a>         │
+<a id="__codelineno-3-67" name="__codelineno-3-67" href="#__codelineno-3-67"></a>    [worker] _orc_write_3mf(session, stl) — reuses OrcSession::config
+<a id="__codelineno-3-68" name="__codelineno-3-68" href="#__codelineno-3-68"></a>    (the same flat DynamicPrintConfig ADR-005 describes) via
+<a id="__codelineno-3-69" name="__codelineno-3-69" href="#__codelineno-3-69"></a>    Slic3r::store_bbs_3mf(); no PartPlateList in this headless bridge, so
+<a id="__codelineno-3-70" name="__codelineno-3-70" href="#__codelineno-3-70"></a>    plate/gcode/thumbnail data is intentionally omitted (mesh + config only)
+<a id="__codelineno-3-71" name="__codelineno-3-71" href="#__codelineno-3-71"></a>         │
+<a id="__codelineno-3-72" name="__codelineno-3-72" href="#__codelineno-3-72"></a>    WRITE_3MF_COMPLETE { data } → downloadBlob(item.name + &#39;.3mf&#39;)
+</code></pre></div>
+<h3 id="config-layers">Config layers</h3>
+<p>The <code>config</code> handed to every slice is resolved from three layers, lowest priority first — <code>preset</code> (printer + filament + quality selection), <code>imported</code> (settings from a loaded <code>.3mf</code> or <code>.json</code> profile), <code>manual</code> (fields the user edited in the panel). <code>src/lib/config-layers.ts</code> owns that order and is the only place it may change; <code>App.tsx</code> holds one piece of state per layer and merges them through <code>resolveConfig()</code>.</p>
+<p>The invariant worth guarding in review: <strong>changing a lower layer must never clear a higher one.</strong> Swapping printer/filament/quality preset or importing a profile replaces only its own layer — the manual layer is dropped solely by an explicit per-field revert, "Reset all", or loading a saved user preset (which is by definition a complete selection). Every one of those handlers used to call <code>setManualOverrides({})</code>, which silently discarded the user's edits; the quality chips fire even when the already-selected one is clicked, so it could happen with no visible change at all. <code>src/lib/config-layers.test.ts</code> pins the precedence, including that a manual <code>0</code> is kept rather than falling through.</p>
+<p>The panel marks manual fields with an amber outline and a revert control, mirroring desktop OrcaSlicer's modified-setting flag. User-facing description: <a href="../profiles/#settings-precedence">Settings precedence</a>.</p>
+<p>One asymmetry sits downstream: the worker applies <code>_passthrough</code> (unmapped fields from an imported profile) <em>after</em> the mapped config on the way to <code>orc_init</code>. That doesn't invert the order, because <code>parseOrcaProfileJson</code> only routes a field to <code>_passthrough</code> when it is <em>not</em> one of the mapped fields the panel can edit — the two sets are disjoint. Adding a panel control for a passthrough-only field would break that assumption and require revisiting the worker's merge order.</p>
+<p>Engine-side 3MF write + read (<code>orc_write_3mf</code> / <code>orc_read_3mf</code>, issue #108) are the first bridge functions to touch <code>libslic3r/Format/bbs_3mf.hpp</code> — previously 3MF only flowed one way, parsed client-side by the now-removed <code>parse3mf.ts</code>. <code>orc_write_3mf</code> is a plain request/response through the worker (like <code>OBJ_TO_STL</code>/<code>CAD_TO_STL</code>), not part of the slice queue's state machine, since exporting doesn't change <code>item.status</code>. <code>orc_read_3mf</code> <em>is</em> part of the file-drop pipeline (same shape as <code>OBJ_TO_STL</code>/<code>CAD_TO_STL</code>'s conversion step); a failed engine read now marks the queue item <code>'error'</code> rather than falling back to a JS parser — <code>orc_read_3mf</code> resolves multi-object transforms the way OrcaSlicer itself does, which the JS walker couldn't, so a fallback would have silently produced worse geometry rather than a clear failure. Not scoped: a full "sliced project" 3MF (per-plate G-code, thumbnails) — this headless bridge has no <code>PartPlateList</code> to source that from; see <code>status.md</code>'s "Nie zaimplementowane" section.</p>
+<h2 id="build-deploy">Build &amp; deploy</h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:5"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><input id="__tabbed_1_4" name="__tabbed_1" type="radio" /><input id="__tabbed_1_5" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Local dev</label><label for="__tabbed_1_2">Production (GitHub Pages)</label><label for="__tabbed_1_3">PR snapshots (GitHub Pages)</label><label for="__tabbed_1_4">Mirror (Cloudflare Workers)</label><label for="__tabbed_1_5">Build WASM engine</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>npm<span class="w"> </span>run<span class="w"> </span>dev<span class="w">       </span><span class="c1"># Vite dev server, WASM from /wasm/</span>
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Triggered automatically on push to master</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># deploy.yml downloads slicer.js + slicer.wasm (ST) from release</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># wasm-v2.4.2, and slicer-mt.js + slicer-mt.wasm (MT) from the sibling</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># wasm-v2.4.2-multithreaded release (best-effort — a missing MT release</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># never fails the deploy), and embeds both in the gh-pages branch under</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="c1"># app/wasm/. GitHub Pages cannot send custom response headers, so it can</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1"># never be crossOriginIsolated — the app always selects the ST engine</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="c1"># here regardless of which files are present (see ADR-011).</span>
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># pr-preview.yml runs for PRs whose source branch is in this repository.</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># Each push builds the UI into previews/pr-&lt;number&gt;/ on gh-pages and posts</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># the URL on the PR. It reuses app/wasm/ from production, so snapshots do</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># not publish another large WASM binary. Closing the PR removes the files.</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1"># Fork PRs intentionally do not receive a snapshot: untrusted PR code is</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="c1"># never run with credentials that can write to gh-pages.</span>
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Cloudflare Workers Builds (Git integration), on push to master</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="c1"># Build command:  npm run build:cf   (scripts/cf-build.mjs)</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># Deploy command: npx wrangler deploy   (wrangler.jsonc, static assets)</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1">#</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="c1"># This builds independently of deploy.yml, off the same master pushes —</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="c1"># including deploy.yml&#39;s own auto-bump commit, so the version label here</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># matches GitHub Pages. That commit is marked [skip actions] rather than</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="c1"># [skip ci] specifically because Workers Builds honors [skip ci] as well:</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="c1"># with the old marker the mirror only ever rebuilt merge commits and sat</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="c1"># permanently one patch version behind (identical code, stale label).</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="c1"># See the comment on deploy.yml&#39;s &quot;Auto-bump app version&quot; step.</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="c1">#</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="c1"># public/_headers sends Cross-Origin-Opener-Policy: same-origin +</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="c1"># Cross-Origin-Embedder-Policy: require-corp on every response here —</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="c1"># the one host in this deployment that&#39;s crossOriginIsolated, so it&#39;s</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="c1"># the only place the real multithreaded (MT) engine actually runs</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="c1"># (see ADR-011).</span>
+<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="c1">#</span>
+<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a><span class="c1"># Cloudflare serves only the app shell: both slicer.wasm and</span>
+<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a><span class="c1"># slicer-mt.wasm (~36 MB each) exceed the 25 MiB per-asset limit, so</span>
+<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a><span class="c1"># cf-build.mjs sets VITE_WASM_BASE_URL to the GitHub Pages copies</span>
+<a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a><span class="c1"># (served with Access-Control-Allow-Origin: * and Content-Type:</span>
+<a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a><span class="c1"># application/wasm — required for COEP to allow the cross-origin fetch</span>
+<a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a><span class="c1"># at all; plain GitHub Releases assets send neither header and can&#39;t be</span>
+<a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a><span class="c1"># read this way) and the app loads whichever engine it needs</span>
+<a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a><span class="c1"># cross-origin. The GitHub Pages deploy therefore remains the source of</span>
+<a id="__codelineno-7-27" name="__codelineno-7-27" href="#__codelineno-7-27"></a><span class="c1"># truth for both engine binaries — a Cloudflare-only deploy cannot ship</span>
+<a id="__codelineno-7-28" name="__codelineno-7-28" href="#__codelineno-7-28"></a><span class="c1"># a new engine.</span>
+<a id="__codelineno-7-29" name="__codelineno-7-29" href="#__codelineno-7-29"></a><span class="c1">#</span>
+<a id="__codelineno-7-30" name="__codelineno-7-30" href="#__codelineno-7-30"></a><span class="c1"># slicer.worker.ts probes for slicer-mt.js before committing to it and</span>
+<a id="__codelineno-7-31" name="__codelineno-7-31" href="#__codelineno-7-31"></a><span class="c1"># falls back to the always-present ST engine on any failure, so a</span>
+<a id="__codelineno-7-32" name="__codelineno-7-32" href="#__codelineno-7-32"></a><span class="c1"># missing/stale MT mirror degrades gracefully rather than breaking the</span>
+<a id="__codelineno-7-33" name="__codelineno-7-33" href="#__codelineno-7-33"></a><span class="c1"># app.</span>
+<a id="__codelineno-7-34" name="__codelineno-7-34" href="#__codelineno-7-34"></a><span class="c1">#</span>
+<a id="__codelineno-7-35" name="__codelineno-7-35" href="#__codelineno-7-35"></a><span class="c1"># Cache key + header label ultimately come from app/wasm/engine-version.json.</span>
+<a id="__codelineno-7-36" name="__codelineno-7-36" href="#__codelineno-7-36"></a><span class="c1"># cf-build.mjs still bakes a value at build time (fallbacks: GitHub Releases</span>
+<a id="__codelineno-7-37" name="__codelineno-7-37" href="#__codelineno-7-37"></a><span class="c1"># API, then the app version) — but that is now only a FALLBACK: the worker</span>
+<a id="__codelineno-7-38" name="__codelineno-7-38" href="#__codelineno-7-38"></a><span class="c1"># (slicer.worker.ts) re-reads engine-version.json at RUNTIME on every load</span>
+<a id="__codelineno-7-39" name="__codelineno-7-39" href="#__codelineno-7-39"></a><span class="c1"># and uses that for the ?v= cache-buster + header. This decouples the app</span>
+<a id="__codelineno-7-40" name="__codelineno-7-40" href="#__codelineno-7-40"></a><span class="c1"># shell from the engine version: because the CF shell build (~2 min) races</span>
+<a id="__codelineno-7-41" name="__codelineno-7-41" href="#__codelineno-7-41"></a><span class="c1"># the multi-hour Build WASM, the shell used to bake a stale engine version</span>
+<a id="__codelineno-7-42" name="__codelineno-7-42" href="#__codelineno-7-42"></a><span class="c1"># and pin the CacheFirst cache to an old (possibly deadlocking) binary until</span>
+<a id="__codelineno-7-43" name="__codelineno-7-43" href="#__codelineno-7-43"></a><span class="c1"># the next shell rebuild. Runtime resolution means the shell always tracks</span>
+<a id="__codelineno-7-44" name="__codelineno-7-44" href="#__codelineno-7-44"></a><span class="c1"># whatever engine gh-pages currently serves, with no CF rebuild needed for</span>
+<a id="__codelineno-7-45" name="__codelineno-7-45" href="#__codelineno-7-45"></a><span class="c1"># an engine-only update. (engine-version.json is deliberately not SW-cached.)</span>
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># GitHub Actions → Build WASM → Run workflow</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="c1"># Or: git tag v2.4.2-ow1 &amp;&amp; git push --tags</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="c1"># Builds two matrix legs (variant: [st, mt]):</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1">#   st: slicer.js (~210 KB) + slicer.wasm (~29 MB) — sequential TBB</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1">#       stubs (ADR-007), unchanged.</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="c1">#   mt: slicer-mt.js + slicer-mt.wasm (~36 MB) — real oneTBB built from</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1">#       source, linked with Emscripten pthreads (ADR-011).</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="c1"># Each leg runs orca-wasm/scripts/smoke-test.mjs before publishing</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="c1"># (ADR-009) — a build that fails the smoke test never reaches the</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="c1"># release step. A compare-outputs job then slices both variants&#39;</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="c1"># outputs and requires matching G-code structure.</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="c1"># Published as GitHub Releases wasm-v2.4.2 (st) and</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="c1"># wasm-v2.4.2-multithreaded (mt).</span>
+</code></pre></div>
+</div>
+</div>
+</div>
+<h2 id="stack">Stack</h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Technology</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>UI</td>
+<td>React 19, TypeScript 6</td>
+<td>No React Router — single-page tab state</td>
+</tr>
+<tr>
+<td>Styling</td>
+<td>Tailwind CSS v4</td>
+<td>Custom <code>orca-*</code> colour scale</td>
+</tr>
+<tr>
+<td>3D</td>
+<td>Three.js 0.184</td>
+<td>STLLoader, OrbitControls, LineSegments2 (fat lines)</td>
+</tr>
+<tr>
+<td>Bundler</td>
+<td>Vite 8</td>
+<td>Worker ES format, configurable base</td>
+</tr>
+<tr>
+<td>WASM</td>
+<td>OrcaSlicer <strong>v2.4.2</strong></td>
+<td>Emscripten, self-built; single-threaded (ST) engine everywhere, plus a real-oneTBB multithreaded (MT) engine served only where cross-origin isolation is available (Cloudflare mirror — see ADR-011)</td>
+</tr>
+<tr>
+<td>Worker</td>
+<td>Web Worker (ES module)</td>
+<td>Blob URL for dynamic import</td>
+</tr>
+<tr>
+<td>License</td>
+<td>AGPL-3.0-or-later</td>
+<td>Source link in UI footer per §13</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../profiles/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Profiles">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Profiles
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../integration/" class="md-footer__link md-footer__link--next" aria-label="Next: Integration Guide">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Integration Guide
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.footer", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

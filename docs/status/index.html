@@ -1,0 +1,2087 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="OrcaSlicer running in the browser via WebAssembly">
+      
+      
+      
+        <link rel="canonical" href="https://hiosdra.github.io/OrcaWeb/docs/status/">
+      
+      
+        <link rel="prev" href="../wasm-build/">
+      
+      
+        <link rel="next" href="../adr/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Status - OrcaWeb</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#status-what-works-what-doesnt" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="OrcaWeb" class="md-header__button md-logo" aria-label="OrcaWeb" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            OrcaWeb
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Status
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Hiosdra/OrcaWeb" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Hiosdra/OrcaWeb
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../getting-started/" class="md-tabs__link">
+          
+  
+  
+  Users
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../architecture/" class="md-tabs__link">
+          
+  
+  
+  Developers
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+  Project
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../st-mt-benchmark/" class="md-tabs__link">
+          
+  
+  
+  Internals & Reports
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="OrcaWeb" class="md-nav__button md-logo" aria-label="OrcaWeb" data-md-component="logo">
+      
+  <img src="../assets/logo.svg" alt="logo">
+
+    </a>
+    OrcaWeb
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Hiosdra/OrcaWeb" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Hiosdra/OrcaWeb
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Users
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Users
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../profiles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Profiles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developers
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developers
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../wasm-build/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building WASM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Status
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ✅ Works
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="✅ Works">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#user-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User interface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wasm-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WASM engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#engine-clean-layer-patches-vs-overrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Engine clean layer (patches vs. overrides)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orcaslicer-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OrcaSlicer profiles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#partially-working-known-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ⚠️ Partially working / known limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#not-yet-implemented" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not yet implemented
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-note" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture note
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_2" id="__nav_4_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture Decisions
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture Decisions
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-001-client-side-wasm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-001: Client-Side WASM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-002-tech-stack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-002: Technology Stack
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-003-web-worker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-003: Web Worker + Singleton
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-004-self-built-wasm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-004: Self-Built WASM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-005-no-slicer-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-005: No slicer.data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-006-patch-strategy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-006: Engine Patch Strategy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-007-tbb-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-007: Sequential TBB Stubs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-008-session-handle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-008: Session-Scoped Engine State
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-009-wasm-smoke-test/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-009: WASM Build Smoke Test
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-010-e2e-smoke-test/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-010: E2E UI Smoke Test
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/adr-011-multithreaded-engine/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ADR-011: Multithreaded Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internals & Reports
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Internals & Reports
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../st-mt-benchmark/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmark: ST vs MT Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gcode-compression-benchmark/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmark: G-code Compression
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ✅ Works
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="✅ Works">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#user-interface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User interface
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wasm-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WASM engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#engine-clean-layer-patches-vs-overrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Engine clean layer (patches vs. overrides)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#orcaslicer-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OrcaSlicer profiles
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#partially-working-known-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ⚠️ Partially working / known limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#not-yet-implemented" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not yet implemented
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-note" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture note
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="status-what-works-what-doesnt">Status — what works, what doesn't</h1>
+<p>This page describes the current state of the project: implemented features and known limitations. Planned-but-not-yet-implemented work lives in GitHub issues, linked below, instead of an in-page roadmap.</p>
+<p>Last updated: <strong>2026-07-24</strong> · engine version: <strong>OrcaSlicer v2.4.2</strong> (self-built, live in production) · app version: <strong>v0.8.11</strong></p>
+<hr />
+<h2 id="works">✅ Works</h2>
+<h3 id="user-interface">User interface</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Drag &amp; drop STL</td>
+<td>ASCII and binary STL; multiple files at once — sequential queue, each G-code downloadable separately</td>
+</tr>
+<tr>
+<td>3MF import</td>
+<td>Engine-side read (<code>orc_read_3mf</code>, OrcaSlicer's native reader — applies per-object/instance transforms correctly); no JS fallback — an engine failure surfaces as an import error</td>
+</tr>
+<tr>
+<td>OBJ import</td>
+<td>OBJ → STL conversion via OrcaSlicer's native parser (<code>objparser.cpp</code> + <code>OBJ.cpp</code>) compiled into WASM — no extra dependencies; supports triangles, quads, multi-object</td>
+</tr>
+<tr>
+<td>STEP import</td>
+<td>STEP → STL conversion via OCCT 7.8.1 compiled directly into <code>slicer.wasm</code> (<code>Model::read_from_step</code>); no separate download. IGES unsupported (OrcaSlicer's STEP reader doesn't read IGES)</td>
+</tr>
+<tr>
+<td>3D model preview (Three.js)</td>
+<td>Model on a virtual print bed at real mm scale, OrbitControls</td>
+</tr>
+<tr>
+<td>Bed grid — dynamic size</td>
+<td>Bed size read from the printer preset or machine profile</td>
+</tr>
+<tr>
+<td>Bed shape (<code>bed_shape</code>)</td>
+<td>Rectangular or circular (e.g. Bambu Lab P1S); visualised in both the 3D preview and G-code viewer</td>
+</tr>
+<tr>
+<td>Fuzzy skin (surface roughness)</td>
+<td>Modes: none / external (outer walls only) / all; thickness 0.05–2 mm, point spacing 0.1–5 mm; libnoise compiled for WASM (Perlin/Billow/RidgedMulti/Voronoi) — since PR #32</td>
+</tr>
+<tr>
+<td>Variable (adaptive) layer height</td>
+<td>Toggle + quality slider (0–1) under Quality; the engine varies layer thickness across Z from the model's geometry — thinner layers on detailed/sloped regions, thicker on flat ones — bounded by the printer's min/max layer height. Matches desktop OrcaSlicer's Adaptive tool (<a href="https://github.com/Hiosdra/OrcaWeb/issues/138">#138</a>)</td>
+</tr>
+<tr>
+<td>Multi-file — sequential queue</td>
+<td>Drag &amp; drop multiple files → each sliced separately, own G-code to download</td>
+</tr>
+<tr>
+<td>Multi-file — one plate</td>
+<td>"One plate (N)" button — all STLs auto-arranged via <code>arrange_objects()</code> (libnest2d), one G-code</td>
+</tr>
+<tr>
+<td>Model / Settings / Slice tabs</td>
+<td>Smooth navigation, tabs locked until a file is loaded</td>
+</tr>
+<tr>
+<td>Settings panel</td>
+<td>Printer, filament, and quality selection</td>
+</tr>
+<tr>
+<td>G-code preview (layer by layer)</td>
+<td>Layer slider, colouring by move type (perimeter/infill/support/travel), thick 3D lines, layer cursor — since PR #16</td>
+</tr>
+<tr>
+<td>G-code preview — both comment dialects</td>
+<td>Layers from <code>;LAYER_CHANGE</code> / <code>; CHANGE_LAYER</code> markers, move types from <code>;TYPE:</code> <strong>and</strong> <code>; FEATURE:</code> (Bambu dialect — type colours previously didn't work for BBL printers), <code>G2</code>/<code>G3</code> arc tessellation, correct vase/spiral mode rendering</td>
+</tr>
+<tr>
+<td>G-code statistics</td>
+<td>Print time, layers, filament (mm/g) on the file card — parsed from the G-code header and footer (both time-comment dialects)</td>
+</tr>
+<tr>
+<td>Side-by-side model + G-code view</td>
+<td>Synchronised layout after slicing</td>
+</tr>
+<tr>
+<td>G-code download</td>
+<td>"Download" button with the correct filename; "Download All (.zip)" bundles every result into one archive</td>
+</tr>
+<tr>
+<td>.3mf export</td>
+<td>".3mf" button on a sliced card — the engine writes the mesh + embedded OrcaSlicer settings (<code>orc_write_3mf</code>); no bed/G-code/thumbnail data (see below)</td>
+</tr>
+<tr>
+<td>Slice cancellation</td>
+<td>"Cancel" button — restarts the worker (the synchronous WASM slice loop can't be interrupted any other way); pending OBJ/STEP conversions are retried automatically</td>
+</tr>
+<tr>
+<td>Stale-result detection</td>
+<td>Changing settings after slicing marks a result "Sliced with previous settings"; the button becomes "Re-slice"</td>
+</tr>
+<tr>
+<td>Settings persistence</td>
+<td>Printer, filament, quality preset, and overrides kept in <code>localStorage</code>, restored on the next visit</td>
+</tr>
+<tr>
+<td>Manual overrides outrank profiles</td>
+<td>A hand-edited field is flagged (amber outline + per-field "reset") and survives switching printer/filament/quality preset and loading another 3MF or profile — preset &lt; imported file &lt; your edits, see <a href="../profiles/#settings-precedence">Settings precedence</a></td>
+</tr>
+<tr>
+<td>Queue as a state machine</td>
+<td><code>useSliceQueue</code> (reducer) — correlates worker responses by <code>requestId</code>; an engine error fails every pending item instead of leaving spinners running forever</td>
+</tr>
+<tr>
+<td>Engine status badge</td>
+<td>"Loading engine…" / "Engine error" in the header</td>
+</tr>
+<tr>
+<td>Engine version in header</td>
+<td><code>v{app} · {date} · engine v{orca}</code> under the logo — same text at every screen width</td>
+</tr>
+<tr>
+<td>Footer — source link (AGPL)</td>
+<td>Visible "Source (AGPL-3.0)" link → GitHub repo</td>
+</tr>
+</tbody>
+</table>
+<h3 id="wasm-engine">WASM engine</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>STL → G-code slicing</td>
+<td>Runs in a Web Worker, doesn't block the UI</td>
+</tr>
+<tr>
+<td>Self-built OrcaSlicer <strong>v2.4.2</strong></td>
+<td>Built via <code>orca-wasm/</code> + Emscripten; artifacts in the <code>wasm-v2.4.2</code> release</td>
+</tr>
+<tr>
+<td>ST / MT engine variants</td>
+<td>Single-threaded (ST, <code>slicer.js</code>/<code>slicer.wasm</code>) served everywhere; multithreaded (MT, <code>slicer-mt.js</code>/<code>slicer-mt.wasm</code>, real oneTBB) served only where the page is cross-origin isolated (currently the Cloudflare mirror) — see <a href="../adr/adr-011-multithreaded-engine/">ADR-011</a> and the <a href="../st-mt-benchmark/">ST vs MT benchmark</a></td>
+</tr>
+<tr>
+<td><code>orc_obj_to_stl</code></td>
+<td>WASM export: OBJ → binary STL conversion without needing <code>orc_init</code>; result returned as an <code>ArrayBuffer</code> to the worker</td>
+</tr>
+<tr>
+<td><code>orc_slice_multi</code></td>
+<td>Multiple STLs → one G-code: auto-arrange via <code>arrange_objects()</code> (libnest2d + NLopt); output identical in shape to <code>orc_slice</code></td>
+</tr>
+<tr>
+<td>Multi-material + real multi-nozzle printers</td>
+<td>Filament slots are defined in the Settings panel and assigned per object on the Slice tab, reaching the engine as <code>orc_slice_multi</code>'s <code>extruder_ids</code> (OrcaSlicer's per-object <code>"extruder"</code> key, normalised to <code>*_filament_id</code> by <code>normalize_fdm()</code>). <code>filament_map</code> decides whether slots share one nozzle (AMS-style) or drive genuine T0/T1 tool changes on a real dual-nozzle machine such as a Bambu Lab H2D — see <code>withFilamentSlots()</code> in <code>src/lib/profiles.ts</code>. Unblocked in <a href="https://github.com/Hiosdra/OrcaWeb/pull/160">#160</a>: the crash that had gated real multi-nozzle profiles off was the bridge joining every multi-value option with <code>,</code> regardless of its type, not the engine</td>
+</tr>
+<tr>
+<td>Variable (adaptive) layer height</td>
+<td><code>orc_init</code> reads two pseudo-keys — <code>adaptive_layer_height</code> (bool) + <code>adaptive_layer_height_quality</code> (0–1) — and, when on, the bridge computes each object's <code>layer_height_profile</code> with <code>layer_height_profile_adaptive()</code> after <code>print.apply()</code> and before <code>print.process()</code>, exactly as desktop OrcaSlicer's Adaptive button does (<a href="https://github.com/Hiosdra/OrcaWeb/issues/138">#138</a>)</td>
+</tr>
+<tr>
+<td><code>orc_write_3mf</code></td>
+<td>WASM export: writes the mesh + embedded config as <code>.3mf</code> via <code>Slic3r::store_bbs_3mf()</code> — no plate/G-code/thumbnail data (no <code>PartPlateList</code> in the headless bridge); verified by the smoke test (ZIP unpacks, <code>3D/3dmodel.model</code> + <code>Metadata/*.config</code> present)</td>
+</tr>
+<tr>
+<td><code>orc_read_3mf</code></td>
+<td>WASM import: reads <code>.3mf</code> via <code>Slic3r::load_bbs_3mf()</code> — merged binary STL (per-instance/volume transforms applied by <code>ModelObject::mesh()</code>) + config JSON (same keys as OrcaSlicer's native <code>.config</code>, parsed by the existing <code>parseOrcaProfileJson()</code>); verified by the smoke test (round-trip: triangle count + config keys)</td>
+</tr>
+<tr>
+<td>No <code>slicer.data</code></td>
+<td>The headless flat-config slicer never reads <code>orca/resources</code> → data file reduced <strong>200 MB → 0</strong></td>
+</tr>
+<tr>
+<td>Singleton worker</td>
+<td>One worker for the whole session</td>
+</tr>
+<tr>
+<td>Error handling</td>
+<td>Error codes <code>-1</code>…<code>-9</code>, readable messages</td>
+</tr>
+<tr>
+<td>WASM load while slicing is requested</td>
+<td><code>SLICE</code> requests are queued while WASM is still loading</td>
+</tr>
+<tr>
+<td>Streaming WASM compile</td>
+<td><code>WebAssembly.compileStreaming</code> compiles <code>slicer.wasm</code> in parallel with the download (and with fetching <code>slicer.js</code>); falls back to buffered <code>compile</code> on a wrong Content-Type</td>
+</tr>
+<tr>
+<td>G-code JPEG thumbnails</td>
+<td>Real JPEG (RGBA→RGB, standard libjpeg) — since PR #13</td>
+</tr>
+<tr>
+<td>Slice timer</td>
+<td>Button shows <code>Slicing… (12s)</code> — honest elapsed time, no fake stage names — since PR #15</td>
+</tr>
+<tr>
+<td>PWA / offline mode</td>
+<td>Service Worker (Workbox) pre-caches all assets + WASM on first visit; installable as a native app</td>
+</tr>
+<tr>
+<td>Session-scoped engine (<code>orc_session_create</code>/<code>orc_session_destroy</code>)</td>
+<td>Engine state (config, bed, last error) moved from global C++ statics to a session handle — see <a href="../adr/adr-008-session-handle/">ADR-008</a></td>
+</tr>
+<tr>
+<td>WASM crash recovery</td>
+<td><code>onAbort</code> reliably reports <code>WASM_ERROR</code> to the main thread; the dead worker is dropped and replaced with a fresh one on the next attempt</td>
+</tr>
+<tr>
+<td>Engine smoke test in CI</td>
+<td><code>orca-wasm/scripts/smoke-test.mjs</code> — real <code>orc_init</code>/<code>orc_slice(_multi)</code> after every build, before publishing a release — see <a href="../adr/adr-009-wasm-smoke-test/">ADR-009</a></td>
+</tr>
+<tr>
+<td>E2E UI smoke test in CI</td>
+<td>Playwright (<code>e2e/slice.spec.ts</code>) — uploads the real Voron Design Cube v7 model → slices → gets G-code through the real WASM engine, on every open PR — see <a href="../adr/adr-010-e2e-smoke-test/">ADR-010</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="engine-clean-layer-patches-vs-overrides">Engine clean layer (patches vs. overrides)</h3>
+<p>OrcaSlicer's C++ source is patched in place (<code>orca-wasm/patches/apply.py</code>) for WASM-compatibility fixes (narrowing, ABI, platform guards), while whole files whose implementation depends on a library unavailable in WASM (OCCT-dependent SVG/text export, OpenVDB, OpenCV, Draco) are replaced wholesale by no-op overrides in <code>orca-wasm/overrides/</code>. These are two distinct mechanisms — see <a href="../adr/adr-006-patch-strategy/">ADR-006</a> for the full three-layer strategy (header shims + C++ overrides + in-place patches) and <a href="../architecture/#engine-clean-layer-override-approach">architecture.md</a> for the current table of stubs.</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Details</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Disabled WASM dependencies</td>
+<td>OpenVDB, OpenCV, Draco replaced by overrides; OCCT and libnoise <strong>are</strong> compiled in</td>
+</tr>
+<tr>
+<td>Upgrading to a new version</td>
+<td>Just <code>ORCA_VERSION</code> in the workflow, plus any stub adjustments</td>
+</tr>
+<tr>
+<td>AGPL-3.0 compliance</td>
+<td><code>LICENSE</code>, <code>NOTICE.md</code>, source link in the UI — §13 network copyleft satisfied</td>
+</tr>
+</tbody>
+</table>
+<h3 id="orcaslicer-profiles">OrcaSlicer profiles</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Built-in quality presets</td>
+<td>Draft (0.3 mm) / Standard (0.2 mm) / Fine (0.1 mm)</td>
+</tr>
+<tr>
+<td>Built-in filaments</td>
+<td>PLA, PETG, ABS, TPU</td>
+</tr>
+<tr>
+<td>Built-in printers</td>
+<td>Generic 0.4/0.6, Bambu Lab P1S/X1C, Prusa MK4, Ender 3, Voron 2.4</td>
+</tr>
+<tr>
+<td>JSON profile import from OrcaSlicer</td>
+<td><code>.json</code> file from a desktop install; <code>ORCA_FIELD_MAP</code> mapping + passthrough of all other fields</td>
+</tr>
+<tr>
+<td>Machine profile import</td>
+<td><code>gcode_flavor</code>, <code>retract_length/speed</code>, <code>lift_z</code>, <code>machine_start/end_gcode</code>, <code>machine_max_speed_*</code>, <code>printable_height</code> — all reach the engine</td>
+</tr>
+<tr>
+<td>Profile extraction from 3MF</td>
+<td>Via <code>orc_read_3mf</code> (falls back to a JS read of <code>Metadata/*.json/.config</code> from the archive if the engine fails)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="deployment">Deployment</h3>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GitHub Actions CI (deploy.yml)</td>
+<td>✅ builds and deploys on every push to <code>master</code></td>
+</tr>
+<tr>
+<td>PR snapshot on GitHub Pages</td>
+<td>✅ <code>pr-preview.yml</code> publishes <code>previews/pr-&lt;number&gt;/</code>, comments the URL, removes the snapshot when the PR closes; same-repository branches only</td>
+</tr>
+<tr>
+<td>Same-origin WASM serving</td>
+<td>✅ no CORS — files live in <code>gh-pages/app/wasm/</code></td>
+</tr>
+<tr>
+<td>WASM release <code>wasm-v2.4.2</code></td>
+<td>✅ <code>slicer.js</code> + <code>slicer.wasm</code> (~29 MB total, includes OCCT for STEP)</td>
+</tr>
+<tr>
+<td>Deploy resilience</td>
+<td>✅ falls back to the previous <code>gh-pages</code> state if the release is missing</td>
+</tr>
+<tr>
+<td>CI build on PRs touching <code>orca-wasm/**</code></td>
+<td>✅ every PR touching the engine runs a ~12 min build</td>
+</tr>
+<tr>
+<td>E2E smoke test on PRs (<code>e2e-smoke.yml</code>)</td>
+<td>✅ every open PR — downloads the published WASM engine and slices the Voron Design Cube v7 through the real UI (Playwright)</td>
+</tr>
+<tr>
+<td>App version auto-bump</td>
+<td>✅ every deploy bumps the patch version in <code>package.json</code>/<code>status.md</code> and tags <code>vX.Y.Z</code> automatically (see the <code>/release</code> skill for a deliberate minor/major bump)</td>
+</tr>
+<tr>
+<td>Engine auto-rebuild on <code>orca-wasm/</code> changes</td>
+<td>✅ a push to <code>master</code> touching <code>orca-wasm/**</code> triggers <code>build-wasm.yml</code>; <code>deploy.yml</code> waits for its result (<code>workflow_run</code>) instead of racing an older engine</td>
+</tr>
+<tr>
+<td>Landing page</td>
+<td>✅ <code>hiosdra.github.io/OrcaWeb/</code></td>
+</tr>
+<tr>
+<td>MkDocs documentation</td>
+<td>✅ <code>hiosdra.github.io/OrcaWeb/docs/</code></td>
+</tr>
+<tr>
+<td>Dependabot + dependency grouping</td>
+<td>✅ weekly schedule</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="partially-working-known-limitations">⚠️ Partially working / known limitations</h2>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Details</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Printer temperature ranges</td>
+<td>Not independently verified — printer+filament preset combinations may be inconsistent for exotic pairings</td>
+</tr>
+<tr>
+<td>Large STL files (&gt;50 MB)</td>
+<td>May cause stutter during preview</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="not-yet-implemented">Not yet implemented</h2>
+<p>Tracked in GitHub issues rather than listed here, so this page doesn't drift into a stale roadmap:</p>
+<ul>
+<li><a href="https://github.com/Hiosdra/OrcaWeb/issues/139">#139</a> — Support enforcement / blocking</li>
+<li><a href="https://github.com/Hiosdra/OrcaWeb/issues/108">#108</a> — Full "sliced project" 3MF export (per-plate G-code, plate thumbnails); <code>orc_write_3mf</code>/<code>orc_read_3mf</code> intentionally cover mesh + embedded config only, since the headless bridge has no <code>PartPlateList</code> to source that from — this is a documented non-goal for the current bridge shape, not a plain backlog item</li>
+</ul>
+<hr />
+<h2 id="architecture-note">Architecture note</h2>
+<p>There is no <code>cli/</code> directory — a Node CLI wrapper existed early on and was deliberately removed in its entirety (<code>chore: remove CLI</code> — frontend → bridge → engine only). It is not a project goal; see <a href="https://github.com/Hiosdra/OrcaWeb/blob/master/agents.md#project-vision">agents.md</a>. For the current component breakdown, see <a href="../architecture/">architecture.md</a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../wasm-build/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Building WASM">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Building WASM
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../adr/" class="md-footer__link md-footer__link--next" aria-label="Next: Overview">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Overview
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "navigation.footer", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
