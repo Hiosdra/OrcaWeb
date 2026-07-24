@@ -416,14 +416,17 @@ static void set_is_bbl_printer(Slic3r::Print& print, const Slic3r::DynamicPrintC
 // the same object process() later reads. Using the PrintObject's own
 // slicing_parameters() guarantees the profile's Z samples line up exactly with
 // what update_layer_height_profile validates against, so it is not discarded.
-// The const_cast mirrors the desktop code, which casts away model_object()'s
-// constness for exactly this assignment.
+// objects_mutable() hands back non-const PrintObject*, so model_object()
+// resolves to the non-const overload (PrintObjectBase has both) — no cast
+// needed to write the profile, unlike desktop's GLCanvas3D path where the
+// object is genuinely held as const ModelObject*.
 static void apply_adaptive_layer_height(Slic3r::Print& print, float quality_factor) {
     for (Slic3r::PrintObject* obj : print.objects_mutable()) {
         const Slic3r::SlicingParameters& sp = obj->slicing_parameters();
         if (!sp.valid) continue;
-        std::vector<double> profile = Slic3r::layer_height_profile_adaptive(sp, *obj->model_object(), quality_factor);
-        const_cast<Slic3r::ModelObject*>(obj->model_object())->layer_height_profile.set(std::move(profile));
+        Slic3r::ModelObject* model_object = obj->model_object();
+        std::vector<double> profile = Slic3r::layer_height_profile_adaptive(sp, *model_object, quality_factor);
+        model_object->layer_height_profile.set(std::move(profile));
     }
 }
 
