@@ -1,9 +1,9 @@
 # Benchmark: Single-Threaded vs Multithreaded Engine
 
-OrcaWeb ships two builds of the same OrcaSlicer engine: the **single-threaded
-(ST)** engine served everywhere, and a **multithreaded (MT)** engine — real
-oneTBB linked against Emscripten pthreads — served only where the page is
-cross-origin isolated (the Cloudflare mirror; see
+OrcaWeb ships two builds of the same OrcaSlicer engine: a **multithreaded (MT)**
+engine — real oneTBB linked against Emscripten pthreads — used by the primary
+cross-origin-isolated product deployment, and the **single-threaded (ST)**
+compatibility engine served on ordinary hosts (see
 [ADR-011](adr/adr-011-multithreaded-engine.md), which also records the
 underlying design constraints).
 
@@ -85,7 +85,8 @@ inherently serial work** — Amdahl's law in practice.
   gate MT on expected slice cost / model complexity rather than assuming it is
   always faster.
 - MT only runs where the page is cross-origin isolated (COOP/COEP), i.e. the
-  Cloudflare mirror — GitHub Pages always serves ST. See
+  primary Cloudflare product deployment — GitHub Pages remains the ST fallback.
+  See
   [ADR-011](adr/adr-011-multithreaded-engine.md).
 
 ## Reproducing

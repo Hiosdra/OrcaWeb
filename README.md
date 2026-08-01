@@ -2,9 +2,12 @@
 
 OrcaSlicer compiled to WebAssembly. Slice STL files directly in the browser — no server, no upload, 100% private.
 
-**[Live app →](https://hiosdra.github.io/OrcaWeb/app/)**  |  **[Live app, multithreaded engine →](https://orcaweb-cf-pages.themppsplx.workers.dev/)**  |  **[Documentation →](https://hiosdra.github.io/OrcaWeb/docs/)**
+**[Live app, multithreaded engine →](https://orcaweb-cf-pages.themppsplx.workers.dev/)**  |  **[Compatibility app (ST) →](https://hiosdra.github.io/OrcaWeb/app/)**  |  **[Documentation →](https://hiosdra.github.io/OrcaWeb/docs/)**
 
-The Cloudflare mirror is cross-origin isolated, so it runs the real multithreaded (MT) WASM engine instead of the single-threaded build GitHub Pages is stuck with — see below.
+The Cloudflare mirror is the primary cross-origin-isolated product deployment,
+so it runs the real multithreaded (MT) WASM engine. GitHub Pages remains the
+single-threaded (ST) compatibility deployment because it cannot send the
+headers required by `SharedArrayBuffer` — see below.
 
 ## Features
 
@@ -20,7 +23,7 @@ The Cloudflare mirror is cross-origin isolated, so it runs the real multithreade
 git clone https://github.com/Hiosdra/OrcaWeb.git
 cd OrcaWeb
 npm install
-node scripts/download-wasm.mjs   # ~29 MB, one-time download
+node scripts/download-wasm.mjs   # ~38 MB ST fallback for local dev
 npm run dev
 ```
 
@@ -30,8 +33,10 @@ Those files are gitignored (too large for git).
 ## Architecture
 
 A React UI (main thread) hands STL/3MF/OBJ/STEP files to a Web Worker running
-the OrcaSlicer engine compiled to WebAssembly (`slicer.js` + `slicer.wasm`,
-~29 MB, includes OCCT for STEP import) and gets G-code back. There is no
+the OrcaSlicer engine compiled to WebAssembly. The worker selects the primary
+MT pair (`slicer-mt.js` + `slicer-mt.wasm`) on a cross-origin-isolated host and
+falls back to the ST pair (`slicer.js` + `slicer.wasm`) when the host or assets
+do not support threads. There is no
 `slicer.data` — the headless flat-config slicer never reads `orca/resources`
 at runtime, so the 200 MB preload file used by older builds was eliminated
 entirely.
@@ -40,29 +45,29 @@ entirely.
 
 ### WASM loading
 
-In CI the WASM artifacts are downloaded from the latest immutable
-`wasm-v2.4.2` (optionally `-patchN`) GitHub Release and embedded directly in
-the GitHub Pages deployment, so they are served from the **same origin** as the app —
-no CORS issues.
+In CI the WASM artifacts are downloaded from the highest immutable release in
+the `wasm-v2.4.2` / `wasm-v2.4.2-patchN` family and embedded directly in the
+GitHub Pages deployment, so they are served from the **same origin** as the app
+— no CORS issues.
 
 The Cloudflare Workers mirror deploy cannot host the engine itself — both
-`slicer.wasm` (~29 MB) and the multithreaded `slicer-mt.wasm` (~36 MB, see
+`slicer.wasm` (~38 MB) and the multithreaded `slicer-mt.wasm` (~37 MB, see
 below) exceed Cloudflare's 25 MiB per-asset limit — so its build
 (`npm run build:cf`, see `scripts/cf-build.mjs`) points `VITE_WASM_BASE_URL`
 at the GitHub Pages copy, which is served with `Access-Control-Allow-Origin: *`.
 
 ### Single-threaded vs multithreaded engine
 
-The engine ships as two builds: a **single-threaded (ST)** variant
-(`slicer.js`/`slicer.wasm`) served everywhere, and a **multithreaded (MT)**
-variant (`slicer-mt.js`/`slicer-mt.wasm`, real oneTBB linked against
-Emscripten pthreads) served only where the page is cross-origin isolated —
-today, only the [Cloudflare mirror](https://orcaweb-cf-pages.themppsplx.workers.dev/).
-GitHub Pages cannot send the required
-`Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy` headers, so it
-always serves ST. The worker probes for the MT engine at runtime and falls
-back to ST on any failure. See [ADR-011](mkdocs-docs/adr/adr-011-multithreaded-engine.md)
-and [the ST vs MT benchmark](mkdocs-docs/st-mt-benchmark.md).
+The engine ships as two builds: a **multithreaded (MT)** variant
+(`slicer-mt.js`/`slicer-mt.wasm`, real oneTBB linked against Emscripten
+pthreads) and a **single-threaded (ST)** compatibility variant
+(`slicer.js`/`slicer.wasm`). MT is the primary product path on the
+[cross-origin-isolated Cloudflare mirror](https://orcaweb-cf-pages.themppsplx.workers.dev/);
+GitHub Pages and other ordinary hosts use ST because they cannot send the
+required `Cross-Origin-Opener-Policy`/`Cross-Origin-Embedder-Policy` headers.
+The worker probes for MT at runtime and falls back to ST on any failure. See
+[ADR-011](mkdocs-docs/adr/adr-011-multithreaded-engine.md) and [the ST vs MT
+benchmark](mkdocs-docs/st-mt-benchmark.md).
 
 ### Self-contained WASM build (v2.4.2)
 
@@ -78,7 +83,7 @@ Build the WASM module locally (Linux / macOS / WSL2 — see
 ```
 
 Or trigger the `Build WASM` GitHub Actions workflow manually to publish a new
-`wasm-v2.4.2` (optionally `-patchN`) release with the compiled artifacts —
+immutable `wasm-v2.4.2` or `wasm-v2.4.2-patchN` release with the compiled artifacts —
 releases are immutable, so a rebuild never overwrites a previous one (see
 [`mkdocs-docs/wasm-build.md`](mkdocs-docs/wasm-build.md)).
 

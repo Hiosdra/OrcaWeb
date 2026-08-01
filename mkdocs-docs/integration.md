@@ -15,9 +15,18 @@ This guide is for developers who want to embed the OrcaSlicer WASM engine in the
 
 `orc_init`/`orc_slice`/`orc_slice_multi` take an opaque **session** handle (from `orc_session_create()`) as their first argument — see [API Reference → orc_session_create](api-reference.md#orc_session_create-orc_session_destroy) and [ADR-008](adr/adr-008-session-handle.md). Create one session and reuse it for every slice; free it with `orc_session_destroy()` when done. The config set by `orc_init` persists on that session between slicing calls. Regardless of variant (see below), always run the engine off the main thread — a Web Worker (browser) or a Worker Thread (Node.js) — since a slice call blocks synchronously until it returns.
 
-### Engine variants: single-threaded (ST) vs multithreaded (MT)
+### Engine variants: multithreaded (MT) primary, single-threaded (ST) fallback
 
-The build publishes two artifact sets: **ST** (`slicer.js`/`slicer.wasm`) and **MT** (`slicer-mt.js`/`slicer-mt.wasm`, real oneTBB linked against Emscripten pthreads). Most embedders should use **ST** — it works anywhere. MT requires the page to be `crossOriginIsolated` (both `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp` response headers, which enables `SharedArrayBuffer`); without cross-origin isolation the MT module will fail to load. See [ADR-011](adr/adr-011-multithreaded-engine.md) for the deployment requirements and [the ST vs MT benchmark](st-mt-benchmark.md) for when MT is actually faster — it is not a universal speedup.
+The build publishes two artifact sets: **MT** (`slicer-mt.js`/`slicer-mt.wasm`,
+real oneTBB linked against Emscripten pthreads) and **ST**
+(`slicer.js`/`slicer.wasm`). MT is the primary product path. It requires the
+page to be `crossOriginIsolated` (both `Cross-Origin-Opener-Policy: same-origin`
+and `Cross-Origin-Embedder-Policy: require-corp` response headers, which enables
+`SharedArrayBuffer`); without cross-origin isolation the loader must use ST as a
+compatibility fallback. See [ADR-011](adr/adr-011-multithreaded-engine.md) for
+the deployment requirements and [the ST vs MT benchmark](st-mt-benchmark.md)
+for the performance trade-off — MT is not a universal speedup, but it is the
+engine used by the primary product deployment.
 
 ---
 
@@ -30,12 +39,23 @@ fix to `orca-wasm/` for the same OrcaSlicer version publishes
 one. `scripts/download-wasm.mjs` and `deploy.yml` both resolve whichever tag
 has the highest patch number automatically.
 
+The current MT target is
+[`wasm-v2.4.2-patch13-multithreaded`](https://github.com/Hiosdra/OrcaWeb/releases/tag/wasm-v2.4.2-patch13-multithreaded)
+and the ST fallback target is the independent
+[`wasm-v2.4.2-patch12`](https://github.com/Hiosdra/OrcaWeb/releases/tag/wasm-v2.4.2-patch12)
+family. See [WASM Engine Migration](wasm-engine-migration.md) when upgrading a
+separate client that still pins the base release.
+
 | File | Size | Purpose |
 |---|---|---|
-| `slicer.wasm` | ~29 MB | Compiled ST engine (OrcaSlicer v2.4.2 + OCCT 7.8.1) |
-| `slicer.js` | ~210 KB | Emscripten JS glue (CommonJS IIFE) |
+| `slicer-mt.wasm` | ~37 MB | Primary MT engine (OrcaSlicer v2.4.2 + OCCT 7.8.1) |
+| `slicer-mt.js` | ~250 KB | Emscripten JS glue (CommonJS IIFE), MT |
+| `slicer.wasm` | ~38 MB | ST compatibility engine |
+| `slicer.js` | ~220 KB | Emscripten JS glue (CommonJS IIFE), ST |
 
-The MT variant (`slicer-mt.wasm` ~36 MB / `slicer-mt.js`) is published alongside as a separate release family — see [Engine variants](#engine-variants-single-threaded-st-vs-multithreaded-mt) above.
+The MT and ST pairs are published in separate release families. Keep each
+JavaScript/WASM pair from the same release tag — see [Engine variants](#engine-variants-multithreaded-mt-primary-single-threaded-st-fallback)
+above.
 
 **Download via the provided script:**
 
@@ -43,13 +63,20 @@ The MT variant (`slicer-mt.wasm` ~36 MB / `slicer-mt.js`) is published alongside
 node scripts/download-wasm.mjs   # saves to public/wasm/
 ```
 
-**Or fetch manually from GitHub Releases** and serve the two files from any static host.
+The helper intentionally downloads the ST fallback for ordinary local
+development. For the primary MT product deployment, download the MT pair from
+the `-multithreaded` release family as described in the [WASM Engine Migration](wasm-engine-migration.md)
+guide.
+
+**Or fetch manually from GitHub Releases** and serve the matching pair for the
+selected variant from a host that satisfies its runtime requirements.
 
 ---
 
 ## Quick start — browser (Web Worker)
 
-Running the engine in a Web Worker keeps the main thread free while the ~29 MB WASM module loads and while slicing runs.
+Running the engine in a Web Worker keeps the main thread free while the ~38 MB
+WASM module loads and while slicing runs.
 
 ### 1. Load the engine in a worker
 

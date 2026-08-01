@@ -44,10 +44,12 @@ The React web UI is a temporary proof-of-concept to demonstrate the engine. It i
 │   └──────────────────┬─────────────────────────────┘    │
 │                      │ fetch                             │
 │   ┌──────────────────▼─────────────────────────────┐    │
-│   │  GitHub Releases: wasm-v2.4.2                  │    │
-│   │  ├── slicer.js    ~210 KB  Emscripten glue     │    │
-│   │  └── slicer.wasm  ~29 MB   OrcaSlicer v2.4.2   │    │
-│   │                   (incl. OCCT STEP engine)      │    │
+│   │  GitHub Releases: MT + ST fallback             │    │
+│   │  ├── slicer-mt.js  ~250 KB (MT glue)           │    │
+│   │  ├── slicer-mt.wasm ~37 MB (MT primary)        │    │
+│   │  ├── slicer.js     ~220 KB (ST glue)           │    │
+│   │  └── slicer.wasm   ~38 MB (ST fallback)        │    │
+│   │     (both include OCCT for STEP)               │    │
 │   └────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -66,21 +68,25 @@ sequenceDiagram
     M->>S: preloadWasm()
     S->>W: new Worker(slicer.worker.ts)
     S->>W: postMessage(LOAD_WASM, url)
-    W->>R: fetch + WebAssembly.compileStreaming(slicer.wasm ~29 MB)
-    W->>R: fetch slicer.js (~210 KB) [parallel]
+    W->>R: probe slicer-mt.js when crossOriginIsolated
+    W->>R: fetch selected .wasm + compileStreaming
+    W->>R: fetch selected .js [parallel]
     W->>W: blob URL trick (add ES default export)
     W->>W: import(blobUrl) → factory({ instantiateWasm })
     W->>S: postMessage(WASM_LOADED)
     S-->>M: listener → wasmStatus = 'ready'
 ```
 
-`slicer.wasm` is compiled with `WebAssembly.compileStreaming` while it downloads
-(and while `slicer.js` is still being fetched), overlapping download and
-compilation; the compiled module is handed to Emscripten through the
+The selected `.wasm` file is compiled with `WebAssembly.compileStreaming` while
+it downloads (and while the matching `.js` glue is still being fetched),
+overlapping download and compilation; the compiled module is handed to Emscripten through the
 `instantiateWasm` hook. When the server mislabels the Content-Type the worker
 falls back to buffered `WebAssembly.compile`.
 
-Total cold load: ~29 MB (down from ~152 MB with the old v2.3.1 + slicer.data engine). The increase over the original ~9 MB comes from OCCT being compiled directly into `slicer.wasm` — no separate download, no extra WASM file, no third-party dependency.
+Total cold MT load is ~37 MB; the ST fallback is ~38 MB (down from ~152 MB with
+the old v2.3.1 + `slicer.data` engine). The current size comes from OCCT being
+compiled directly into the selected WASM binary — no separate download, no
+extra WASM file, no third-party dependency.
 
 ## Blob URL trick
 
@@ -367,9 +373,11 @@ Engine-side 3MF write + read (`orc_write_3mf` / `orc_read_3mf`, issue #108) are 
 === "Production (GitHub Pages)"
     ```bash
     # Triggered automatically on push to master
-    # deploy.yml downloads slicer.js + slicer.wasm (ST) from release
-    # wasm-v2.4.2, and slicer-mt.js + slicer-mt.wasm (MT) from the sibling
-    # wasm-v2.4.2-multithreaded release (best-effort — a missing MT release
+    # deploy.yml resolves the highest release in the wasm-v2.4.2 /
+    # wasm-v2.4.2-patchN family for slicer.js + slicer.wasm (ST), and
+    # the highest sibling wasm-v2.4.2-patchN-multithreaded release
+    # for slicer-mt.* (MT)
+    # (best-effort — a missing MT release
     # never fails the deploy), and embeds both in the gh-pages branch under
     # app/wasm/. GitHub Pages cannot send custom response headers, so it can
     # never be crossOriginIsolated — the app always selects the ST engine
@@ -406,8 +414,8 @@ Engine-side 3MF write + read (`orc_write_3mf` / `orc_read_3mf`, issue #108) are 
     # the only place the real multithreaded (MT) engine actually runs
     # (see ADR-011).
     #
-    # Cloudflare serves only the app shell: both slicer.wasm and
-    # slicer-mt.wasm (~36 MB each) exceed the 25 MiB per-asset limit, so
+    # Cloudflare serves only the app shell: slicer.wasm (~38 MB) and
+    # slicer-mt.wasm (~37 MB) both exceed the 25 MiB per-asset limit, so
     # cf-build.mjs sets VITE_WASM_BASE_URL to the GitHub Pages copies
     # (served with Access-Control-Allow-Origin: * and Content-Type:
     # application/wasm — required for COEP to allow the cross-origin fetch
@@ -438,18 +446,19 @@ Engine-side 3MF write + read (`orc_write_3mf` / `orc_read_3mf`, issue #108) are 
 === "Build WASM engine"
     ```bash
     # GitHub Actions → Build WASM → Run workflow
-    # Or: git tag v2.4.2-ow1 && git push --tags
+    # Manual dispatch: enter the upstream OrcaSlicer tag, e.g. v2.4.2
     # Builds two matrix legs (variant: [st, mt]):
-    #   st: slicer.js (~210 KB) + slicer.wasm (~29 MB) — sequential TBB
+    #   st: slicer.js (~220 KB) + slicer.wasm (~38 MB) — sequential TBB
     #       stubs (ADR-007), unchanged.
-    #   mt: slicer-mt.js + slicer-mt.wasm (~36 MB) — real oneTBB built from
+    #   mt: slicer-mt.js + slicer-mt.wasm (~37 MB) — real oneTBB built from
     #       source, linked with Emscripten pthreads (ADR-011).
     # Each leg runs orca-wasm/scripts/smoke-test.mjs before publishing
     # (ADR-009) — a build that fails the smoke test never reaches the
     # release step. A compare-outputs job then slices both variants'
     # outputs and requires matching G-code structure.
-    # Published as GitHub Releases wasm-v2.4.2 (st) and
-    # wasm-v2.4.2-multithreaded (mt).
+    # Current published targets are wasm-v2.4.2-patch12 (st) and
+    # wasm-v2.4.2-patch13-multithreaded (mt); future builds use the
+    # highest immutable patch in each family.
     ```
 
 ## Stack
@@ -460,6 +469,6 @@ Engine-side 3MF write + read (`orc_write_3mf` / `orc_read_3mf`, issue #108) are 
 | Styling | Tailwind CSS v4 | Custom `orca-*` colour scale |
 | 3D | Three.js 0.184 | STLLoader, OrbitControls, LineSegments2 (fat lines) |
 | Bundler | Vite 8 | Worker ES format, configurable base |
-| WASM | OrcaSlicer **v2.4.2** | Emscripten, self-built; single-threaded (ST) engine everywhere, plus a real-oneTBB multithreaded (MT) engine served only where cross-origin isolation is available (Cloudflare mirror — see ADR-011) |
+| WASM | OrcaSlicer **v2.4.2** | Emscripten, self-built; real-oneTBB multithreaded (MT) engine is primary on the cross-origin-isolated product host, with single-threaded (ST) fallback elsewhere (see ADR-011) |
 | Worker | Web Worker (ES module) | Blob URL for dynamic import |
 | License | AGPL-3.0-or-later | Source link in UI footer per §13 |

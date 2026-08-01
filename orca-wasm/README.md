@@ -50,10 +50,10 @@ orca-wasm/
 
 | File | Size | Description |
 |------|------|-------------|
-| `slicer.wasm` | ~29 MB | Compiled OrcaSlicer v2.4.2 core + OCCT (STEP engine), single-threaded (ST) |
-| `slicer.js` | ~210 KB | Emscripten glue code (CommonJS IIFE), ST |
-| `slicer-mt.wasm` | ~36 MB | Same engine, linked against real oneTBB for multithreading (MT) — see [ADR-011](../mkdocs-docs/adr/adr-011-multithreaded-engine.md) |
-| `slicer-mt.js` | ~210 KB | Emscripten glue code, MT |
+| `slicer.wasm` | ~38 MB | Compiled OrcaSlicer v2.4.2 core + OCCT (STEP engine), single-threaded (ST) |
+| `slicer.js` | ~220 KB | Emscripten glue code (CommonJS IIFE), ST |
+| `slicer-mt.wasm` | ~37 MB | Same engine, linked against real oneTBB for multithreading (MT) — see [ADR-011](../mkdocs-docs/adr/adr-011-multithreaded-engine.md) |
+| `slicer-mt.js` | ~250 KB | Emscripten glue code, MT |
 
 No `slicer.data` — the headless flat-config slicer never reads `orca/resources` at runtime, so the 200 MB preload file was eliminated entirely.
 
@@ -148,9 +148,8 @@ See the [Architecture docs](https://hiosdra.github.io/OrcaWeb/docs/architecture/
 ## CI workflow
 
 `.github/workflows/build-wasm.yml` — triggered by:
-- **Manual dispatch:** Actions → Build WASM → Run workflow (specify OrcaSlicer tag)
-- **Tag push:** `git tag wasm-v2.4.2-ow1 && git push --tags`
-- **Push to master** touching `orca-wasm/**` or the workflow itself — auto-publishes the next patch release
+- **Manual dispatch:** provide the upstream OrcaSlicer tag, for example `v2.4.2`
+- **Push to master** touching `orca-wasm/**` or the workflow itself — auto-publishes the next immutable patch release
 - **Pull requests** touching the same paths — validation build only, nothing is published
 
 Steps:
