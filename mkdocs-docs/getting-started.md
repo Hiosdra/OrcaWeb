@@ -35,11 +35,14 @@ This fetches two files into `public/wasm/`:
 | `slicer.js` | ~220 KB | Emscripten glue code |
 | `slicer.wasm` | ~38 MB | Compiled OrcaSlicer v2.4.2 + OCCT (STEP engine) |
 
-The downloader resolves the highest immutable ST release in the pinned
-OrcaSlicer version's base/patch family. The current target is
+The downloader resolves the highest immutable ST fallback release in the
+pinned OrcaSlicer version's base/patch family. The current ST fallback is
 [`wasm-v2.4.2-patch12`](https://github.com/Hiosdra/OrcaWeb/releases/tag/wasm-v2.4.2-patch12).
-For manual client migration, including cache invalidation and the optional MT
-variant, see [WASM Engine Migration](wasm-engine-migration.md).
+The primary product deployment uses the MT pair from
+[`wasm-v2.4.2-patch13-multithreaded`](https://github.com/Hiosdra/OrcaWeb/releases/tag/wasm-v2.4.2-patch13-multithreaded)
+when cross-origin isolation is available. For manual client migration,
+including cache invalidation and MT-first fallback selection, see [WASM Engine
+Migration](wasm-engine-migration.md).
 
 ### 4. Start dev server
 

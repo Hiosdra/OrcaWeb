@@ -44,10 +44,12 @@ The React web UI is a temporary proof-of-concept to demonstrate the engine. It i
 │   └──────────────────┬─────────────────────────────┘    │
 │                      │ fetch                             │
 │   ┌──────────────────▼─────────────────────────────┐    │
-│   │  GitHub Releases: wasm-v2.4.2-patch12 (ST)     │    │
-│   │  ├── slicer.js    ~220 KB  Emscripten glue     │    │
-│   │  └── slicer.wasm  ~38 MB   OrcaSlicer v2.4.2   │    │
-│   │                   (incl. OCCT STEP engine)      │    │
+│   │  GitHub Releases: MT + ST fallback             │    │
+│   │  ├── slicer-mt.js  ~250 KB (MT glue)           │    │
+│   │  ├── slicer-mt.wasm ~37 MB (MT primary)        │    │
+│   │  ├── slicer.js     ~220 KB (ST glue)           │    │
+│   │  └── slicer.wasm   ~38 MB (ST fallback)        │    │
+│   │     (both include OCCT for STEP)               │    │
 │   └────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -66,21 +68,25 @@ sequenceDiagram
     M->>S: preloadWasm()
     S->>W: new Worker(slicer.worker.ts)
     S->>W: postMessage(LOAD_WASM, url)
-    W->>R: fetch + WebAssembly.compileStreaming(slicer.wasm ~38 MB)
-    W->>R: fetch slicer.js (~220 KB) [parallel]
+    W->>R: probe slicer-mt.js when crossOriginIsolated
+    W->>R: fetch selected .wasm + compileStreaming
+    W->>R: fetch selected .js [parallel]
     W->>W: blob URL trick (add ES default export)
     W->>W: import(blobUrl) → factory({ instantiateWasm })
     W->>S: postMessage(WASM_LOADED)
     S-->>M: listener → wasmStatus = 'ready'
 ```
 
-`slicer.wasm` is compiled with `WebAssembly.compileStreaming` while it downloads
-(and while `slicer.js` is still being fetched), overlapping download and
-compilation; the compiled module is handed to Emscripten through the
+The selected `.wasm` file is compiled with `WebAssembly.compileStreaming` while
+it downloads (and while the matching `.js` glue is still being fetched),
+overlapping download and compilation; the compiled module is handed to Emscripten through the
 `instantiateWasm` hook. When the server mislabels the Content-Type the worker
 falls back to buffered `WebAssembly.compile`.
 
-Total cold ST load: ~38 MB (down from ~152 MB with the old v2.3.1 + slicer.data engine). The increase over the original ~9 MB comes from OCCT being compiled directly into `slicer.wasm` — no separate download, no extra WASM file, no third-party dependency.
+Total cold MT load is ~37 MB; the ST fallback is ~38 MB (down from ~152 MB with
+the old v2.3.1 + `slicer.data` engine). The current size comes from OCCT being
+compiled directly into the selected WASM binary — no separate download, no
+extra WASM file, no third-party dependency.
 
 ## Blob URL trick
 
@@ -463,6 +469,6 @@ Engine-side 3MF write + read (`orc_write_3mf` / `orc_read_3mf`, issue #108) are 
 | Styling | Tailwind CSS v4 | Custom `orca-*` colour scale |
 | 3D | Three.js 0.184 | STLLoader, OrbitControls, LineSegments2 (fat lines) |
 | Bundler | Vite 8 | Worker ES format, configurable base |
-| WASM | OrcaSlicer **v2.4.2** | Emscripten, self-built; single-threaded (ST) engine everywhere, plus a real-oneTBB multithreaded (MT) engine served only where cross-origin isolation is available (Cloudflare mirror — see ADR-011) |
+| WASM | OrcaSlicer **v2.4.2** | Emscripten, self-built; real-oneTBB multithreaded (MT) engine is primary on the cross-origin-isolated product host, with single-threaded (ST) fallback elsewhere (see ADR-011) |
 | Worker | Web Worker (ES module) | Blob URL for dynamic import |
 | License | AGPL-3.0-or-later | Source link in UI footer per §13 |

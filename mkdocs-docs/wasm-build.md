@@ -113,8 +113,9 @@ Dependencies are cached between runs (GitHub Actions cache key based on dependen
 
     CI builds both the `st` (single-threaded) and `mt` (multithreaded,
     real oneTBB + pthreads — see [ADR-011](adr/adr-011-multithreaded-engine.md))
-    variants as separate matrix legs; this script builds one at a time,
-    defaulting to `st`:
+    variants as separate matrix legs; this script builds one at a time and
+    defaults to the ST fallback for local convenience. To reproduce the
+    primary product engine, build the MT variant explicitly:
 
     ```bash
     WASM_VARIANT=mt ./orca-wasm/scripts/build-local-wsl.sh

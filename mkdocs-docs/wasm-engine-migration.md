@@ -6,9 +6,10 @@ This guide is for a client frontend that still downloads the original
 The version distinction matters:
 
 - **OrcaSlicer version:** still `v2.4.2`.
-- **OrcaWeb WASM build:** the current single-threaded build is
+- **Primary product build:** the current multithreaded build is
+  `wasm-v2.4.2-patch13-multithreaded`.
+- **Compatibility fallback:** the current single-threaded build is
   `wasm-v2.4.2-patch12`.
-- **Optional multithreaded build:** `wasm-v2.4.2-patch13-multithreaded`.
 
 The patch suffix is an immutable OrcaWeb build revision. It is not a new
 upstream OrcaSlicer version, and the `-patchN` counter is independent from the
@@ -18,12 +19,13 @@ upstream OrcaSlicer version, and the `-patchN` counter is independent from the
 
 | Use case | Release tag | Files | Runtime requirements |
 |---|---|---|---|
-| Default browser deployment | [`wasm-v2.4.2-patch12`](https://github.com/Hiosdra/OrcaWeb/releases/tag/wasm-v2.4.2-patch12) | `slicer.js`, `slicer.wasm` | Works on ordinary static hosting; no `SharedArrayBuffer` required |
-| Cross-origin-isolated deployment | [`wasm-v2.4.2-patch13-multithreaded`](https://github.com/Hiosdra/OrcaWeb/releases/tag/wasm-v2.4.2-patch13-multithreaded) | `slicer-mt.js`, `slicer-mt.wasm` | `crossOriginIsolated === true`, COOP/COEP headers, and `SharedArrayBuffer` |
+| **Primary product deployment** | [`wasm-v2.4.2-patch13-multithreaded`](https://github.com/Hiosdra/OrcaWeb/releases/tag/wasm-v2.4.2-patch13-multithreaded) | `slicer-mt.js`, `slicer-mt.wasm` | `crossOriginIsolated === true`, COOP/COEP headers, and `SharedArrayBuffer` |
+| Compatibility fallback | [`wasm-v2.4.2-patch12`](https://github.com/Hiosdra/OrcaWeb/releases/tag/wasm-v2.4.2-patch12) | `slicer.js`, `slicer.wasm` | Works on ordinary static hosting; no `SharedArrayBuffer` required |
 
-Use the ST release unless the frontend and its host already support the MT
-requirements. Never combine the JavaScript glue from one release with the
-`.wasm` file from another release.
+Use MT as the product path. Keep ST available as a fallback for hosts that
+cannot provide cross-origin isolation. Never combine the JavaScript glue from
+one release with the `.wasm` file from another release; the ST and MT release
+families are independent and must each be downloaded as a matching pair.
 
 ## 1. Pin and download a matching artifact pair
 
@@ -32,42 +34,48 @@ the same origin as the app. Do not make the browser resolve a GitHub `latest`
 URL at runtime: release assets are immutable, and a floating URL makes cache
 and rollback behaviour difficult to reason about.
 
-For the default ST engine:
+For the primary MT engine:
 
 ```bash
-ENGINE_TAG="wasm-v2.4.2-patch12"
+ENGINE_TAG="wasm-v2.4.2-patch13-multithreaded"
 ENGINE_BASE="https://github.com/Hiosdra/OrcaWeb/releases/download/${ENGINE_TAG}"
 
 mkdir -p public/wasm
-curl --fail --location "${ENGINE_BASE}/slicer.js" \
-  --output public/wasm/slicer.js
-curl --fail --location "${ENGINE_BASE}/slicer.wasm" \
-  --output public/wasm/slicer.wasm
+curl --fail --location "${ENGINE_BASE}/slicer-mt.js" \
+  --output public/wasm/slicer-mt.js
+curl --fail --location "${ENGINE_BASE}/slicer-mt.wasm" \
+  --output public/wasm/slicer-mt.wasm
 ```
 
 Current headless builds do **not** publish `slicer.data`; do not carry over an
 old `slicer.data` download from a previous frontend integration.
 
-Verify the exact files before committing or publishing them:
+Verify the primary MT pair before committing or publishing it:
 
 ```bash
+printf '%s  %s\n' \
+  '680e1b6941e79c56aff030d8596387e16831a15ebe7f2c73fb56552e0b456626' \
+  public/wasm/slicer-mt.js \
+  '3260641412d7fb096aec677a6d1c5fbcb8b91e9e5ae9434472612395bd428b37' \
+  public/wasm/slicer-mt.wasm | sha256sum --check
+```
+
+If the client must also work on a non-isolated host, ship the ST fallback pair:
+
+```bash
+ST_TAG="wasm-v2.4.2-patch12"
+ST_BASE="https://github.com/Hiosdra/OrcaWeb/releases/download/${ST_TAG}"
+
+curl --fail --location "${ST_BASE}/slicer.js" \
+  --output public/wasm/slicer.js
+curl --fail --location "${ST_BASE}/slicer.wasm" \
+  --output public/wasm/slicer.wasm
+
 printf '%s  %s\n' \
   '800a7dda56254f426cc84b48fb9a818daf2ea84b20d04e01bf2ced37e7f65bb2' \
   public/wasm/slicer.js \
   '8d481d1b1f7050b8acac2e28f812ca3fb0d130bf0720d2dc13d4934420ab88e7' \
   public/wasm/slicer.wasm | sha256sum --check
-```
-
-If MT is also shipped, download its pair from its own release tag:
-
-```bash
-MT_TAG="wasm-v2.4.2-patch13-multithreaded"
-MT_BASE="https://github.com/Hiosdra/OrcaWeb/releases/download/${MT_TAG}"
-
-curl --fail --location "${MT_BASE}/slicer-mt.js" \
-  --output public/wasm/slicer-mt.js
-curl --fail --location "${MT_BASE}/slicer-mt.wasm" \
-  --output public/wasm/slicer-mt.wasm
 ```
 
 The release assets are the authoritative source for the current digests and
@@ -76,20 +84,28 @@ release.
 
 ## 2. Update the loader and cache key
 
-The loader should use a fixed base directory and the two matching filenames:
+The loader should try the MT pair first and use the ST pair only as fallback.
+Keep the base directory fixed and append the same cache key to every engine
+asset:
 
 ```typescript
 const engineBase = `${import.meta.env.BASE_URL}wasm`
-const engineLabel = 'v2.4.2-patch12'
-// For an ST-only deployment, use the first 16 hex characters of the ST
-// slicer.wasm SHA-256 digest.
-const engineBuild = '8d481d1b1f7050b8'
+const engineLabel = 'v2.4.2-patch13-multithreaded'
+// Inject this at build time from the deployed artifact set. For an MT-only
+// deployment, the first 16 hex characters of slicer-mt.wasm are
+// 3260641412d7fb09. When both variants are deployed, use the combined digest
+// shown below instead.
+const engineBuild = import.meta.env.VITE_WASM_VERSION
 
 const engineUrl = (file: string) => `${engineBase}/${file}?v=${engineBuild}`
 
-// ST
-const jsUrl = engineUrl('slicer.js')
-const wasmUrl = engineUrl('slicer.wasm')
+// Primary product path
+const mtJsUrl = engineUrl('slicer-mt.js')
+const mtWasmUrl = engineUrl('slicer-mt.wasm')
+
+// Compatibility fallback
+const stJsUrl = engineUrl('slicer.js')
+const stWasmUrl = engineUrl('slicer.wasm')
 ```
 
 The query parameter is intentional. The filenames are stable, so a
@@ -108,14 +124,15 @@ time:
 3. Test once with an existing installation, not only in a clean browser
    profile.
 
-`engine-version.json` is optional for an independent client. For an ST-only
-deployment, if the loader uses the same runtime manifest convention as OrcaWeb,
-publish it beside the files:
+`engine-version.json` is optional for an independent client. If the loader uses
+the same runtime manifest convention as OrcaWeb, publish it beside the files:
 
 ```json
 {
-  "label": "v2.4.2-patch12",
-  "version": "8d481d1b1f7050b8"
+  "label": "v2.4.2-patch13-multithreaded",
+  "version": "<cache-key-for-the-deployed-artifact-set>",
+  "primaryVariant": "mt",
+  "fallbackVariant": "st"
 }
 ```
 
@@ -123,37 +140,39 @@ The manifest must not be cached longer than the engine deployment decision;
 the engine files themselves may remain immutable and long-lived in cache.
 
 If both ST and MT are published, derive the cache key from both deployed WASM
-files, so a change to either variant produces a new URL:
+files, so a change to either variant produces a new URL. Use a deterministic
+order and include the bytes, not the individual hash strings:
 
 ```bash
 cat public/wasm/slicer.wasm public/wasm/slicer-mt.wasm \
   | sha256sum | cut -c1-16
 ```
 
-This is the convention used by OrcaWeb's production deploy. Do not reuse the
-ST-only example above as the combined ST+MT manifest value.
+This is the convention used by OrcaWeb's production deploy. Do not use the
+MT-only digest when the fallback files are also part of the deployment.
 
 ## 3. Keep the browser loading contract
 
-The release contains Emscripten glue (`slicer.js`) as a CommonJS-style IIFE,
-not a browser-native ES module. A browser frontend must therefore either:
+The release contains Emscripten glue (`slicer-mt.js` for the primary path,
+`slicer.js` for the fallback) as a CommonJS-style IIFE, not a browser-native ES
+module. A browser frontend must therefore either:
 
 - use the existing worker loader pattern from the
   [Integration Guide](integration.md#loading-slicerjs-without-a-bundler), or
 - load the glue as text, append an ES-module export in a Blob URL, and give the
   factory the matching `.wasm` location.
 
-Do not import `slicer.js` directly through Vite and assume that its relative
-`.wasm` lookup will work after bundling. Keep the engine in a Web Worker (or a
-Node worker thread); slicing is synchronous inside the WASM call and blocks
-the calling worker.
+Do not import either glue file directly through Vite and assume that its
+relative `.wasm` lookup will work after bundling. Keep the engine in a Web
+Worker (or a Node worker thread); slicing is synchronous inside the WASM call
+and blocks the calling worker.
 
 For a same-origin deployment, check that the server returns:
 
 | File | Required response |
 |---|---|
-| `slicer.js` | `200`, JavaScript content type |
-| `slicer.wasm` | `200`, `Content-Type: application/wasm` |
+| `slicer-mt.js` / `slicer.js` | `200`, JavaScript content type |
+| `slicer-mt.wasm` / `slicer.wasm` | `200`, `Content-Type: application/wasm` |
 
 An SPA fallback that returns `index.html` with status `200` is still an engine
 load failure. Check the response body and content type, not just `response.ok`.
@@ -196,28 +215,31 @@ The optional current bridge keys for adaptive layer height are:
 They are bridge pseudo-keys, not upstream OrcaSlicer options. Existing clients
 can omit them and retain the previous fixed-layer-height behaviour.
 
-## 5. Add MT only behind a runtime capability check
+## 5. Select MT first and fall back safely
 
-MT is not a drop-in replacement for ST. The page must send these headers on
-the document and worker responses:
+MT is the primary product path, but it still needs a runtime capability check.
+The page must send these headers on the document and worker responses:
 
 ```http
 Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-Select MT only when all of the following are true:
+The MT candidate is eligible when all of the following are true:
 
 ```typescript
 const canUseMt =
   typeof SharedArrayBuffer !== 'undefined' &&
   globalThis.crossOriginIsolated === true
+
+const preferredVariant = canUseMt ? 'slicer-mt' : 'slicer'
 ```
 
 Also probe that `slicer-mt.js` really exists and is JavaScript. A missing asset
-served as an HTML SPA fallback must select ST, not be passed to the ESM
-loader. If MT is unavailable, fall back to `slicer.js`/`slicer.wasm` without
-showing an engine error.
+served as an HTML SPA fallback must select ST, not be passed to the ESM loader.
+If MT is unavailable, fall back to `slicer.js`/`slicer.wasm` without showing an
+engine error. On the isolated product host, a successful probe should therefore
+load `slicer-mt.js`/`slicer-mt.wasm`; ST is the compatibility path.
 
 Do not fetch the MT files directly from GitHub Releases from a COEP-isolated
 page. The release download redirects do not provide the CORS/CORP response
@@ -231,8 +253,9 @@ use the Blob URL approach from the existing loader. See
 Before switching production traffic, verify both a cold browser and an
 existing service-worker installation:
 
-- the network panel shows the pinned release's `slicer.js` and `slicer.wasm`,
-  not `wasm-v2.4.2` without a suffix;
+- the isolated product host loads the pinned release's `slicer-mt.js` and
+  `slicer-mt.wasm` first, while a non-isolated host loads the ST fallback;
+- no request uses `wasm-v2.4.2` without a suffix;
 - both files return `200` and the expected content types, with no HTML body;
 - the worker reaches `WASM_LOADED` and the UI reports the new engine label;
 - `_orc_session_create()` returns a handle, `_orc_init()` returns `0`, and a
@@ -259,10 +282,9 @@ npm run test:e2e
 ## Rollback
 
 Rollback is a pin change, not a release mutation. Restore the previous
-known-good release asset pair (the original migration target is
-`wasm-v2.4.2`), restore its cache key, and invalidate the new service-worker
-cache entry. Keep both releases available so the rollback can be reproduced
-and audited.
+known-good `wasm-v2.4.2` asset pair, restore its cache key, and invalidate the
+new service-worker cache entry. Keep both releases available so the rollback
+can be reproduced and audited.
 
 For the complete bridge examples, see the [Integration Guide](integration.md)
 and [API Reference](api-reference.md). For upstream release context, see the
