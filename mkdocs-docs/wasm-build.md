@@ -1,6 +1,6 @@
 # Building the WASM Engine
 
-This page explains how to compile OrcaSlicer v2.4.2 to WebAssembly using the `orca-wasm/` build pipeline. You only need this if you want to change the C++ engine itself. For normal development of the web UI, download the pre-built artifacts with `node scripts/download-wasm.mjs`.
+This page explains how to compile OrcaSlicer v2.4.2 to WebAssembly using the `orca-wasm/` build pipeline. You only need this if you want to change the C++ engine itself. For normal development of the web UI, download the pre-built artifacts with `node scripts/download-wasm.mjs`. For migrating a separate client frontend from the base release to the current immutable patch release, see [WASM Engine Migration](wasm-engine-migration.md).
 
 ## When to build
 
@@ -13,19 +13,22 @@ This page explains how to compile OrcaSlicer v2.4.2 to WebAssembly using the `or
 
 ## Artifacts
 
-The build produces two files, published as an immutable GitHub Release. The
-first build for a given OrcaSlicer version publishes `wasm-v2.4.2`; every
-later fix to `orca-wasm/` for the *same* OrcaSlicer version (not an upstream
-bump) publishes `wasm-v2.4.2-patch1`, `-patch2`, etc. as a brand-new release
-rather than overwriting the previous one — `deploy.yml` resolves whichever
-has the highest patch number at deploy time. Each release's description
-includes an auto-generated changelog: the list of commits touching
-`orca-wasm/**` or the build workflow since the previous `wasm-*` release.
+The build produces an ST pair and, in the matrix MT leg, an MT pair. They are
+published as immutable GitHub Release assets. The first build for a given
+OrcaSlicer version publishes `wasm-v2.4.2`; every later fix to `orca-wasm/`
+for the *same* OrcaSlicer version (not an upstream bump) publishes
+`wasm-v2.4.2-patch1`, `-patch2`, etc. as a brand-new release rather than
+overwriting the previous one — `deploy.yml` resolves whichever has the highest
+patch number at deploy time. Each release's description includes an
+auto-generated changelog: the list of commits touching `orca-wasm/**` or the
+build workflow since the previous `wasm-*` release.
 
 | File | Size | Description |
 |------|------|-------------|
-| `slicer.wasm` | ~29 MB | Compiled OrcaSlicer v2.4.2 core + OCCT (STEP engine) |
-| `slicer.js` | ~210 KB | Emscripten glue code (CommonJS IIFE) |
+| `slicer.wasm` | ~38 MB | Compiled OrcaSlicer v2.4.2 core + OCCT (STEP engine), single-threaded (ST) |
+| `slicer.js` | ~220 KB | Emscripten glue code (CommonJS IIFE), ST |
+| `slicer-mt.wasm` | ~37 MB | The same engine linked against real oneTBB, multithreaded (MT) |
+| `slicer-mt.js` | ~250 KB | Emscripten glue code, MT |
 
 There is no `slicer.data` — the headless flat-config slicer never reads `orca/resources` at runtime, so the 200 MB preload file was eliminated entirely.
 
@@ -61,10 +64,10 @@ Dependencies are cached between runs (GitHub Actions cache key based on dependen
 
 === "GitHub Actions (recommended)"
 
-    Two ways to trigger:
+    Supported ways to trigger:
 
-    - **Manual dispatch:** go to **Actions → Build WASM → Run workflow**, enter the OrcaSlicer tag (e.g. `v2.4.2`), and run.
-    - **Tag push:** push a tag matching `wasm-v*.*.*` (e.g. `git tag wasm-v2.4.2-ow2 && git push --tags`). The workflow picks up the tag automatically.
+    - **Manual dispatch:** go to **Actions → Build WASM → Run workflow**, enter the upstream OrcaSlicer tag (e.g. `v2.4.2`), and run.
+    - **Push to `master`:** changes under `orca-wasm/**` or the workflow automatically build and publish the next immutable patch release for the pinned upstream version.
 
     Both paths:
 

@@ -48,6 +48,7 @@ nav:
   - Developers:
     - Architecture: architecture.md
     - Integration Guide: integration.md
+    - WASM Engine Migration: wasm-engine-migration.md
     - API Reference: api-reference.md
     - Building WASM: wasm-build.md
   - Project:

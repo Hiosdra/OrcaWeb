@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - **Node.js 22 LTS** — [nodejs.org](https://nodejs.org) (the version used by CI; Node 24 currently leaves Playwright's local Vite server running after E2E tests on Windows)
-- ~**30 MB** free disk space for WASM artifacts
+- ~**40 MB** free disk space for the current ST WASM artifacts
 
 ## Installation
 
@@ -32,10 +32,14 @@ This fetches two files into `public/wasm/`:
 
 | File | Size | Description |
 |------|------|-------------|
-| `slicer.js` | ~210 KB | Emscripten glue code |
-| `slicer.wasm` | ~29 MB | Compiled OrcaSlicer v2.4.2 + OCCT (STEP engine) |
+| `slicer.js` | ~220 KB | Emscripten glue code |
+| `slicer.wasm` | ~38 MB | Compiled OrcaSlicer v2.4.2 + OCCT (STEP engine) |
 
-Source: OrcaWeb GitHub Release [`wasm-v2.4.2`](https://github.com/Hiosdra/OrcaWeb/releases/tag/wasm-v2.4.2) (self-built via `orca-wasm/` pipeline).
+The downloader resolves the highest immutable ST release in the pinned
+OrcaSlicer version's base/patch family. The current target is
+[`wasm-v2.4.2-patch12`](https://github.com/Hiosdra/OrcaWeb/releases/tag/wasm-v2.4.2-patch12).
+For manual client migration, including cache invalidation and the optional MT
+variant, see [WASM Engine Migration](wasm-engine-migration.md).
 
 ### 4. Start dev server
 

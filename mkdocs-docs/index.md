@@ -33,7 +33,9 @@ Clone, install, download the WASM engine, and run the dev server — see the
 
 The slicer is deployed at **[hiosdra.github.io/OrcaWeb/app/](https://hiosdra.github.io/OrcaWeb/app/)**.
 
-On first load, the browser downloads ~29 MB of WASM data from GitHub Releases. Subsequent visits use the browser cache (or the PWA service worker pre-cache).
+On first load, the browser downloads ~38 MB of ST WASM data from GitHub
+Releases. Subsequent visits use the browser cache (or the PWA service worker
+pre-cache).
 
 ## How it works
 

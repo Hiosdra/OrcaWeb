@@ -2,7 +2,7 @@
 
 This page describes the current state of the project: implemented features and known limitations. Planned-but-not-yet-implemented work lives in GitHub issues, linked below, instead of an in-page roadmap.
 
-Last updated: **2026-07-24** · engine version: **OrcaSlicer v2.4.2** (self-built, live in production) · app version: **v0.8.11**
+Last updated: **2026-08-01** · engine version: **OrcaSlicer v2.4.2** (self-built, live in production; ST `wasm-v2.4.2-patch12`, MT `wasm-v2.4.2-patch13-multithreaded`) · app version: **v0.8.11**
 
 ---
 
@@ -45,7 +45,7 @@ Last updated: **2026-07-24** · engine version: **OrcaSlicer v2.4.2** (self-buil
 | Feature | Notes |
 |---------|-------|
 | STL → G-code slicing | Runs in a Web Worker, doesn't block the UI |
-| Self-built OrcaSlicer **v2.4.2** | Built via `orca-wasm/` + Emscripten; artifacts in the `wasm-v2.4.2` release |
+| Self-built OrcaSlicer **v2.4.2** | Built via `orca-wasm/` + Emscripten; current artifacts are ST `wasm-v2.4.2-patch12` and MT `wasm-v2.4.2-patch13-multithreaded` |
 | ST / MT engine variants | Single-threaded (ST, `slicer.js`/`slicer.wasm`) served everywhere; multithreaded (MT, `slicer-mt.js`/`slicer-mt.wasm`, real oneTBB) served only where the page is cross-origin isolated (currently the Cloudflare mirror) — see [ADR-011](adr/adr-011-multithreaded-engine.md) and the [ST vs MT benchmark](st-mt-benchmark.md) |
 | `orc_obj_to_stl` | WASM export: OBJ → binary STL conversion without needing `orc_init`; result returned as an `ArrayBuffer` to the worker |
 | `orc_slice_multi` | Multiple STLs → one G-code: auto-arrange via `arrange_objects()` (libnest2d + NLopt); output identical in shape to `orc_slice` |
@@ -94,7 +94,7 @@ OrcaSlicer's C++ source is patched in place (`orca-wasm/patches/apply.py`) for W
 | GitHub Actions CI (deploy.yml) | ✅ builds and deploys on every push to `master` |
 | PR snapshot on GitHub Pages | ✅ `pr-preview.yml` publishes `previews/pr-<number>/`, comments the URL, removes the snapshot when the PR closes; same-repository branches only |
 | Same-origin WASM serving | ✅ no CORS — files live in `gh-pages/app/wasm/` |
-| WASM release `wasm-v2.4.2` | ✅ `slicer.js` + `slicer.wasm` (~29 MB total, includes OCCT for STEP) |
+| WASM releases | ✅ ST `wasm-v2.4.2-patch12` (`slicer.js` + `slicer.wasm`) and MT `wasm-v2.4.2-patch13-multithreaded` (`slicer-mt.js` + `slicer-mt.wasm`), both including OCCT for STEP |
 | Deploy resilience | ✅ falls back to the previous `gh-pages` state if the release is missing |
 | CI build on PRs touching `orca-wasm/**` | ✅ every PR touching the engine runs a ~12 min build |
 | E2E smoke test on PRs (`e2e-smoke.yml`) | ✅ every open PR — downloads the published WASM engine and slices the Voron Design Cube v7 through the real UI (Playwright) |

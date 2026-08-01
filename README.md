@@ -20,7 +20,7 @@ The Cloudflare mirror is cross-origin isolated, so it runs the real multithreade
 git clone https://github.com/Hiosdra/OrcaWeb.git
 cd OrcaWeb
 npm install
-node scripts/download-wasm.mjs   # ~29 MB, one-time download
+node scripts/download-wasm.mjs   # ~38 MB ST engine, one-time download
 npm run dev
 ```
 
@@ -31,7 +31,8 @@ Those files are gitignored (too large for git).
 
 A React UI (main thread) hands STL/3MF/OBJ/STEP files to a Web Worker running
 the OrcaSlicer engine compiled to WebAssembly (`slicer.js` + `slicer.wasm`,
-~29 MB, includes OCCT for STEP import) and gets G-code back. There is no
+~38 MB for the current ST build, including OCCT for STEP import) and gets
+G-code back. There is no
 `slicer.data` — the headless flat-config slicer never reads `orca/resources`
 at runtime, so the 200 MB preload file used by older builds was eliminated
 entirely.
@@ -40,13 +41,13 @@ entirely.
 
 ### WASM loading
 
-In CI the WASM artifacts are downloaded from the latest immutable
-`wasm-v2.4.2` (optionally `-patchN`) GitHub Release and embedded directly in
-the GitHub Pages deployment, so they are served from the **same origin** as the app —
-no CORS issues.
+In CI the WASM artifacts are downloaded from the highest immutable release in
+the `wasm-v2.4.2` / `wasm-v2.4.2-patchN` family and embedded directly in the
+GitHub Pages deployment, so they are served from the **same origin** as the app
+— no CORS issues.
 
 The Cloudflare Workers mirror deploy cannot host the engine itself — both
-`slicer.wasm` (~29 MB) and the multithreaded `slicer-mt.wasm` (~36 MB, see
+`slicer.wasm` (~38 MB) and the multithreaded `slicer-mt.wasm` (~37 MB, see
 below) exceed Cloudflare's 25 MiB per-asset limit — so its build
 (`npm run build:cf`, see `scripts/cf-build.mjs`) points `VITE_WASM_BASE_URL`
 at the GitHub Pages copy, which is served with `Access-Control-Allow-Origin: *`.
@@ -78,7 +79,7 @@ Build the WASM module locally (Linux / macOS / WSL2 — see
 ```
 
 Or trigger the `Build WASM` GitHub Actions workflow manually to publish a new
-`wasm-v2.4.2` (optionally `-patchN`) release with the compiled artifacts —
+immutable `wasm-v2.4.2` or `wasm-v2.4.2-patchN` release with the compiled artifacts —
 releases are immutable, so a rebuild never overwrites a previous one (see
 [`mkdocs-docs/wasm-build.md`](mkdocs-docs/wasm-build.md)).
 

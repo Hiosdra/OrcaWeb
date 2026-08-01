@@ -29,7 +29,7 @@ If you touch the WASM pipeline, CI workflow, shims, or UI — check whether any 
 
 ```bash
 npm install
-node scripts/download-wasm.mjs   # downloads ~29 MB WASM artifacts (slicer.js + slicer.wasm) into public/wasm/
+node scripts/download-wasm.mjs   # downloads ~38 MB ST WASM artifacts into public/wasm/
 npm run dev                      # Vite dev server at http://localhost:5173
 ```
 

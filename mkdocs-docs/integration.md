@@ -30,12 +30,21 @@ fix to `orca-wasm/` for the same OrcaSlicer version publishes
 one. `scripts/download-wasm.mjs` and `deploy.yml` both resolve whichever tag
 has the highest patch number automatically.
 
+The current ST target is
+[`wasm-v2.4.2-patch12`](https://github.com/Hiosdra/OrcaWeb/releases/tag/wasm-v2.4.2-patch12).
+The current MT target is the independent
+[`wasm-v2.4.2-patch13-multithreaded`](https://github.com/Hiosdra/OrcaWeb/releases/tag/wasm-v2.4.2-patch13-multithreaded)
+family. See [WASM Engine Migration](wasm-engine-migration.md) when upgrading a
+separate client that still pins the base release.
+
 | File | Size | Purpose |
 |---|---|---|
-| `slicer.wasm` | ~29 MB | Compiled ST engine (OrcaSlicer v2.4.2 + OCCT 7.8.1) |
-| `slicer.js` | ~210 KB | Emscripten JS glue (CommonJS IIFE) |
+| `slicer.wasm` | ~38 MB | Compiled ST engine (OrcaSlicer v2.4.2 + OCCT 7.8.1) |
+| `slicer.js` | ~220 KB | Emscripten JS glue (CommonJS IIFE) |
 
-The MT variant (`slicer-mt.wasm` ~36 MB / `slicer-mt.js`) is published alongside as a separate release family — see [Engine variants](#engine-variants-single-threaded-st-vs-multithreaded-mt) above.
+The MT variant (`slicer-mt.wasm` ~37 MB / `slicer-mt.js` ~250 KB) is published
+as a separate release family — see [Engine variants](#engine-variants-single-threaded-st-vs-multithreaded-mt)
+above.
 
 **Download via the provided script:**
 
@@ -49,7 +58,8 @@ node scripts/download-wasm.mjs   # saves to public/wasm/
 
 ## Quick start — browser (Web Worker)
 
-Running the engine in a Web Worker keeps the main thread free while the ~29 MB WASM module loads and while slicing runs.
+Running the engine in a Web Worker keeps the main thread free while the ~38 MB
+WASM module loads and while slicing runs.
 
 ### 1. Load the engine in a worker
 
