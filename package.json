@@ -1,7 +1,7 @@
 {
   "name": "orca-web",
   "private": true,
-  "version": "0.8.12",
+  "version": "0.8.13",
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "engines": {

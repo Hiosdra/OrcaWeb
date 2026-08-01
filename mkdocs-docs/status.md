@@ -2,7 +2,7 @@
 
 This page describes the current state of the project: implemented features and known limitations. Planned-but-not-yet-implemented work lives in GitHub issues, linked below, instead of an in-page roadmap.
 
-Last updated: **2026-08-01** · engine version: **OrcaSlicer v2.4.2** (self-built, live in production; primary MT `wasm-v2.4.2-patch13-multithreaded`, ST fallback `wasm-v2.4.2-patch12`) · app version: **v0.8.12**
+Last updated: **2026-08-01** · engine version: **OrcaSlicer v2.4.2** (self-built, live in production; primary MT `wasm-v2.4.2-patch13-multithreaded`, ST fallback `wasm-v2.4.2-patch12`) · app version: **v0.8.13**
 
 ---
 
