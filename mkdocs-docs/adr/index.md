@@ -16,6 +16,7 @@ Each ADR explains the context, the decision taken, and the resulting trade-offs.
 | [ADR-009](adr-009-wasm-smoke-test.md) | WASM Build Smoke Test | Accepted | 2026-07-04 |
 | [ADR-010](adr-010-e2e-smoke-test.md) | E2E UI Smoke Test with the Real WASM Engine | Accepted | 2026-07-05 |
 | [ADR-011](adr-011-multithreaded-engine.md) | Multithreaded Engine Variant (Real oneTBB) on the Cloudflare Mirror | Accepted | 2026-07-14 |
+| [ADR-012](adr-012-local-profile-sets.md) | Atomic Local OrcaSlicer Profile Sets | Accepted | 2026-09-02 |
 
 !!! note "Version drift is expected in ADR titles/content"
     ADR-004's title and body reference OrcaSlicer v2.4.0, the version pinned
