@@ -20,7 +20,7 @@ Slice STL files locally — no server, no account, no upload. Your files never l
 
 - :package: **Profile Import**
 
-    Import machine, filament, or process profiles directly from your OrcaSlicer desktop installation.
+    Import a machine/process profile set and one filament JSON per material slot directly from OrcaSlicer.
 
 </div>
 

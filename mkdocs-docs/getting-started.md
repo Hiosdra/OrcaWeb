@@ -55,13 +55,15 @@ Open [http://localhost:5173](http://localhost:5173).
 ## First slice
 
 1. **Model tab** — drag & drop an STL file or click to browse
-2. **Settings tab** — choose printer, filament, quality preset; optionally import an OrcaSlicer `.json` profile
+2. **Settings tab** — choose printer, filament, quality preset; optionally import one or more OrcaSlicer `.json` profiles
 3. **Slice tab** — click **Slice model**; wait ~50–500 ms depending on model complexity
 4. When complete, a **Download G-code** button appears next to a live G-code preview
 
 ## Importing OrcaSlicer profiles
 
-In the **Settings tab**, click **Import OrcaSlicer profile (.json)** and select any profile JSON from your desktop OrcaSlicer installation.
+In the **Settings tab**, click **Import profiles (.json)**. You can select one
+machine/process/print JSON and one filament JSON per material slot in the same
+file-picker action. The import is validated and applied atomically.
 
 Profile files are typically found at:
 
@@ -78,6 +80,20 @@ Profile files are typically found at:
     ~/.config/OrcaSlicer/user/default/
     ```
 
-The folder contains three subdirectories: `machine/`, `filament/`, and `process/`. Any `.json` file from these directories can be imported.
+The folder contains three subdirectories: `machine/`, `filament/`, and `process/`. Any `.json` file from these directories can be imported. For a
+dual-nozzle setup, select both filament files together; OrcaWeb keeps known
+material slots deterministic and maps them to the imported nozzle vector.
+
+For the Voron backup used by the production walkthrough, select:
+
+```text
+orcaslicer/user/1945486786/machine/Voron 0.4.json
+orcaslicer/user/1945486786/process/0.20mm Tuned.json
+orcaslicer/user/1945486786/filament/Voron PLA.json
+orcaslicer/user/1945486786/filament/Voron PETG.json
+```
+
+The app only reads files selected locally. It does not authenticate to GitHub
+or download profiles from a private repository.
 
 → [Profile format reference](profiles.md)

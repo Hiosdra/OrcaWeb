@@ -19,7 +19,7 @@ The React web UI is a temporary proof-of-concept to demonstrate the engine. It i
 │   │  App.tsx            layout, tabs, settings     │    │
 │   │  ├── FileUpload     drag & drop STL/3MF/STEP/OBJ│    │
 │   │  ├── ModelViewer    Three.js, real mm scale    │    │
-│   │  ├── SettingsPanel  presets + profile import   │    │
+│   │  ├── SettingsPanel  presets + profile-set import│    │
 │   │  ├── GcodeViewer    toolpaths, layer slider    │    │
 │   │  └── SliceCards     SliceHeader, QueueItemCard,│    │
 │   │       PlateResultCard, ConfigSummary           │    │
@@ -353,13 +353,35 @@ File drop
 
 ### Config layers
 
-The `config` handed to every slice is resolved from three layers, lowest priority first — `preset` (printer + filament + quality selection), `imported` (settings from a loaded `.3mf` or `.json` profile), `manual` (fields the user edited in the panel). `src/lib/config-layers.ts` owns that order and is the only place it may change; `App.tsx` holds one piece of state per layer and merges them through `resolveConfig()`.
+The `config` handed to every slice is resolved from three layers, lowest priority first — `preset` (printer + filament + quality selection), `imported` (settings from a loaded `.3mf` or `.json` profile/profile set), `manual` (fields the user edited in the panel). `src/lib/config-layers.ts` owns that order and is the only place it may change; `App.tsx` holds one piece of state per layer and merges them through `resolveConfig()`.
 
-The invariant worth guarding in review: **changing a lower layer must never clear a higher one.** Swapping printer/filament/quality preset or importing a profile replaces only its own layer — the manual layer is dropped solely by an explicit per-field revert, "Reset all", or loading a saved user preset (which is by definition a complete selection). Every one of those handlers used to call `setManualOverrides({})`, which silently discarded the user's edits; the quality chips fire even when the already-selected one is clicked, so it could happen with no visible change at all. `src/lib/config-layers.test.ts` pins the precedence, including that a manual `0` is kept rather than falling through.
+The invariant worth guarding in review: **changing a lower layer must never clear a higher one.** Swapping a compatible preset or importing a profile replaces only its own layer — the manual layer is dropped solely by an explicit per-field revert, "Reset all", or loading a saved user preset (which is by definition a complete selection). A complete imported machine/profile-set/3MF context is the deliberate exception: changing the printer or, for a complete set, its material list removes that imported context before the new selection is rendered, so the UI cannot claim one machine while the engine receives another one's vectors. Every one of those handlers used to call `setManualOverrides({})`, which silently discarded the user's edits; the quality chips fire even when the already-selected one is clicked, so it could happen with no visible change at all. `src/lib/config-layers.test.ts` pins the precedence, including that a manual `0` is kept rather than falling through.
 
 The panel marks manual fields with an amber outline and a revert control, mirroring desktop OrcaSlicer's modified-setting flag. User-facing description: [Settings precedence](profiles.md#settings-precedence).
 
 One asymmetry sits downstream: the worker applies `_passthrough` (unmapped fields from an imported profile) *after* the mapped config on the way to `orc_init`. That doesn't invert the order, because `parseOrcaProfileJson` only routes a field to `_passthrough` when it is *not* one of the mapped fields the panel can edit — the two sets are disjoint. Adding a panel control for a passthrough-only field would break that assumption and require revisiting the worker's merge order.
+
+### Local OrcaSlicer profile-set import
+
+`SettingsPanel` reads all selected local JSON files, parses them through
+`parseOrcaProfileJson()`, and calls the pure
+`mergeImportedProfileFiles()` reducer before notifying `App`. The reducer
+rejects duplicate machine/process/print categories, orders known filament types
+deterministically, preserves OrcaSlicer's multi-value vectors in `_passthrough`,
+and adds inferred `filament_type`/`filament_settings_id` values for leaf files
+that omit them. The state update is one imported layer, so a parse or merge
+failure cannot leave a half-applied selection.
+
+`withFilamentSlots()` then combines the imported vectors with the UI's material
+selection. The number of physical nozzles comes from the imported
+`nozzle_diameter` vector; slots are assigned round-robin through `filament_map`
+(`1`, `2` for PLA/PETG on a two-nozzle machine), while imported per-slot
+temperatures, flow, and G-code remain authoritative when the picker names the
+same material. There is deliberately no GitHub-auth or printer-upload path in
+this flow: the worker's production boundary is local slicing and G-code
+download. A change to the material list clears a complete imported set before
+the new slot list is resolved, preventing fixed-length per-filament vectors
+from being reused for a different material selection.
 
 Engine-side 3MF write + read (`orc_write_3mf` / `orc_read_3mf`, issue #108) are the first bridge functions to touch `libslic3r/Format/bbs_3mf.hpp` — previously 3MF only flowed one way, parsed client-side by the now-removed `parse3mf.ts`. `orc_write_3mf` is a plain request/response through the worker (like `OBJ_TO_STL`/`CAD_TO_STL`), not part of the slice queue's state machine, since exporting doesn't change `item.status`. `orc_read_3mf` *is* part of the file-drop pipeline (same shape as `OBJ_TO_STL`/`CAD_TO_STL`'s conversion step); a failed engine read now marks the queue item `'error'` rather than falling back to a JS parser — `orc_read_3mf` resolves multi-object transforms the way OrcaSlicer itself does, which the JS walker couldn't, so a fallback would have silently produced worse geometry rather than a clear failure. Not scoped: a full "sliced project" 3MF (per-plate G-code, thumbnails) — this headless bridge has no `PartPlateList` to source that from; see `status.md`'s "Nie zaimplementowane" section.
 

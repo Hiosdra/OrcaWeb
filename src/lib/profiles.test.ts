@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { OrcaConfig, PassthroughConfig } from '../types'
 import { resolveConfig } from './config-layers'
+import type { ImportedProfileFile } from './profiles'
 import {
   buildConfig,
   describeExportCompatibility,
@@ -12,8 +13,13 @@ import {
   flattenSliceConfig,
   type ImportedFilamentSource,
   importedFilamentSlotLabels,
+  inferImportedFilamentType,
+  inferImportedPrinterModel,
+  inferImportedProfileType,
   MAX_FILAMENT_SLOTS,
+  mergeImportedProfileFiles,
   parseOrcaProfileJson,
+  physicalNozzleCount,
   withFilamentSlots,
 } from './profiles'
 
@@ -28,6 +34,123 @@ describe('filamentSlots', () => {
 
   it('falls back to the display default when unset', () => {
     expect(filamentSlots({})).toEqual(['PLA'])
+  })
+})
+
+describe('mergeImportedProfileFiles', () => {
+  const file = (name: string, type: ImportedProfileFile['type'], raw: Record<string, unknown>, inherits?: string) =>
+    ({
+      name,
+      type,
+      settings: parseOrcaProfileJson(JSON.stringify(raw)),
+      inherits,
+    }) satisfies ImportedProfileFile
+
+  it('turns the Voron-style leaf files into a dual-nozzle PLA/PETG config', () => {
+    const machine = file(
+      'Voron 0.4',
+      'machine',
+      {
+        nozzle_diameter: ['0.4', '0.4'],
+        printable_area: ['0x0', '350x0', '350x356', '0x356'],
+        machine_start_gcode: 'PRINT_START',
+      },
+      'Voron 2.4 350 0.4 nozzle',
+    )
+    const process = file('0.20mm Tuned', 'process', { layer_height: '0.2', outer_wall_speed: '150' })
+    const pla = file('Voron PLA', 'filament', {
+      nozzle_temperature: ['220'],
+      hot_plate_temp: ['55'],
+      filament_flow_ratio: ['0.98'],
+    })
+    const petg = file('Voron PETG', 'filament', {
+      nozzle_temperature: ['240'],
+      hot_plate_temp: ['80'],
+      filament_flow_ratio: ['0.97'],
+      filament_start_gcode: ['SET_GCODE_OFFSET Z=0.02'],
+    })
+
+    expect(inferImportedPrinterModel(machine)).toBe('Voron 2.4 350')
+    expect(inferImportedFilamentType(pla)).toBe('PLA')
+    expect(inferImportedFilamentType(petg)).toBe('PETG')
+
+    // FileList ordering is a browser/OS detail. Known materials must retain
+    // the same slot order even when PETG is selected before PLA.
+    const merged = mergeImportedProfileFiles([petg, process, machine, pla])
+    expect(merged.profileTypes).toEqual(['machine', 'process', 'filament', 'filament'])
+    expect(merged.settings.printer_model).toBe('Voron 2.4 350')
+    expect(physicalNozzleCount(merged.settings)).toBe(2)
+    expect(merged.settings._passthrough?.filament_type).toEqual(['PLA', 'PETG'])
+    expect(merged.settings._passthrough?.filament_settings_id).toEqual(['Voron PLA', 'Voron PETG'])
+    expect(merged.settings._passthrough?.filament_flow_ratio).toEqual(['0.98', '0.97'])
+    expect(merged.settings._passthrough?.filament_start_gcode).toEqual(['', 'SET_GCODE_OFFSET Z=0.02'])
+
+    const effective = withFilamentSlots(merged.settings, ['PLA', 'PETG'])
+    expect(effective._passthrough?.filament_map).toEqual(['1', '2'])
+    expect(effective._passthrough?.nozzle_temperature).toEqual(['220', '240'])
+    expect(effective._passthrough?.hot_plate_temp).toEqual(['55', '80'])
+  })
+
+  it('rejects ambiguous duplicate machine/process/print files before applying them', () => {
+    const a = file('a', 'machine', { nozzle_diameter: '0.4' })
+    const b = file('b', 'machine', { nozzle_diameter: '0.6' })
+    expect(() => mergeImportedProfileFiles([a, b])).toThrow('at most one machine')
+  })
+
+  it('does not borrow a material-specific value when a leaf inherits that option', () => {
+    const pla = file('Voron PLA', 'filament', {
+      nozzle_temperature: ['210'],
+      nozzle_temperature_initial_layer: ['210'],
+      enable_pressure_advance: ['1'],
+      pressure_advance: ['0.03'],
+    })
+    const petg = file('Voron PETG', 'filament', {
+      nozzle_temperature: ['240'],
+      nozzle_temperature_initial_layer: ['240'],
+      fan_min_speed: ['100'],
+      filament_flow_ratio: ['0.98'],
+      enable_pressure_advance: ['1'],
+      pressure_advance: ['0.07'],
+    })
+
+    const merged = mergeImportedProfileFiles([petg, pla])
+    expect(merged.settings._passthrough?.filament_flow_ratio).toEqual(['1', '0.98'])
+    expect(merged.settings._passthrough?.fan_min_speed).toEqual(['100', '100'])
+    expect(merged.settings._passthrough?.enable_pressure_advance).toEqual(['1', '1'])
+    expect(merged.settings._passthrough?.pressure_advance).toEqual(['0.03', '0.07'])
+  })
+
+  it('drops a partially specified unknown option instead of forwarding a short vector', () => {
+    const pla = file('PLA custom', 'filament', { filament_type: ['PLA'], custom_filament_option: ['pla-only'] })
+    const petg = file('PETG custom', 'filament', { filament_type: ['PETG'] })
+
+    expect(mergeImportedProfileFiles([pla, petg]).settings._passthrough?.custom_filament_option).toBeUndefined()
+  })
+})
+
+describe('inferImportedProfileType', () => {
+  const untyped = (name: string, raw: Record<string, unknown>, inherits?: string) => ({
+    name,
+    settings: parseOrcaProfileJson(JSON.stringify(raw)),
+    inherits,
+  })
+
+  it('recognizes the untyped machine, process, and filament leaves used by OrcaSlicer backups', () => {
+    expect(
+      inferImportedProfileType(
+        untyped(
+          'Voron 0.4',
+          { nozzle_diameter: ['0.4', '0.4'], printable_area: ['0x0', '350x0', '350x356', '0x356'] },
+          'Voron 2.4 350 0.4 nozzle',
+        ),
+      ),
+    ).toBe('machine')
+    expect(inferImportedProfileType(untyped('0.20mm Tuned', { inner_wall_speed: '250', layer_height: '0.2' }))).toBe(
+      'process',
+    )
+    expect(
+      inferImportedProfileType(untyped('Voron PETG', { nozzle_temperature: ['240'], pressure_advance: ['0.07'] })),
+    ).toBe('filament')
   })
 })
 
@@ -658,8 +781,10 @@ describe('withFilamentSlots (#140)', () => {
         'filament_colour',
         'filament_diameter',
         'filament_end_gcode',
+        'filament_extruder_variant',
         'filament_map',
         'filament_map_mode',
+        'filament_self_index',
         'filament_start_gcode',
         'filament_type',
         'flush_multiplier',
@@ -695,6 +820,8 @@ describe('withFilamentSlots (#140)', () => {
     expect(pt.flush_multiplier).toEqual(['1', '1'])
     expect(pt.filament_map).toEqual(['1', '2'])
     expect(pt.filament_map_mode).toBe('Manual')
+    expect(pt.filament_extruder_variant).toEqual(['Direct Drive Standard', 'Direct Drive Standard'])
+    expect(pt.filament_self_index).toEqual(['1', '2'])
   })
 })
 

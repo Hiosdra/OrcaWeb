@@ -66,6 +66,7 @@ nav:
       - 'ADR-009: WASM Build Smoke Test': adr/adr-009-wasm-smoke-test.md
       - 'ADR-010: E2E UI Smoke Test': adr/adr-010-e2e-smoke-test.md
       - 'ADR-011: Multithreaded Engine': adr/adr-011-multithreaded-engine.md
+      - 'ADR-012: Atomic Local Profile Sets': adr/adr-012-local-profile-sets.md
   - Internals & Reports:
     - 'Benchmark: ST vs MT Engine': st-mt-benchmark.md
     - 'Benchmark: G-code Compression': gcode-compression-benchmark.md
