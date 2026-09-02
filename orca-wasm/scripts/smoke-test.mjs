@@ -242,7 +242,7 @@ const BASE_CONFIG = {
   printable_height: 250,
   nozzle_diameter: 0.4,
   layer_height: 0.2,
-  initial_layer_height: 0.2,
+  initial_layer_print_height: 0.2,
   wall_loops: 2,
   top_shell_layers: 3,
   bottom_shell_layers: 3,
@@ -284,6 +284,8 @@ const DUAL_NOZZLE_CONFIG = {
   hot_plate_temp_initial_layer: ['55', '70'],
   filament_start_gcode: ['', ''],
   filament_end_gcode: ['', ''],
+  filament_extruder_variant: ['Direct Drive Standard', 'Direct Drive Standard'],
+  filament_self_index: ['1', '2'],
   // slot 1 -> nozzle 1, slot 2 -> nozzle 2: this is what produces T0/T1
   filament_map: ['1', '2'],
   filament_map_mode: 'Manual',
@@ -453,7 +455,7 @@ async function main() {
         initSession(module, session, JSON.stringify(scenario.config))
         const gcode = sliceOnce(module, session, mesh.bytes)
         assertSaneGcode(gcode, label)
-        assertRestsOnBed(gcode, label, scenario.config.initial_layer_height)
+        assertRestsOnBed(gcode, label, scenario.config.initial_layer_print_height)
         scenario.assert?.(gcode, label)
         console.log(`PASS (${gcode.length} bytes)`)
       } catch (err) {
@@ -473,7 +475,7 @@ async function main() {
       initSession(module, session, JSON.stringify(BASE_CONFIG))
       const gcode = sliceMultiOnce(module, session, [mesh.bytes, mesh.bytes], Int32Array.from([1, 1]))
       assertSaneGcode(gcode, plateLabel)
-      assertRestsOnBed(gcode, plateLabel, BASE_CONFIG.initial_layer_height)
+      assertRestsOnBed(gcode, plateLabel, BASE_CONFIG.initial_layer_print_height)
       console.log(`PASS (${gcode.length} bytes)`)
     } catch (err) {
       failures++
@@ -490,8 +492,27 @@ async function main() {
       initSession(module, session, JSON.stringify(DUAL_NOZZLE_CONFIG))
       const gcode = sliceMultiOnce(module, session, [mesh.bytes, mesh.bytes], Int32Array.from([1, 2]))
       assertSaneGcode(gcode, dualLabel)
-      assertRestsOnBed(gcode, dualLabel, BASE_CONFIG.initial_layer_height)
+      assertRestsOnBed(gcode, dualLabel, BASE_CONFIG.initial_layer_print_height)
       assertToolChanges(gcode, dualLabel)
+      console.log(`PASS (${gcode.length} bytes)`)
+    } catch (err) {
+      failures++
+      console.log('FAIL')
+      console.error(`  ${err.message}`)
+    }
+
+    // The UI represents assigning one uploaded STL to slot 2 as a one-object
+    // multi slice. Keep that exact shape covered: a two-object T0/T1 plate can
+    // pass while the single-object path still collapses the selected filament.
+    const singlePetgLabel = `[${mesh.label}] single object assigned to filament slot 2 (T1)`
+    process.stdout.write(`[smoke-test] ${singlePetgLabel} ... `)
+    try {
+      initSession(module, session, JSON.stringify(DUAL_NOZZLE_CONFIG))
+      const gcode = sliceMultiOnce(module, session, [mesh.bytes], Int32Array.from([2]))
+      assertSaneGcode(gcode, singlePetgLabel)
+      if (!/; nozzle_temperature = 220,255\n/.test(gcode)) throw new Error('slot 2 assignment collapsed the per-filament nozzle temperatures')
+      if (!/; nozzle_temperature_initial_layer = 220,255\n/.test(gcode)) throw new Error('slot 2 assignment collapsed the first-layer temperatures')
+      if (!/(?:^|\n)T1(?:\s|$)/m.test(gcode)) throw new Error('slot 2 assignment did not select T1')
       console.log(`PASS (${gcode.length} bytes)`)
     } catch (err) {
       failures++
@@ -568,11 +589,14 @@ async function main() {
 
     // orc_write_3mf: mesh + embedded config, no plate/gcode data (see
     // orca-wasm/bridge/slicer.cpp doc comment and issue #108's scope notes).
+    // Use the real dual-nozzle shape here so the read side also proves it
+    // preserves vector boundaries instead of returning one joined scalar per
+    // filament/nozzle option.
     const write3mfLabel = `[${mesh.label}] write .3mf (mesh + embedded config)`
     process.stdout.write(`[smoke-test] ${write3mfLabel} ... `)
     let written3mf = null
     try {
-      initSession(module, session, JSON.stringify(BASE_CONFIG))
+      initSession(module, session, JSON.stringify(DUAL_NOZZLE_CONFIG))
       written3mf = write3mfOnce(module, session, mesh.bytes)
       assertValid3mf(written3mf, write3mfLabel)
       console.log(`PASS (${written3mf.length} bytes)`)
@@ -601,8 +625,13 @@ async function main() {
       for (const key of ['layer_height', 'nozzle_temperature', 'filament_type', 'sparse_infill_density']) {
         if (!(key in config)) throw new Error(`config key "${key}" missing from round-tripped .3mf (keys: ${Object.keys(config).join(', ')})`)
       }
-      if (parseFloat(config.layer_height) !== BASE_CONFIG.layer_height) {
-        throw new Error(`layer_height mismatch: expected ${BASE_CONFIG.layer_height}, got ${config.layer_height}`)
+      if (parseFloat(config.layer_height) !== DUAL_NOZZLE_CONFIG.layer_height) {
+        throw new Error(`layer_height mismatch: expected ${DUAL_NOZZLE_CONFIG.layer_height}, got ${config.layer_height}`)
+      }
+      for (const key of ['nozzle_diameter', 'filament_type', 'filament_colour', 'nozzle_temperature', 'filament_map', 'flush_volumes_matrix']) {
+        if (!Array.isArray(config[key])) {
+          throw new Error(`round-tripped .3mf vector "${key}" lost its array shape: ${JSON.stringify(config[key])}`)
+        }
       }
 
       console.log(`PASS (${actualTris} tris, ${Object.keys(config).length} config keys)`)

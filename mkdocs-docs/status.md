@@ -2,7 +2,7 @@
 
 This page describes the current state of the project: implemented features and known limitations. Planned-but-not-yet-implemented work lives in GitHub issues, linked below, instead of an in-page roadmap.
 
-Last updated: **2026-08-01** · engine version: **OrcaSlicer v2.4.2** (self-built, live in production; primary MT `wasm-v2.4.2-patch13-multithreaded`, ST fallback `wasm-v2.4.2-patch12`) · app version: **v0.8.13**
+Last updated: **2026-09-02** · engine version: **OrcaSlicer v2.4.2** (self-built, live in production; primary MT `wasm-v2.4.2-patch13-multithreaded`, ST fallback `wasm-v2.4.2-patch12`) · app version: **v0.8.19**
 
 ---
 
@@ -83,9 +83,10 @@ OrcaSlicer's C++ source is patched in place (`orca-wasm/patches/apply.py`) for W
 | Built-in quality presets | Draft (0.3 mm) / Standard (0.2 mm) / Fine (0.1 mm) |
 | Built-in filaments | PLA, PETG, ABS, TPU |
 | Built-in printers | Generic 0.4/0.6, Bambu Lab P1S/X1C, Prusa MK4, Ender 3, Voron 2.4 |
-| JSON profile import from OrcaSlicer | `.json` file from a desktop install; `ORCA_FIELD_MAP` mapping + passthrough of all other fields |
+| JSON profile/profile-set import from OrcaSlicer | One or more local `.json` files; atomic machine/process/filament merge, deterministic known-material slots, `ORCA_FIELD_MAP` mapping + passthrough of all other fields |
 | Machine profile import | `gcode_flavor`, `retract_length/speed`, `lift_z`, `machine_start/end_gcode`, `machine_max_speed_*`, `printable_height` — all reach the engine |
-| Profile extraction from 3MF | Via `orc_read_3mf` (falls back to a JS read of `Metadata/*.json/.config` from the archive if the engine fails) |
+| Dual-nozzle imported profiles | Preserves multi-value machine/filament vectors and maps material slots to physical nozzles through `filament_map`; validated with the real WASM slice/download path |
+| Profile extraction from 3MF | Via `orc_read_3mf`; an engine failure surfaces as an import error rather than a JS fallback |
 
 ### Deployment
 

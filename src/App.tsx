@@ -10,14 +10,17 @@ import { useSliceQueue } from './hooks/useSliceQueue'
 import { type ConfigField, mergeConfigLayers, resolveConfig, revertField } from './lib/config-layers'
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
+import type { ImportedProfileType } from './lib/profiles'
 import {
   buildConfig,
   DISPLAY_DEFAULTS,
   FILAMENT_PRESETS,
   filamentSlotLabels,
   importedFilamentSlotLabels,
+  importedFilamentTypes,
   PRESETS,
   PRINTER_PRESETS,
+  physicalNozzleCount,
   withFilamentSlots,
 } from './lib/profiles'
 import type { WasmStatus } from './lib/worker-singleton'
@@ -39,16 +42,17 @@ interface SavedSettings {
   overrides?: Partial<OrcaConfig>
 }
 
-type ProfileType = 'machine' | 'filament' | 'process' | 'print'
+type ProfileType = ImportedProfileType | 'set'
 
 interface ImportedProfile {
   name: string
   type: ProfileType
   settings: Partial<OrcaConfig>
+  sourceNames?: string[]
 }
 
 function isProfileType(value: unknown): value is ProfileType {
-  return value === 'machine' || value === 'filament' || value === 'process' || value === 'print'
+  return value === 'machine' || value === 'filament' || value === 'process' || value === 'print' || value === 'set'
 }
 
 function countProfileSettings(settings: Partial<OrcaConfig>): number {
@@ -67,10 +71,13 @@ function loadSavedSettings(): SavedSettings | null {
     // pointing at a selection that no longer exists.
     return {
       printer:
-        typeof s.printer === 'string' && s.printer in PRINTER_PRESETS ? s.printer : Object.keys(PRINTER_PRESETS)[0],
-      filament: typeof s.filament === 'string' && s.filament in FILAMENT_PRESETS ? s.filament : 'PLA',
+        typeof s.printer === 'string' && Object.keys(PRINTER_PRESETS).includes(s.printer)
+          ? s.printer
+          : Object.keys(PRINTER_PRESETS)[0],
+      filament:
+        typeof s.filament === 'string' && Object.keys(FILAMENT_PRESETS).includes(s.filament) ? s.filament : 'PLA',
       filaments: Array.isArray(s.filaments)
-        ? s.filaments.filter((f): f is string => typeof f === 'string' && f in FILAMENT_PRESETS)
+        ? s.filaments.filter((f): f is string => typeof f === 'string' && Object.keys(FILAMENT_PRESETS).includes(f))
         : undefined,
       preset: typeof s.preset === 'string' && PRESETS.some((p) => p.name === s.preset) ? s.preset : 'standard',
       manualOverrides:
@@ -166,6 +173,29 @@ function findPresetKeyByField(
   return Object.keys(presets).find((key) => presets[key][field] === value)
 }
 
+// User profiles often encode the build-size variant in the model value
+// ("Voron 2.4 350"), while this compact app ships one representative preset
+// for that family ("Voron 2.4 300"). Exact values still win; the family
+// fallback is only used to choose a sensible lower-priority base for fields a
+// leaf profile omitted because they live in its private `inherits` parent.
+function findPrinterPresetKey(value: unknown): string | undefined {
+  const exact = findPresetKeyByField(PRINTER_PRESETS, 'printer_model', value)
+  if (exact || typeof value !== 'string') return exact
+
+  const family = (model: string) =>
+    model
+      .trim()
+      .toLowerCase()
+      .replace(/\s+\d+(?:\.\d+)?$/, '')
+  const targetFamily = family(value)
+  const matches = Object.keys(PRINTER_PRESETS).filter(
+    (key) =>
+      typeof PRINTER_PRESETS[key].printer_model === 'string' &&
+      family(PRINTER_PRESETS[key].printer_model) === targetFamily,
+  )
+  return matches.length === 1 ? matches[0] : undefined
+}
+
 // Slot 0's filament type from an imported patch. A multi-material profile's
 // `filament_type` is collapsed by ORCA_FIELD_MAP to the joined "PLA,PETG",
 // which matches no FILAMENT_PRESETS key — so reach past it to the unflattened
@@ -174,10 +204,29 @@ function findPresetKeyByField(
 // Material dropdown never re-points to slot 0's material and the panel keeps
 // describing whatever was selected before the import (#161).
 function firstFilamentType(patch: Partial<OrcaConfig>): string | undefined {
-  const declared = patch._passthrough?.filament_type
-  if (Array.isArray(declared)) return declared[0]
-  if (typeof declared === 'string') return declared
-  return typeof patch.filament_type === 'string' ? patch.filament_type : undefined
+  return importedFilamentTypes(patch)[0]
+}
+
+/**
+ * Select the UI materials that correspond to an imported profile. A two-nozzle
+ * machine must expose two slots even when the machine JSON has no filament
+ * field; a profile set with PLA + PETG supplies the exact slot order itself.
+ * Unknown custom materials stay represented by importedFilamentSlotLabels(),
+ * while the editable dropdown falls back to a safe built-in material.
+ */
+function filamentSelectionForImport(profile: ImportedProfile, current: string[]): string[] {
+  const declared = importedFilamentTypes(profile.settings)
+  const requiresMachineSlots = profile.type === 'machine' || profile.type === 'set' || profile.type === 'print'
+  const count =
+    profile.type === 'set'
+      ? Math.max(declared.length, physicalNozzleCount(profile.settings), 1)
+      : Math.max(current.length, declared.length, requiresMachineSlots ? physicalNozzleCount(profile.settings) : 1)
+  const builtIns = Object.keys(FILAMENT_PRESETS)
+  return Array.from({ length: count }, (_, index) => {
+    const imported = declared[index]
+    if (imported && builtIns.includes(imported)) return imported
+    return current[index] ?? builtIns.find((name) => !current.includes(name)) ?? builtIns[0]
+  })
 }
 
 // Returns an array with the same File objects, in the same order, as `next`
@@ -227,9 +276,14 @@ export default function App() {
   const [selectedPrinter, setSelectedPrinter] = useState(saved?.printer ?? Object.keys(PRINTER_PRESETS)[0])
   // One entry per filament slot; slot 0 is what the settings panel's scalar
   // fields show. Falls back to the legacy single-slot setting.
-  const [selectedFilaments, setSelectedFilaments] = useState<string[]>(() =>
-    saved?.filaments?.length ? saved.filaments : [saved?.filament ?? 'PLA'],
-  )
+  const [selectedFilaments, setSelectedFilaments] = useState<string[]>(() => {
+    const current = saved?.filaments?.length ? saved.filaments : [saved?.filament ?? 'PLA']
+    // Older builds persisted only the visible selection. If a saved imported
+    // machine/profile set declared two nozzles, restore the same slot count
+    // before the first config is built; otherwise the panel and engine could
+    // disagree until the user re-imported the files.
+    return saved?.importedProfile ? filamentSelectionForImport(saved.importedProfile, current) : current
+  })
   const selectedFilament = selectedFilaments[0]
   const setSelectedFilament = useCallback((name: string) => {
     setSelectedFilaments((prev) => (prev.length <= 1 ? [name] : prev.map((s, i) => (i === 0 ? name : s))))
@@ -245,14 +299,27 @@ export default function App() {
   )
   // preset < imported file < manual edits — see config-layers.ts for what
   // each layer is and why the manual one must outlive changes to the others.
-  const config: OrcaConfig = useMemo(
-    () =>
-      withFilamentSlots(
-        resolveConfig({ preset: baseConfig, imported: importedProfile?.settings, manual: manualOverrides }),
-        selectedFilaments,
-      ),
-    [baseConfig, importedProfile, manualOverrides, selectedFilaments],
-  )
+  const config: OrcaConfig = useMemo(() => {
+    const resolved = resolveConfig({ preset: baseConfig, imported: importedProfile?.settings, manual: manualOverrides })
+    const slotted = withFilamentSlots(resolved, selectedFilaments)
+
+    // The visible nozzle field is scalar, but an imported dual-nozzle
+    // machine carries the physical diameters as an array in passthrough.
+    // Once the user edits that field, the manual value must win for every
+    // physical nozzle; otherwise flattenSliceConfig() would spread the old
+    // imported array over the manual scalar and the engine would still slice
+    // with the previous diameter.
+    const manualNozzle = manualOverrides.nozzle_diameter
+    const physicalNozzles = physicalNozzleCount(slotted)
+    if (manualNozzle === undefined || physicalNozzles < 2 || !slotted._passthrough?.nozzle_diameter) return slotted
+    return {
+      ...slotted,
+      _passthrough: {
+        ...slotted._passthrough,
+        nozzle_diameter: Array.from({ length: physicalNozzles }, () => String(manualNozzle)),
+      },
+    }
+  }, [baseConfig, importedProfile, manualOverrides, selectedFilaments])
 
   useEffect(() => {
     try {
@@ -367,14 +434,16 @@ export default function App() {
   // dropdown changes cannot silently erase them.
   const handleSettingsImported = useCallback(
     (patch: Partial<OrcaConfig>, filename: string) => {
-      setImportedProfile({ name: filename, type: 'print', settings: patch })
+      const profile: ImportedProfile = { name: filename, type: 'print', settings: patch }
+      setImportedProfile(profile)
+      setSelectedFilaments((current) => filamentSelectionForImport(profile, current))
       // Sync the dropdowns too — without this, config.printer_model/filament_type
       // get overridden correctly (visible on the Slice tab) but the Settings tab
       // dropdowns keep showing whatever was selected before import, and touching
       // either one afterwards wipes every imported override via
       // onPrinterChange/onFilamentChange's setConfigOverrides({}) reset.
       if (patch.printer_model !== undefined) {
-        const matched = findPresetKeyByField(PRINTER_PRESETS, 'printer_model', patch.printer_model)
+        const matched = findPrinterPresetKey(patch.printer_model)
         if (matched) setSelectedPrinter(matched)
       }
       const importedType = firstFilamentType(patch)
@@ -437,18 +506,20 @@ export default function App() {
   // can't fire on an unchanged value, but the guard is the same shape for
   // all three rather than relying on that).
   const handlePresetChange = (name: string) => {
-    const presetImport = importedProfile?.type === 'process' || importedProfile?.type === 'print'
+    const presetImport =
+      importedProfile?.type === 'process' || importedProfile?.type === 'print' || importedProfile?.type === 'set'
     if (name === selectedPreset && !presetImport) return
     setSelectedPreset(name)
-    setImportedProfile((profile) => (profile?.type === 'process' || profile?.type === 'print' ? null : profile))
+    setImportedProfile((profile) =>
+      profile?.type === 'process' || profile?.type === 'print' || profile?.type === 'set' ? null : profile,
+    )
   }
 
   const handleProfileImported = (profile: ImportedProfile) => {
     setImportedProfile(profile)
+    setSelectedFilaments((current) => filamentSelectionForImport(profile, current))
     const printer =
-      profile.settings.printer_model === undefined
-        ? undefined
-        : findPresetKeyByField(PRINTER_PRESETS, 'printer_model', profile.settings.printer_model)
+      profile.settings.printer_model === undefined ? undefined : findPrinterPresetKey(profile.settings.printer_model)
     if (printer) setSelectedPrinter(printer)
     const importedType = firstFilamentType(profile.settings)
     const filament =
@@ -458,9 +529,16 @@ export default function App() {
 
   const handlePrinterChange = (name: string) => {
     if (name === `Imported: ${importedProfile?.name}`) return
-    if (name === selectedPrinter && importedProfile?.type !== 'machine') return
+    if (name === selectedPrinter && importedProfile?.type !== 'machine' && importedProfile?.type !== 'set') return
     setSelectedPrinter(name)
-    setImportedProfile((profile) => (profile?.type === 'machine' ? null : profile))
+    // A machine/profile-set/3MF import is a complete printer context. Once the
+    // operator picks another printer, retaining that imported layer would leave
+    // the dropdown and the actual engine config disagreeing, so shed it before
+    // the new selection is rendered. A standalone filament/process import is
+    // still compatible with changing the printer and remains active.
+    setImportedProfile((profile) =>
+      profile?.type === 'machine' || profile?.type === 'set' || profile?.type === 'print' ? null : profile,
+    )
   }
 
   const handleFilamentsChange = (names: string[]) => {
@@ -474,10 +552,31 @@ export default function App() {
     // An imported filament profile describes slot 0 — that is the only slot
     // whose scalars it feeds — so only a change there sheds it. Adding or
     // removing a *slot*, or repicking a material further down the list, leaves
-    // the import standing rather than silently discarding a file the user
-    // still has selected.
-    if (next[0] !== selectedFilament || unchanged) {
-      setImportedProfile((profile) => (profile?.type === 'filament' ? null : profile))
+    // a single-filament import standing rather than silently discarding a file
+    // the user still has selected. A profile set is different: its imported
+    // vectors describe the complete slot list. Any change to that list —
+    // removing a slot, adding one, or re-picking a material — would leave some
+    // per-filament values (flow, pressure advance, hooks, and more) paired
+    // with the wrong material or with no entry at all. Shed the complete set
+    // atomically and let the next render rebuild every slot from the built-in
+    // presets. This is also the safe escape hatch for a set whose material
+    // labels are ordinary preset names rather than read-only custom labels.
+    const changesImportedSetSlots =
+      importedProfile?.type === 'set' && importedFilamentTypes(importedProfile.settings).length > 0 && !unchanged
+    // A 3MF's filament vectors belong to the print context too. A material,
+    // add-slot, or remove-slot interaction must shed that context atomically;
+    // otherwise slot 0 can keep the imported material while the picker shows a
+    // different one, and removing a declared slot cannot actually shrink the
+    // engine's vectors. Labelled custom materials are read-only in the panel,
+    // so the remove-import button remains the explicit escape hatch for them.
+    const changesImportedPrint = importedProfile?.type === 'print' && !unchanged
+    if (next[0] !== selectedFilament || unchanged || changesImportedSetSlots || changesImportedPrint) {
+      setImportedProfile((profile) => {
+        if (profile?.type === 'filament') return null
+        if (profile?.type === 'set' && changesImportedSetSlots) return null
+        if (profile?.type === 'print' && changesImportedPrint) return null
+        return profile
+      })
     }
   }
 
@@ -667,7 +766,9 @@ export default function App() {
                 onPresetChange={handlePresetChange}
                 selectedPrinter={selectedPrinter}
                 importedPrinterLabel={
-                  importedProfile?.type === 'machine' ? `Imported: ${importedProfile.name}` : undefined
+                  importedProfile?.type === 'machine' || importedProfile?.type === 'set'
+                    ? `Imported: ${importedProfile.name}`
+                    : undefined
                 }
                 onPrinterChange={handlePrinterChange}
                 selectedFilaments={selectedFilaments}

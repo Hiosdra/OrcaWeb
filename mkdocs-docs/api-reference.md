@@ -542,7 +542,7 @@ interface OrcaConfig {
 
   // Quality
   layer_height?: number            // mm
-  initial_layer_height?: number    // mm
+  initial_layer_print_height?: number // mm; FFF first-layer height
   top_shell_layers?: number
   bottom_shell_layers?: number
   wall_loops?: number

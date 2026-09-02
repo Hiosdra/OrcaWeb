@@ -51,7 +51,7 @@ OrcaWeb maps OrcaSlicer profile fields to its internal `OrcaConfig`. Aliases fro
 | OrcaSlicer field | OrcaConfig key | Notes |
 |-----------------|---------------|-------|
 | `layer_height` | `layer_height` | mm |
-| `initial_layer_height` | `initial_layer_height` | mm |
+| `initial_layer_print_height` | `initial_layer_print_height` | mm; `initial_layer_height` is the SLA-only field |
 | `wall_loops` / `perimeters` | `wall_loops` | |
 | `top_shell_layers` | `top_shell_layers` | |
 | `bottom_shell_layers` | `bottom_shell_layers` | |
@@ -100,7 +100,7 @@ Every value OrcaWeb slices with comes from one of three layers. Later layers win
 | # | Layer | Where it comes from | Replaced when |
 |---|-------|--------------------|---------------|
 | 1 | **Preset** | The selected printer + filament + quality preset | You pick a different printer, filament or quality preset |
-| 2 | **Imported file** | Settings embedded in a `.3mf`, or an imported `.json` OrcaSlicer preset | You import another file, or remove the active import |
+| 2 | **Imported file** | Settings embedded in a `.3mf`, or an imported `.json` OrcaSlicer profile/profile set | You import another file/set, remove it, or change a complete imported printer context |
 | 3 | **Your edits** | Any field you changed by hand in the settings panel | Only by you — per-field **reset**, **Reset all**, or loading a saved preset |
 
 The rule that matters in daily use is the third row: **a setting you changed by hand survives everything underneath it.** Switch printer, switch filament, switch quality preset, load a different 3MF — your edited fields stay exactly as you left them, and only the fields you never touched follow the new profile. This matches desktop OrcaSlicer, where a modified setting stays modified (and stays flagged) as you switch presets around it.
@@ -116,18 +116,73 @@ The layer model itself lives in [`src/lib/config-layers.ts`](https://github.com/
 
 ## Import behaviour
 
-When you import a profile:
+When you import a profile or profile set:
 
-1. OrcaWeb reads the JSON and extracts all recognised fields into the UI model
-2. Any remaining OrcaSlicer fields are collected and forwarded verbatim to the WASM slicer
-3. The extracted settings become the **imported** layer — above the preset selection, below your own edits
-4. A confirmation message shows the profile name and type (e.g. `Imported "Bambu Lab P1S 0.4 nozzle" · machine profile · 42 settings`)
-5. You can still manually adjust individual settings after importing, and those adjustments outrank the file
+1. OrcaWeb reads every selected JSON and validates it before changing state
+2. Recognised fields are exposed in the UI; remaining OrcaSlicer fields are collected and forwarded verbatim to the WASM slicer when their vector shape is complete
+3. The extracted settings become one **imported** layer — above the preset selection, below your own edits
+4. A confirmation message shows either the profile name/type or the number and types of files in the set
+5. You can still manually adjust individual settings after importing, and those adjustments outrank the file/set
 
-Importing a second profile replaces the first one's layer. It does not touch settings you edited by hand.
+Importing another profile or set replaces the previous imported layer atomically. A malformed file or an ambiguous duplicate category leaves the previous import untouched. It does not touch settings you edited by hand.
 
 !!! tip "Machine profiles"
     Import a machine profile JSON from your OrcaSlicer installation (`%APPDATA%\OrcaSlicer\user\default\machine\` on Windows) to transfer the full printer configuration — G-code dialect, retraction, Z-hop, start/end G-code scripts, and kinematics limits — to the browser slicer.
+
+## Complete local profile sets
+
+OrcaSlicer stores a real selection as separate JSON files. The **Import profiles
+(.json)** picker accepts several files in one operation:
+
+- at most one `machine`, `process`, or `print` file;
+- one `filament` file per material slot;
+- duplicate machine/process/print categories are rejected before any state changes;
+- known materials use the preset order (PLA, PETG, ABS, TPU), so slot order does not depend on the order returned by the operating system;
+- a missing `filament_type` is inferred from the filament name or its `inherits` value, which is common in leaf profiles.
+
+The importer preserves multi-value arrays such as `nozzle_diameter`,
+`filament_type`, temperatures, filament IDs, and filament-specific G-code. On a
+machine profile with two nozzle diameters, the first two material slots are
+mapped to physical extruders 1 and 2. The app does not connect to or upload to
+the printer; the result is downloaded as G-code from the Slice tab.
+
+Because a complete set carries vectors for a fixed material list, changing that
+list (adding/removing a slot or choosing another material) removes the imported
+set atomically before the new selection is used. This prevents a custom flow,
+pressure-advance value, or filament G-code hook from being applied to a
+different material; import the set again after making such a change.
+
+### Example Voron backup
+
+For a dual-nozzle Voron backup, select the machine, process, and filament files
+together. The directory name below is only an example; replace `sample-user`
+with the directory name in your own backup:
+
+```text
+orcaslicer/user/sample-user/machine/Voron 0.4.json
+orcaslicer/user/sample-user/process/0.20mm Tuned.json
+orcaslicer/user/sample-user/filament/Voron PLA.json
+orcaslicer/user/sample-user/filament/Voron PETG.json
+```
+
+The `default/machine/Voron 2.4 350 0.4 nozzle - Copy.json` file is an
+alternative machine profile, not an additional layer; selecting both machine
+files is intentionally rejected as ambiguous. `hints.cereal` is not a profile
+JSON and should not be selected.
+
+The backup's leaf profiles use `inherits`. OrcaWeb does not fetch private parent
+profiles or require GitHub credentials: values present in the selected leaf
+files are preserved, while omitted values continue to come from the selected
+built-in preset/engine defaults. For a production print, check the resulting
+printer dimensions, nozzle diameter, temperatures, start/end G-code, and
+extruder assignment against the same selection in desktop OrcaSlicer before
+starting the first job.
+
+For a partially specified per-filament option, the importer uses the pinned
+OrcaSlicer engine default (or the selected built-in material default where one
+exists). An unknown option that is present in only some filament leaves is
+omitted rather than copied to another material; this is safer than producing a
+short vector with the wrong slot mapping.
 
 ## Built-in presets
 

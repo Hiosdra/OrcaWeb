@@ -151,7 +151,7 @@ const BASE_CONFIG = {
   printable_height: 250,
   nozzle_diameter: 0.4,
   layer_height: 0.2,
-  initial_layer_height: 0.2,
+  initial_layer_print_height: 0.2,
   wall_loops: 2,
   top_shell_layers: 3,
   bottom_shell_layers: 3,

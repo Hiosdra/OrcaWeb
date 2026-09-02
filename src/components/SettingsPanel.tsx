@@ -3,12 +3,15 @@ import { strToU8, zipSync } from 'fflate'
 import { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { type ConfigField, overriddenFields } from '../lib/config-layers'
 import { downloadBlob } from '../lib/download'
+import type { ImportedProfileFile, ImportedProfileType } from '../lib/profiles'
 import {
   DISPLAY_DEFAULTS,
   describeExportCompatibility,
   exportOrcaProfileBundle,
   FILAMENT_PRESETS,
+  inferImportedProfileType,
   MAX_FILAMENT_SLOTS,
+  mergeImportedProfileFiles,
   PRESETS,
   PRIME_TOWER_DEFAULT_ENABLED,
   PRINTER_PRESETS,
@@ -85,6 +88,7 @@ function useOverride(field?: ConfigField) {
 // section.
 const BASIC_SETTING_FIELDS: ConfigField[] = [
   'nozzle_diameter',
+  'printable_height',
   'nozzle_temperature',
   'bed_temperature',
   'layer_height',
@@ -158,8 +162,9 @@ interface Props {
   onRevertAll: () => void
   onProfileImport: (profile: {
     name: string
-    type: 'machine' | 'filament' | 'process' | 'print'
+    type: ImportedProfileType | 'set'
     settings: Partial<OrcaConfig>
+    sourceNames?: string[]
   }) => void
   activeImport: { name: string; type: string; settingCount: number } | null
   onRemoveImport: () => void
@@ -213,6 +218,28 @@ export function SettingsPanel({
   const densityId = useId()
   const adaptiveQualityId = useId()
   const [savingPresetName, setSavingPresetName] = useState<string | null>(null)
+  const importRequestRef = useRef(0)
+  const noticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function showNotice(value: { ok: boolean; text: string }, durationMs: number) {
+    if (noticeTimeoutRef.current !== null) clearTimeout(noticeTimeoutRef.current)
+    setNotice(value)
+    noticeTimeoutRef.current = setTimeout(() => {
+      noticeTimeoutRef.current = null
+      setNotice(null)
+    }, durationMs)
+  }
+
+  useEffect(
+    () => () => {
+      // File.text() is asynchronous and the panel unmounts when the operator
+      // changes tabs. Invalidate a read before it can call setState on an
+      // unmounted panel.
+      importRequestRef.current += 1
+      if (noticeTimeoutRef.current !== null) clearTimeout(noticeTimeoutRef.current)
+    },
+    [],
+  )
 
   const overriddenKeys = overriddenFields(overrides)
   const overrideContext = useMemo(
@@ -252,37 +279,70 @@ export function SettingsPanel({
   }
   const hiddenOverrideKeys = overriddenKeys.filter((field) => !visibleOverrideFields.has(field))
 
-  function handleProfileFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+  async function handleProfileFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0) return
     e.target.value = ''
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      try {
-        const json = ev.target?.result as string
-        const parsed = JSON.parse(json) as Record<string, unknown> | null
-        const patch = parseOrcaProfileJson(json)
-        const { _passthrough, ...knownFields } = patch
-        const knownCount = Object.keys(knownFields).length
-        const passthroughCount = _passthrough ? Object.keys(_passthrough).length : 0
-        const total = knownCount + passthroughCount
-        if (total === 0) {
-          setNotice({ ok: false, text: 'No recognised settings found in this JSON.' })
-        } else {
-          const rawType = parsed?.type
-          const profileType =
-            rawType === 'machine' || rawType === 'filament' || rawType === 'process' ? rawType : 'print'
-          const profileName = typeof parsed?.name === 'string' ? parsed.name : null
-          const label = profileName ? `"${profileName}"` : `"${file.name}"`
-          onProfileImport({ name: profileName ?? file.name, type: profileType, settings: patch })
-          setNotice({ ok: true, text: `Imported ${label} · ${profileType} profile · ${total} settings` })
-        }
-      } catch {
-        setNotice({ ok: false, text: 'Invalid JSON file.' })
-      }
-      setTimeout(() => setNotice(null), 4000)
+    const request = ++importRequestRef.current
+
+    try {
+      const parsedProfiles: ImportedProfileFile[] = await Promise.all(
+        files.map(async (file): Promise<ImportedProfileFile> => {
+          const json = await file.text()
+          const parsed = JSON.parse(json) as Record<string, unknown> | null
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error(`Invalid JSON file: ${file.name}`)
+          }
+          const patch = parseOrcaProfileJson(json)
+          const { _passthrough, ...knownFields } = patch
+          const total = Object.keys(knownFields).length + Object.keys(_passthrough ?? {}).length
+          if (total === 0) throw new Error(`No recognised settings found in ${file.name}.`)
+          const name = typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name : file.name
+          const inherits = typeof parsed.inherits === 'string' ? parsed.inherits : undefined
+          const rawType = parsed.type
+          const type: ImportedProfileType =
+            rawType === 'machine' || rawType === 'filament' || rawType === 'process' || rawType === 'print'
+              ? rawType
+              : inferImportedProfileType({ name, settings: patch, inherits })
+          return {
+            name,
+            type,
+            settings: patch,
+            inherits,
+          }
+        }),
+      )
+      if (request !== importRequestRef.current) return
+
+      const merged = mergeImportedProfileFiles(parsedProfiles)
+      const type = parsedProfiles.length > 1 ? 'set' : parsedProfiles[0].type
+      const counts = parsedProfiles.reduce<Record<string, number>>((acc, profile) => {
+        acc[profile.type] = (acc[profile.type] ?? 0) + 1
+        return acc
+      }, {})
+      const summary = Object.entries(counts)
+        .map(([profileType, count]) => `${count} ${profileType}`)
+        .join(', ')
+      onProfileImport({
+        name: merged.name,
+        type,
+        settings: merged.settings,
+        sourceNames: merged.sourceNames,
+      })
+      showNotice(
+        {
+          ok: true,
+          text:
+            parsedProfiles.length > 1
+              ? `Imported profile set · ${parsedProfiles.length} files (${summary})`
+              : `Imported "${merged.name}" · ${parsedProfiles[0].type} profile`,
+        },
+        4000,
+      )
+    } catch (error) {
+      if (request !== importRequestRef.current) return
+      showNotice({ ok: false, text: error instanceof Error ? error.message : 'Invalid JSON file.' }, 4000)
     }
-    reader.readAsText(file)
   }
 
   // Real OrcaSlicer presets are separate files (print/filament/printer) — a
@@ -300,12 +360,12 @@ export function SettingsPanel({
     // OrcaSlicer will actually accept the result (see
     // describeExportCompatibility).
     const problem = describeExportCompatibility(config)
-    setNotice(
+    showNotice(
       problem
         ? { ok: false, text: problem }
         : { ok: true, text: `Exported ${files.length} preset files as orcaweb-settings.zip` },
+      problem ? 12000 : 4000,
     )
-    setTimeout(() => setNotice(null), problem ? 12000 : 4000)
   }
 
   function handleConfirmSavePreset() {
@@ -435,6 +495,7 @@ export function SettingsPanel({
             data-testid="profile-file-input"
             type="file"
             accept=".json"
+            multiple
             className="hidden"
             onChange={handleProfileFile}
           />
@@ -445,7 +506,7 @@ export function SettingsPanel({
               className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl border-2 border-dashed border-slate-200 text-sm text-slate-500 hover:border-orca-400 hover:text-orca-600 hover:bg-orca-50 transition-all"
             >
               <UploadIcon className="w-4 h-4" />
-              Import (.json)
+              Import profiles (.json)
             </button>
             <button
               type="button"
@@ -458,6 +519,9 @@ export function SettingsPanel({
               Export (.zip)
             </button>
           </div>
+          <p className="mt-1.5 text-xs text-slate-400">
+            Select one machine/process file and one filament file per slot.
+          </p>
           {notice && (
             <p
               data-testid="settings-notice"
@@ -472,7 +536,8 @@ export function SettingsPanel({
         {activeImport && (
           <div className="flex items-center justify-between gap-2 rounded-xl border border-orca-200 bg-orca-50 px-3 py-2 text-xs text-orca-700">
             <span className="min-w-0 truncate font-medium">
-              Profile: {activeImport.name} · {activeImport.type} · {activeImport.settingCount} settings
+              Profile: {activeImport.name} · {activeImport.type === 'set' ? 'profile set' : activeImport.type} ·{' '}
+              {activeImport.settingCount} settings
             </span>
             <button
               type="button"
@@ -509,6 +574,18 @@ export function SettingsPanel({
               onChange={(v) => onChange({ nozzle_diameter: v })}
             />
           </div>
+          <div className="mt-3">
+            <NumberField
+              label="Max print height"
+              field="printable_height"
+              unit="mm"
+              value={config.printable_height ?? DISPLAY_DEFAULTS.printable_height}
+              min={1}
+              max={1000}
+              step={1}
+              onChange={(v) => onChange({ printable_height: v })}
+            />
+          </div>
         </Section>
 
         {/* Filament */}
@@ -526,7 +603,8 @@ export function SettingsPanel({
             // import's declared material, so a pick would silently snap back and
             // read as broken. Lock the labelled slots for that case and point at
             // the Remove-import control instead. See #161.
-            const importLocked = Boolean(importedLabel) && activeImport?.type === 'print'
+            const importLocked =
+              Boolean(importedLabel) && (activeImport?.type === 'print' || activeImport?.type === 'set')
             return (
               // Slots are a positional list — index IS the identity, and the
               // engine indexes its per-filament arrays the same way.
@@ -563,11 +641,12 @@ export function SettingsPanel({
               </div>
             )
           })}
-          {activeImport?.type === 'print' && importedFilamentLabels?.some(Boolean) && (
-            <p data-testid="filament-import-locked-hint" className="mb-2 text-xs text-slate-400">
-              Material is set by the imported {activeImport.name}. Remove the import (× above) to choose a preset.
-            </p>
-          )}
+          {(activeImport?.type === 'print' || activeImport?.type === 'set') &&
+            importedFilamentLabels?.some(Boolean) && (
+              <p data-testid="filament-import-locked-hint" className="mb-2 text-xs text-slate-400">
+                Material is set by the imported {activeImport.name}. Remove the import (× above) to choose a preset.
+              </p>
+            )}
           {selectedFilaments.length < MAX_FILAMENT_SLOTS && (
             <button
               type="button"
