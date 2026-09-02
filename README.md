@@ -14,7 +14,8 @@ headers required by `SharedArrayBuffer` — see below.
 - Full OrcaSlicer engine (WASM) — same slicing quality as the desktop app
 - 3D model preview + G-code layer visualiser side-by-side
 - Import STL, 3MF, OBJ, and STEP files — OBJ and STEP are converted to STL by native OrcaSlicer/OCCT code compiled into the WASM engine, no extra downloads
-- Import OrcaSlicer profiles (.json) from your desktop installation
+- Import one or more OrcaSlicer profiles (.json), including a machine/process
+  set with one filament profile per material slot
 - Built-in presets: Bambu Lab P1S/X1C, Prusa MK4, Ender 3, Voron 2.4
 
 ## Quick start (local dev)

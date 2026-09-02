@@ -20,7 +20,7 @@ When you load a `.3mf` file, OrcaWeb automatically:
 
 1. Extracts the mesh geometry and converts it to binary STL for the slicer
 2. Reads any OrcaSlicer profile metadata bundled inside the archive (`Metadata/*.json` / `.config`)
-3. Merges the embedded settings — printer model, nozzle diameter, bed size, filament temperatures, process parameters — on top of your current overrides, and shows a notice telling you how many settings were applied
+3. Merges the embedded settings — printer model, nozzle diameter, bed size, filament temperatures, process parameters — into the imported layer below your manual overrides, and shows a notice telling you how many settings were applied
 
 If the 3MF contains a machine profile with a `printable_area` field the bed visualisation updates to match.
 
@@ -39,6 +39,14 @@ When you load a `.step` or `.stp` file, OrcaWeb uses Open CASCADE Technology (OC
 - No extra download — OCCT is part of `slicer.wasm`
 - Conversion runs in the slicer Web Worker alongside OBJ and STL processing
 - IGES (`.iges`/`.igs`) is **not** supported — OrcaSlicer's STEP reader (`STEPCAFControl_Reader`) does not read IGES
+
+#### Universal desk cable holder
+
+The [Universal Desk Cable Holder](https://www.printables.com/model/1728813-universal-desk-cable-holder)
+is distributed as separate **BASE** and **SCREW** parts. Download the STL files
+from Printables to your computer, then select the part(s) in OrcaWeb; the app
+does not fetch a model directly from a URL. The model instructions state that
+support is needed only for BASE, which is printed face down.
 
 ### Settings tab
 
@@ -61,7 +69,10 @@ You can also load a 3MF file from OrcaSlicer to pull in the exact bed dimensions
 
 #### Filament
 
-Select the material type; nozzle and bed temperatures update automatically.
+Select the material type; nozzle and bed temperatures update automatically. Use
+**+ Add filament slot** for a multi-material print, then assign each model to a
+slot on the Slice tab. When a profile set supplies filament JSON files, the
+imported slot labels and per-slot engine vectors are retained together.
 
 | Material | Nozzle | Bed |
 |----------|--------|-----|
@@ -120,9 +131,31 @@ Those edits are the highest-priority layer: they **stay put when you switch prin
 
 The full order — preset, then imported file, then your edits — is described under [Settings precedence](profiles.md#settings-precedence).
 
-#### Importing an OrcaSlicer profile
+#### Importing an OrcaSlicer profile set
 
-Click **Import OrcaSlicer profile (.json)** to load settings from any desktop OrcaSlicer profile file. The app shows how many settings were imported and applies them on top of the current preset — but below anything you edited by hand.
+Click **Import profiles (.json)** and select the files that make up the desktop
+selection. For the two-nozzle Voron path, select one machine file, one process
+file, and both filament files in one operation. The app shows a `profile set`
+notice and applies the files on top of the current preset — but below anything
+you edited by hand. The selection is rejected without changing the active
+configuration if it contains duplicate machine/process/print categories or an
+invalid JSON file.
+
+The app does not resolve private `inherits` parents over the network. Leaf
+values and multi-slot vectors are preserved; omitted inherited values remain
+from the selected built-in preset or engine defaults. Verify the imported
+dimensions, temperatures, start G-code, and slot mapping before the first
+production print.
+
+Changing the printer removes a complete imported machine/profile-set/3MF
+context before the new printer is applied; this keeps the printer selector and
+the machine/nozzle vectors in agreement. Standalone filament or process
+imports remain active when the printer changes.
+
+The imported set describes a fixed list of materials. Adding/removing a slot or
+choosing another material clears that set before applying the new list, so its
+custom per-filament values cannot leak onto a different material. Re-import the
+four files if you need the original set again.
 
 Alternatively, load a **3MF file** — profiles embedded in the archive are extracted automatically (see [Model tab](#model-tab) above).
 
@@ -154,6 +187,9 @@ every finished G-code into a single ZIP archive.
     If you change any setting after a file was sliced, its result is marked
     **"Sliced with previous settings"** and the Slice button turns into
     **Re-slice** — the previous G-code stays downloadable until you re-slice.
+
+OrcaWeb's scope ends at the downloaded G-code file. Uploading or sending it to
+the Voron/Moonraker workflow is a separate step outside this application.
 
 #### G-code viewer
 

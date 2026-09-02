@@ -282,7 +282,7 @@ const BASE_PROFILE = {
   printable_height: 250,
   nozzle_diameter: 0.4,
   layer_height: 0.2,
-  initial_layer_height: 0.2,
+  initial_layer_print_height: 0.2,
   wall_loops: 2,
   top_shell_layers: 3,
   bottom_shell_layers: 3,
@@ -338,7 +338,7 @@ const CORPUS = [
     profile: {
       ...BASE_PROFILE,
       layer_height: 0.12,
-      initial_layer_height: 0.12,
+      initial_layer_print_height: 0.12,
       wall_loops: 3,
       top_shell_layers: 5,
       bottom_shell_layers: 5,
