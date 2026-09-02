@@ -84,14 +84,16 @@ The folder contains three subdirectories: `machine/`, `filament/`, and `process/
 dual-nozzle setup, select both filament files together; OrcaWeb keeps known
 material slots deterministic and maps them to the imported nozzle vector.
 
-For the Voron backup used by the production walkthrough, select:
+For a dual-nozzle Voron backup, for example, select:
 
 ```text
-orcaslicer/user/1945486786/machine/Voron 0.4.json
-orcaslicer/user/1945486786/process/0.20mm Tuned.json
-orcaslicer/user/1945486786/filament/Voron PLA.json
-orcaslicer/user/1945486786/filament/Voron PETG.json
+orcaslicer/user/sample-user/machine/Voron 0.4.json
+orcaslicer/user/sample-user/process/0.20mm Tuned.json
+orcaslicer/user/sample-user/filament/Voron PLA.json
+orcaslicer/user/sample-user/filament/Voron PETG.json
 ```
+
+Replace `sample-user` with the directory name in your own backup.
 
 The app only reads files selected locally. It does not authenticate to GitHub
 or download profiles from a private repository.

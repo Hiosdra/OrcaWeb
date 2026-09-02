@@ -152,15 +152,17 @@ set atomically before the new selection is used. This prevents a custom flow,
 pressure-advance value, or filament G-code hook from being applied to a
 different material; import the set again after making such a change.
 
-### Hiosdra Voron backup
+### Example Voron backup
 
-For the private backup linked in the app, select these four files together:
+For a dual-nozzle Voron backup, select the machine, process, and filament files
+together. The directory name below is only an example; replace `sample-user`
+with the directory name in your own backup:
 
 ```text
-orcaslicer/user/1945486786/machine/Voron 0.4.json
-orcaslicer/user/1945486786/process/0.20mm Tuned.json
-orcaslicer/user/1945486786/filament/Voron PLA.json
-orcaslicer/user/1945486786/filament/Voron PETG.json
+orcaslicer/user/sample-user/machine/Voron 0.4.json
+orcaslicer/user/sample-user/process/0.20mm Tuned.json
+orcaslicer/user/sample-user/filament/Voron PLA.json
+orcaslicer/user/sample-user/filament/Voron PETG.json
 ```
 
 The `default/machine/Voron 2.4 350 0.4 nozzle - Copy.json` file is an
