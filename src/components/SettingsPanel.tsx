@@ -520,15 +520,7 @@ export function SettingsPanel({
             </button>
           </div>
           <p className="mt-1.5 text-xs text-slate-400">
-            Select one machine/process file and one filament file per slot.{' '}
-            <a
-              href="https://github.com/Hiosdra/configs/tree/master/orcaslicer/user"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline hover:text-slate-600"
-            >
-              Open profile backup
-            </a>
+            Select one machine/process file and one filament file per slot.
           </p>
           {notice && (
             <p
