@@ -288,7 +288,11 @@ static char* read_file_to_buffer(const char* path, long* out_len, const char** o
 static std::string json_val_to_string(const nlohmann::json& v) {
     if (v.is_string())  return v.get<std::string>();
     if (v.is_boolean()) return v.get<bool>() ? "1" : "0";
-    if (v.is_number())  return std::to_string(v.get<double>());
+    // Keep the JSON number's full representation. std::to_string(double)
+    // prints only six digits after the decimal point, which silently changes
+    // otherwise valid profile values such as a fine layer height or flow
+    // ratio before OrcaSlicer sees them.
+    if (v.is_number())  return v.dump();
     return "";
 }
 
@@ -353,17 +357,16 @@ static std::string json_array_to_config_string(const std::string& key, const nlo
     return out;
 }
 
-// ModelObject::center_around_origin() centers the raw mesh bounding box on
-// *all three* axes, including Z — it's meant to be called with an existing
-// instance that absorbs the shift (see its desktop usage), which then
-// re-lands the object on the bed. This bridge calls it before any instance
-// exists, so nothing compensates for the Z shift: the mesh's own vertical
-// midpoint (not its bottom) ends up at bed level, and the object floats
-// half above / half below Z=0. Desktop Orca's bed-centering only recenters
-// X/Y and leaves Z exactly as authored in the source mesh — do the same here.
+// Center a newly uploaded mesh like desktop OrcaSlicer: centre X/Y on the
+// selected bed and drop the lowest point onto Z=0. STL files from model sites
+// are not required to be bed-aligned; leaving a negative raw Z here silently
+// clips the lower part of the model and makes the resulting layer count differ
+// from desktop OrcaSlicer. The instance is created after this translation, so
+// the volume transform itself must carry the Z correction.
 static void center_object_xy_only(Slic3r::ModelObject* obj) {
-    Slic3r::Vec3d shift = -obj->raw_mesh_bounding_box().center();
-    shift.z() = 0.0;
+    const Slic3r::BoundingBoxf3 bbox = obj->raw_mesh_bounding_box();
+    Slic3r::Vec3d shift = -bbox.center();
+    shift.z() = -bbox.min.z();
     obj->translate(shift);
     obj->origin_translation += shift;
 }
@@ -1347,10 +1350,12 @@ int orc_write_3mf(void* session_ptr, const void* stl_data, int stl_len,
  *     ModelObject::mesh() (so position/rotation/scale in the file survive),
  *     merged into one. Byte length in *out_stl_len.
  *   *out_config_json points to a malloc'd, null-terminated JSON object
- *     string of every config key the file's Metadata/*.config had *set*
- *     (same string-valued shape OrcaSlicer's own .config files use — the JS
- *     side re-parses it with the existing parseOrcaProfileJson(), the same
- *     parser already used for imported profile JSON). Byte length in
+ *     string of every config key the file's Metadata/<name>.config had *set*
+ *     (scalar values use the same string-valued shape OrcaSlicer's own
+ *     .config files use; vector values stay arrays so the JS side can retain
+ *     slot/nozzle boundaries before re-parsing it with the existing
+ *     parseOrcaProfileJson(), the same parser already used for imported
+ *     profile JSON). Byte length in
  *     *out_config_len (excludes the trailing NUL, matching orc_slice's
  *     gcode convention; JSON text itself never contains an embedded NUL).
  * Caller must free both buffers with orc_free().
@@ -1452,13 +1457,27 @@ int orc_read_3mf(const void* mf_data, int mf_len,
         std::unique_ptr<char, decltype(&std::free)> stl_owner(stl_buf, &std::free);
         int stl_len = static_cast<int>(stl_sz);
 
-        // Serialize every config key the file actually had set — matches
-        // OrcaSlicer's own flat .config shape (string values), which
-        // parseOrcaProfileJson() on the JS side already knows how to read.
+        // Serialize every config key the file actually had set. Scalar values
+        // match OrcaSlicer's flat .config shape (string values), while vector
+        // options deliberately use vserialize() and remain JSON arrays. A
+        // plain ConfigOption::serialize() joins vectors into one string
+        // ("PLA;PETG", "220,255", ...), which loses the slot/nozzle
+        // boundaries when parseOrcaProfileJson() imports this 3MF result.
         nlohmann::json j = nlohmann::json::object();
         for (const auto& key : config.keys()) {
             const Slic3r::ConfigOption* opt = config.option(key);
-            if (opt) j[key] = opt->serialize();
+            if (!opt) continue;
+            // The loaded config object is authoritative here. Looking the key
+            // up again in print_config_def would make a future/foreign 3MF
+            // option lose its vector shape merely because this pinned bridge
+            // does not know its definition (and would make the cast below
+            // depend on two independently obtained type values).
+            if (opt->is_vector()) {
+                const auto* vector_opt = static_cast<const Slic3r::ConfigOptionVectorBase*>(opt);
+                j[key] = vector_opt->vserialize();
+            } else {
+                j[key] = opt->serialize();
+            }
         }
         std::string json_str = j.dump();
 
