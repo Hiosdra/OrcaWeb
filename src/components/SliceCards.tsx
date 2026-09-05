@@ -206,6 +206,10 @@ export function QueueItemCard({
   // Stable array reference so ModelViewer's effect doesn't recreate the
   // WebGL scene on every unrelated re-render while the card is expanded.
   const previewFiles = useMemo(() => (item.stlFile ? [item.stlFile] : []), [item.stlFile])
+  const previewModels = useMemo(
+    () => (item.stlFile ? [{ id: item.id, file: item.stlFile, transform: item.transform }] : []),
+    [item.id, item.stlFile, item.transform],
+  )
 
   const handleExport3mf = async () => {
     setExporting3mf(true)
@@ -376,7 +380,13 @@ export function QueueItemCard({
               <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Model</div>
               <div style={{ height: 270 }}>
                 <ViewerErrorBoundary key={item.id} message="3D preview unavailable">
-                  <ModelViewer files={previewFiles} bedX={bedX} bedY={bedY} bedShape={bedShape} />
+                  <ModelViewer
+                    files={previewFiles}
+                    models={previewModels}
+                    bedX={bedX}
+                    bedY={bedY}
+                    bedShape={bedShape}
+                  />
                 </ViewerErrorBoundary>
               </div>
             </div>

@@ -115,6 +115,23 @@ export function buildPlateExtruderIds(items: Pick<QueueItem, 'extruderId'>[]): n
   return ids.some((id) => id > 0) ? ids : undefined
 }
 
+/**
+ * Build the transform table for a new current-plate action.
+ *
+ * A finite offset returned by `arrange` is useful while slicing the already
+ * arranged plate, but it is not a user lock. Sending it back as a pinned
+ * exclusion would make the next `arrange` a no-op. The UI has no manual
+ * placement control yet, so every stored offset is engine-owned and must be
+ * released before another action gets a chance to arrange the plate again.
+ */
+export function buildPlateActionTransforms(items: Pick<QueueItem, 'transform'>[]): ObjectTransform[] | undefined {
+  if (!items.some((item) => item.transform !== undefined)) return undefined
+  return items.map((item) => {
+    const transform = item.transform ?? identityObjectTransform()
+    return { ...transform, offset: null }
+  })
+}
+
 function isSliceablePlateItem(item: QueueItem): item is QueueItem & { stlFile: File } {
   return (item.status === 'ready' || (item.status === 'done' && item.stale === true)) && item.stlFile != null
 }
@@ -333,11 +350,19 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
           // Still in range, but renumbered onto a different material.
           (shrank && slots[id - 1] !== previous[id - 1]))
       const dropStaleSlot = (i: QueueItem): QueueItem => (staleSlot(i.extruderId) ? { ...i, extruderId: undefined } : i)
+      const releaseEnginePlacement = (i: QueueItem): QueueItem =>
+        i.transform ? { ...i, transform: { ...i.transform, offset: null } } : i
       return {
         ...state,
         configEpoch: action.epoch,
         slotLabels: slots,
-        items: state.items.map((i) => dropStaleSlot(i.status === 'done' ? { ...i, stale: true } : i)),
+        // Bed dimensions and printable shape are part of the config. A
+        // placement produced for the old bed must not remain pinned when the
+        // next slice uses the new one; keep orientation/scale, but let the
+        // engine arrange the object again.
+        items: state.items.map((i) =>
+          releaseEnginePlacement(dropStaleSlot(i.status === 'done' ? { ...i, stale: true } : i)),
+        ),
         plate: state.plate.gcode ? { ...state.plate, stale: true } : state.plate,
       }
     }
@@ -934,10 +959,7 @@ export function useSliceQueue(
 
       const requestId = crypto.randomUUID()
       const configSnapshot = configSnapshotRef.current
-      const hasExistingTransforms = targetItems.some((item) => item.transform !== undefined)
-      const transforms = hasExistingTransforms
-        ? targetItems.map((item) => item.transform ?? identityObjectTransform())
-        : undefined
+      const transforms = buildPlateActionTransforms(targetItems)
       const requestGeneration = sliceRequestGeneration.current
 
       plateActionRef.current = requestId
