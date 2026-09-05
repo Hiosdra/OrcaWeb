@@ -1,16 +1,26 @@
 import { logError, logInfo, logWarn } from '../lib/log'
+import { encodeTransformTable, parseObjectTransforms } from '../lib/model-transforms'
 import { flattenSliceConfig } from '../lib/profiles'
 import {
   cadToStl,
   humanizeSliceError,
   OrcaSliceError,
   objToStl,
+  preparePlate,
   read3mf,
   sliceMultiStl,
   sliceStl,
   write3mf,
 } from '../lib/wasm-loader'
-import type { OrcaConfig, OrcaModule, OrcaModuleFactory, WorkerInMessage, WorkerOutMessage } from '../types'
+import type {
+  ObjectTransform,
+  OrcaConfig,
+  OrcaModule,
+  OrcaModuleFactory,
+  PlateAction,
+  WorkerInMessage,
+  WorkerOutMessage,
+} from '../types'
 
 // A genuinely stalled connection (TCP connected but the server/proxy never
 // answers — as opposed to a slow-but-progressing download) previously left
@@ -53,8 +63,21 @@ let loadingWasm = false
 let wasmCrashed = false
 // Slice request that arrived before WASM was ready — last-wins (UI disables
 // the Slice button while loading, so only one request can queue in practice)
-let pendingSlice: { stl: ArrayBuffer; config: OrcaConfig; extruderId?: number } | null = null
-let pendingPlate: { stls: ArrayBuffer[]; config: OrcaConfig; extruderIds?: number[] } | null = null
+let pendingSlice: { stl: ArrayBuffer; config: OrcaConfig; extruderId?: number; transform?: ObjectTransform } | null =
+  null
+let pendingPlate: {
+  stls: ArrayBuffer[]
+  config: OrcaConfig
+  extruderIds?: number[]
+  transforms?: ObjectTransform[]
+} | null = null
+let pendingPlatePreparation: {
+  stls: ArrayBuffer[]
+  config: OrcaConfig
+  operation: PlateAction
+  transforms?: ObjectTransform[]
+  requestId: string
+} | null = null
 const pendingObjConvertQueue: { obj: ArrayBuffer; requestId: string }[] = []
 const pendingCadConvertQueue: { cad: ArrayBuffer; requestId: string }[] = []
 const pendingWrite3mfQueue: { stl: ArrayBuffer; config: OrcaConfig; requestId: string }[] = []
@@ -79,6 +102,9 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
         break
       case 'SLICE_MULTI':
         send({ type: 'SLICE_MULTI_ERROR', code: -9, message: crashMsg })
+        break
+      case 'PREPARE_PLATE':
+        send({ type: 'PLATE_TRANSFORMS_ERROR', code: -9, message: crashMsg, requestId: msg.requestId })
         break
       case 'OBJ_TO_STL':
         send({ type: 'OBJ_STL_ERROR', message: crashMsg, requestId: msg.requestId })
@@ -345,14 +371,19 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       }
       pendingRead3mfQueue.length = 0
       if (pendingSlice) {
-        const { stl, config, extruderId } = pendingSlice
+        const { stl, config, extruderId, transform } = pendingSlice
         pendingSlice = null
-        doSlice(stl, config, extruderId)
+        doSlice(stl, config, extruderId, transform)
       }
       if (pendingPlate) {
-        const { stls, config, extruderIds } = pendingPlate
+        const { stls, config, extruderIds, transforms } = pendingPlate
         pendingPlate = null
-        doSliceMulti(stls, config, extruderIds)
+        doSliceMulti(stls, config, extruderIds, transforms)
+      }
+      if (pendingPlatePreparation) {
+        const { stls, config, operation, transforms, requestId } = pendingPlatePreparation
+        pendingPlatePreparation = null
+        doPreparePlate(stls, config, operation, transforms, requestId)
       }
     } catch (err) {
       loadingWasm = false
@@ -371,17 +402,30 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
   switch (msg.type) {
     case 'SLICE':
       if (!orcaModule) {
-        pendingSlice = { stl: msg.stl, config: msg.config, extruderId: msg.extruderId }
+        pendingSlice = { stl: msg.stl, config: msg.config, extruderId: msg.extruderId, transform: msg.transform }
         return
       }
-      doSlice(msg.stl, msg.config, msg.extruderId)
+      doSlice(msg.stl, msg.config, msg.extruderId, msg.transform)
       return
     case 'SLICE_MULTI':
       if (!orcaModule) {
-        pendingPlate = { stls: msg.stls, config: msg.config, extruderIds: msg.extruderIds }
+        pendingPlate = { stls: msg.stls, config: msg.config, extruderIds: msg.extruderIds, transforms: msg.transforms }
         return
       }
-      doSliceMulti(msg.stls, msg.config, msg.extruderIds)
+      doSliceMulti(msg.stls, msg.config, msg.extruderIds, msg.transforms)
+      return
+    case 'PREPARE_PLATE':
+      if (!orcaModule) {
+        pendingPlatePreparation = {
+          stls: msg.stls,
+          config: msg.config,
+          operation: msg.operation,
+          transforms: msg.transforms,
+          requestId: msg.requestId,
+        }
+        return
+      }
+      doPreparePlate(msg.stls, msg.config, msg.operation, msg.transforms, msg.requestId)
       return
     case 'OBJ_TO_STL':
       if (!orcaModule) {
@@ -440,13 +484,14 @@ function doObjToStl(obj: ArrayBuffer, requestId: string) {
   }
 }
 
-function doSliceMulti(stls: ArrayBuffer[], config: OrcaConfig, extruderIds?: number[]) {
+function doSliceMulti(stls: ArrayBuffer[], config: OrcaConfig, extruderIds?: number[], transforms?: ObjectTransform[]) {
   if (!orcaModule) return
   const startedAt = performance.now()
   const totalMB = stls.reduce((sum, s) => sum + s.byteLength, 0) / 1e6
   logInfo(
     `[OrcaWASM] slice-multi start — ${stls.length} STL(s), ${totalMB.toFixed(2)} MB total, ` +
-      `${summarizeConfig(config)}${extruderIds ? `, extruders [${extruderIds.join(',')}]` : ''}`,
+      `${summarizeConfig(config)}${extruderIds ? `, extruders [${extruderIds.join(',')}]` : ''}` +
+      `${transforms ? ', with object transforms' : ''}`,
   )
   try {
     // A plate goes through orc_slice_multi, which clamps the prime tower onto
@@ -466,8 +511,18 @@ function doSliceMulti(stls: ArrayBuffer[], config: OrcaConfig, extruderIds?: num
     }
 
     const extruderIdsArr = extruderIds && extruderIds.length === stls.length ? Int32Array.from(extruderIds) : undefined
+    const transformTable = encodeTransformTable(transforms ?? [])
 
-    const gcode = sliceMultiStl(orcaModule, session, combined, offsets, stls.length, configJson, extruderIdsArr)
+    const gcode = sliceMultiStl(
+      orcaModule,
+      session,
+      combined,
+      offsets,
+      stls.length,
+      configJson,
+      extruderIdsArr,
+      transformTable,
+    )
     logInfo(
       `[OrcaWASM] slice-multi done in ${Math.round(performance.now() - startedAt)}ms ` +
         `— G-code ${(gcode.length / 1e6).toFixed(2)} MB`,
@@ -547,12 +602,12 @@ function doRead3mf(mf: ArrayBuffer, requestId: string) {
   }
 }
 
-function doSlice(stl: ArrayBuffer, config: OrcaConfig, extruderId?: number) {
+function doSlice(stl: ArrayBuffer, config: OrcaConfig, extruderId?: number, transform?: ObjectTransform) {
   if (!orcaModule) return
   const startedAt = performance.now()
   logInfo(
     `[OrcaWASM] slice start — STL ${(stl.byteLength / 1e6).toFixed(2)} MB, ${summarizeConfig(config)}` +
-      `${extruderId ? `, filament slot ${extruderId}` : ''}`,
+      `${extruderId ? `, filament slot ${extruderId}` : ''}${transform ? ', with object transform' : ''}`,
   )
   try {
     // A no-slot single object goes through orc_slice below, which prints the
@@ -577,6 +632,7 @@ function doSlice(stl: ArrayBuffer, config: OrcaConfig, extruderId?: number) {
     // purely because a slot was picked — expected, but it is why re-slicing
     // after an assignment differs by more than the tool changes.
     const bytes = new Uint8Array(stl)
+    const transformTable = transform ? encodeTransformTable([transform]) : undefined
     const gcode = extruderId
       ? sliceMultiStl(
           orcaModule,
@@ -586,8 +642,9 @@ function doSlice(stl: ArrayBuffer, config: OrcaConfig, extruderId?: number) {
           1,
           configJson,
           Int32Array.from([extruderId]),
+          transformTable,
         )
-      : sliceStl(orcaModule, session, bytes, configJson)
+      : sliceStl(orcaModule, session, bytes, configJson, transformTable)
     logInfo(
       `[OrcaWASM] slice done in ${Math.round(performance.now() - startedAt)}ms ` +
         `— G-code ${(gcode.length / 1e6).toFixed(2)} MB`,
@@ -602,5 +659,54 @@ function doSlice(stl: ArrayBuffer, config: OrcaConfig, extruderId?: number) {
       logError(`[OrcaWASM] slice failed after ${ms}ms:`, err)
       send({ type: 'SLICE_ERROR', code: -1, message: String(err) })
     }
+  }
+}
+
+function doPreparePlate(
+  stls: ArrayBuffer[],
+  config: OrcaConfig,
+  operation: PlateAction,
+  transforms: ObjectTransform[] | undefined,
+  requestId: string,
+) {
+  if (!orcaModule) return
+  const startedAt = performance.now()
+  logInfo(`[OrcaWASM] ${operation} current plate start — ${stls.length} STL(s)`)
+  try {
+    if (typeof orcaModule._orc_prepare_plate !== 'function') {
+      throw new Error('The loaded slicer engine does not support current-plate actions. Reload the latest engine.')
+    }
+
+    const totalLen = stls.reduce((sum, stl) => sum + stl.byteLength, 0)
+    const combined = new Uint8Array(totalLen)
+    const offsets = new Int32Array(stls.length * 2)
+    let pos = 0
+    for (let i = 0; i < stls.length; i++) {
+      combined.set(new Uint8Array(stls[i]), pos)
+      offsets[i * 2] = pos
+      offsets[i * 2 + 1] = stls[i].byteLength
+      pos += stls[i].byteLength
+    }
+
+    const configJson = JSON.stringify(flattenSliceConfig(config, true))
+    const transformTable = encodeTransformTable(transforms ?? [])
+    const json = preparePlate(
+      orcaModule,
+      session,
+      combined,
+      offsets,
+      stls.length,
+      configJson,
+      operation,
+      transformTable,
+    )
+    const result = parseObjectTransforms(JSON.parse(json))
+    logInfo(`[OrcaWASM] ${operation} current plate done in ${Math.round(performance.now() - startedAt)}ms`)
+    send({ type: 'PLATE_TRANSFORMS_COMPLETE', transforms: result, requestId })
+  } catch (err) {
+    const message =
+      err instanceof OrcaSliceError ? humanizeSliceError(err.message) : err instanceof Error ? err.message : String(err)
+    logError(`[OrcaWASM] ${operation} current plate failed after ${Math.round(performance.now() - startedAt)}ms:`, err)
+    send({ type: 'PLATE_TRANSFORMS_ERROR', code: err instanceof OrcaSliceError ? err.code : -1, message, requestId })
   }
 }

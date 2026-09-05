@@ -188,6 +188,7 @@ not require an application-level API rewrite. The important calls are:
 | Initialise a session | `_orc_init` |
 | Slice one STL | `_orc_slice` |
 | Arrange and slice multiple STLs | `_orc_slice_multi` |
+| Auto-orient or arrange a current plate | `_orc_prepare_plate` |
 | Convert OBJ or STEP to STL | `_orc_obj_to_stl`, `_orc_cad_to_stl` |
 | Read or write mesh/config 3MF | `_orc_read_3mf`, `_orc_write_3mf` |
 | Read errors and release bridge buffers | `_orc_decode_exception`, `_orc_free` |

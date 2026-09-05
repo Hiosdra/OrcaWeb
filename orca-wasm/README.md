@@ -11,7 +11,8 @@ orca-wasm/
 ├── orca/                  ← git submodule: SoftFever/OrcaSlicer@v2.4.2
 ├── bridge/
 │   ├── slicer.cpp         ← C++ bridge (orc_session_create/destroy, orc_init,
-│   │                          orc_slice, orc_slice_multi, orc_obj_to_stl,
+│   │                          orc_slice, orc_slice_multi, orc_prepare_plate,
+│   │                          orc_obj_to_stl,
 │   │                          orc_cad_to_stl, orc_write_3mf, orc_read_3mf)
 │   └── CMakeLists.txt
 ├── wasm/
@@ -92,16 +93,27 @@ void  _orc_session_destroy(void* session);
 // Initialise the given session with a JSON config (values string-encoded as in OrcaSlicer).
 int _orc_init(void* session, const char* json, int len);   // → 0 success
 
-// Slice an STL file (raw binary bytes) on the given session.
+// Slice an STL file (raw binary bytes) on the given session. The trailing
+// transform pointer is nullable; pass 0 to keep the legacy placement path.
 // *out_gcode is heap-allocated — free with _orc_free().
 int _orc_slice(void* session, const void* stl, int stl_len,
-               char** out_gcode, int* out_len); // → 0 success
+               char** out_gcode, int* out_len,
+               const float* transforms); // → 0 success
 
-// Slice multiple STLs on one auto-arranged plate → single G-code.
+// Slice multiple STLs on one auto-arranged plate → single G-code. The trailing
+// transform pointer is nullable; pass 0 to keep the legacy placement path.
 // extruder_ids may be null (single-extruder callers).
 int _orc_slice_multi(void* session, const void* all_stl, int all_stl_len,
                       const int* offsets, int n_files, const int* extruder_ids,
-                      char** out_gcode, int* out_len); // → 0 success
+                      char** out_gcode, int* out_len,
+                      const float* transforms); // → 0 success
+
+// Prepare the current plate without slicing. operation: 1 = auto-orient,
+// 2 = arrange. Returns a malloc'd JSON array with one transform per STL.
+int _orc_prepare_plate(void* session, const void* all_stl, int all_stl_len,
+                       const int* offsets, int n_files,
+                       const float* transforms, int operation,
+                       char** out_transforms_json, int* out_len); // → 0 success
 
 // Convert an OBJ file to binary STL (no session required).
 int _orc_obj_to_stl(const char* obj, int obj_len,

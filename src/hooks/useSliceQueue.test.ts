@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildPlateExtruderIds, sliceQueueReducer } from './useSliceQueue'
+import { buildPlateActionTransforms, buildPlateExtruderIds, sliceQueueReducer } from './useSliceQueue'
 
 const state = {
   items: [],
@@ -65,6 +65,57 @@ describe('per-object filament-slot assignment', () => {
   it('leaves an empty plate untouched when a slot is reassigned', () => {
     const next = sliceQueueReducer(state, { type: 'ASSIGN_EXTRUDER', id: 'a', extruderId: 2 })
     expect(next.plate).toEqual(state.plate)
+  })
+})
+
+describe('engine-side current-plate transforms', () => {
+  const transform = {
+    scale: [1, 1, 1] as [number, number, number],
+    rotation: [0.1, 0.2, 0.3] as [number, number, number],
+    mirror: [1, -1, 1] as [number, number, number],
+    offset: [10, -5] as [number, number],
+  }
+
+  it('releases engine-arranged offsets before another current-plate action', () => {
+    expect(buildPlateActionTransforms([{ transform }, {}])).toEqual([
+      { ...transform, offset: null },
+      {
+        scale: [1, 1, 1],
+        rotation: [0, 0, 0],
+        mirror: [1, 1, 1],
+        offset: null,
+      },
+    ])
+    expect(buildPlateActionTransforms([{}, {}])).toBeUndefined()
+  })
+
+  it('stores returned transforms and marks existing item and plate G-code stale', () => {
+    const items = [
+      { id: 'a', status: 'done', gcode: 'G1', stale: false },
+      { id: 'b', status: 'ready' },
+    ] as unknown as typeof state.items
+    const next = sliceQueueReducer(
+      { ...state, items, plate: { ...state.plate, gcode: 'G1 X0' } },
+      {
+        type: 'APPLY_TRANSFORMS',
+        updates: [
+          { id: 'a', transform },
+          { id: 'b', transform },
+        ],
+      },
+    )
+    expect(next.items[0]).toMatchObject({ transform, stale: true })
+    expect(next.items[1]).toMatchObject({ transform })
+    expect(next.plate.stale).toBe(true)
+  })
+
+  it('releases old engine placement when the printer config changes', () => {
+    const items = [{ id: 'a', status: 'ready', transform }] as unknown as typeof state.items
+    const next = sliceQueueReducer(
+      { ...state, items, slotLabels: ['PLA'] },
+      { type: 'CONFIG_CHANGED', epoch: 1, slotLabels: ['PLA'] },
+    )
+    expect(next.items[0].transform).toEqual({ ...transform, offset: null })
   })
 })
 

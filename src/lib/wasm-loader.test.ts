@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { OrcaModule } from '../types'
-import { cadToStl, humanizeSliceError, objToStl, read3mf, sliceMultiStl, sliceStl, write3mf } from './wasm-loader'
+import { encodeTransformTable } from './model-transforms'
+import {
+  cadToStl,
+  humanizeSliceError,
+  objToStl,
+  preparePlate,
+  read3mf,
+  sliceMultiStl,
+  sliceStl,
+  write3mf,
+} from './wasm-loader'
 
 function fakeModule(failAt: number) {
   let allocation = 0
@@ -25,6 +35,7 @@ function fakeModule(failAt: number) {
     _orc_init: () => 0,
     _orc_slice: () => 0,
     _orc_slice_multi: () => 0,
+    _orc_prepare_plate: () => 0,
     _orc_obj_to_stl: () => 0,
     _orc_cad_to_stl: () => 0,
     _orc_write_3mf: () => 0,
@@ -43,6 +54,7 @@ const scenarios: [string, number, (module: OrcaModule) => unknown][] = [
     6,
     (m) => sliceMultiStl(m, 1, data, new Int32Array([0, 1]), 1, '{}', new Int32Array([1])),
   ],
+  ['preparePlate', 5, (m) => preparePlate(m, 1, data, new Int32Array([0, 1]), 1, '{}', 'arrange')],
   ['write3mf', 4, (m) => write3mf(m, 1, data, '{}')],
   ['read3mf', 5, (m) => read3mf(m, data)],
   ['cadToStl', 3, (m) => cadToStl(m, data)],
@@ -65,6 +77,49 @@ describe('WASM allocation failures', () => {
     module.getValue = () => 32
     expect(() => sliceMultiStl(module, 1, new Uint8Array(), new Int32Array(), 0, '{}')).not.toThrow()
     expect(freed).toEqual([16, 16, 16])
+  })
+})
+
+describe('WASM transform ABI', () => {
+  it('keeps the transform pointer after the legacy slice output pointers', () => {
+    const { module } = fakeModule(Number.POSITIVE_INFINITY)
+    const calls: unknown[][] = []
+    module._orc_slice = ((...args: unknown[]) => {
+      calls.push(args)
+      return 0
+    }) as unknown as OrcaModule['_orc_slice']
+    const transform = {
+      scale: [2, 1, 0.5] as [number, number, number],
+      rotation: [0.1, 0.2, 0.3] as [number, number, number],
+      mirror: [1, -1, 1] as [number, number, number],
+      offset: [4, -3] as [number, number],
+    }
+    const table = encodeTransformTable([transform])
+    expect(table).toBeDefined()
+    expect(() => sliceStl(module, 1, data, '{}', table)).not.toThrow()
+    expect(calls[0]?.slice(3, 5)).toEqual([48, 64])
+    expect(calls[0]?.[5]).toBe(80)
+  })
+
+  it('marshals the current-plate operation and transform table', () => {
+    const { module } = fakeModule(Number.POSITIVE_INFINITY)
+    const calls: unknown[][] = []
+    module._orc_prepare_plate = ((...args: unknown[]) => {
+      calls.push(args)
+      return 0
+    }) as unknown as OrcaModule['_orc_prepare_plate']
+    const transforms = new Float32Array(11)
+    expect(() => preparePlate(module, 1, data, new Int32Array([0, 1]), 1, '{}', 'arrange', transforms)).not.toThrow()
+    expect(calls[0]?.[4]).toBe(1)
+    expect(calls[0]?.[5]).toBe(64)
+    expect(calls[0]?.[6]).toBe(2)
+  })
+
+  it('rejects a transform table that is not parallel to the input objects', () => {
+    const { module } = fakeModule(Number.POSITIVE_INFINITY)
+    expect(() =>
+      sliceMultiStl(module, 1, data, new Int32Array([0, 1]), 1, '{}', undefined, new Float32Array(1)),
+    ).toThrow(/expected 11/)
   })
 })
 

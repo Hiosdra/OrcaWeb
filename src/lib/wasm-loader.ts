@@ -1,8 +1,9 @@
 // Loading/instantiating the WASM module lives in src/workers/slicer.worker.ts
 // (the only caller) — this file holds the pure call helpers around the
 // orc_* bridge exports plus their error decoding.
-import type { OrcaModule } from '../types'
+import type { OrcaModule, PlateAction } from '../types'
 import { logWarn } from './log'
+import { TRANSFORM_STRIDE } from './model-transforms'
 
 type Allocate = (size: number, label: string) => number
 
@@ -26,6 +27,14 @@ function withAllocations<T>(module: OrcaModule, operation: (allocate: Allocate) 
   }
 }
 
+function validateTransformTable(transforms: Float32Array | undefined, objectCount: number): void {
+  if (transforms && transforms.length !== objectCount * TRANSFORM_STRIDE) {
+    throw new Error(
+      `Object transform table has ${transforms.length} values; expected ${objectCount * TRANSFORM_STRIDE}`,
+    )
+  }
+}
+
 function initSession(module: OrcaModule, session: number, configJson: string): void {
   const configBytes = new TextEncoder().encode(configJson)
   const result = withAllocations(module, (allocate) => {
@@ -36,14 +45,25 @@ function initSession(module: OrcaModule, session: number, configJson: string): v
   if (result !== 0) throw new OrcaSliceError(result, wasmError(module, session, result))
 }
 
-export function sliceStl(module: OrcaModule, session: number, stlData: Uint8Array, configJson: string): string {
+export function sliceStl(
+  module: OrcaModule,
+  session: number,
+  stlData: Uint8Array,
+  configJson: string,
+  transforms?: Float32Array,
+): string {
+  validateTransformTable(transforms, 1)
   initSession(module, session, configJson)
   return withAllocations(module, (allocate) => {
     const stlPtr = allocate(stlData.length, 'STL data')
     module.HEAPU8.set(stlData, stlPtr)
     const outPtrPtr = allocate(4, 'G-code output pointer')
     const outLenPtr = allocate(4, 'G-code output length')
-    const result = module._orc_slice(session, stlPtr, stlData.length, outPtrPtr, outLenPtr)
+    const transformsPtr = transforms?.length ? allocate(transforms.length * 4, 'object transform table') : 0
+    if (transforms) {
+      for (let i = 0; i < transforms.length; i++) module.setValue(transformsPtr + i * 4, transforms[i], 'float')
+    }
+    const result = module._orc_slice(session, stlPtr, stlData.length, outPtrPtr, outLenPtr, transformsPtr)
     if (result !== 0) throw new OrcaSliceError(result, wasmError(module, session, result))
     const gcodePtr = module.getValue(outPtrPtr, 'i32')
     const gcodeLen = module.getValue(outLenPtr, 'i32')
@@ -92,7 +112,9 @@ export function sliceMultiStl(
   nFiles: number,
   configJson: string,
   extruderIds?: Int32Array,
+  transforms?: Float32Array,
 ): string {
+  validateTransformTable(transforms, nFiles)
   initSession(module, session, configJson)
   return withAllocations(module, (allocate) => {
     const dataPtr = allocate(data.length, 'combined STL data')
@@ -107,6 +129,10 @@ export function sliceMultiStl(
 
     const outPtrPtr = allocate(4, 'G-code output pointer')
     const outLenPtr = allocate(4, 'G-code output length')
+    const transformsPtr = transforms?.length ? allocate(transforms.length * 4, 'object transform table') : 0
+    if (transforms) {
+      for (let i = 0; i < transforms.length; i++) module.setValue(transformsPtr + i * 4, transforms[i], 'float')
+    }
     const result = module._orc_slice_multi(
       session,
       dataPtr,
@@ -116,6 +142,7 @@ export function sliceMultiStl(
       extruderIdsPtr,
       outPtrPtr,
       outLenPtr,
+      transformsPtr,
     )
     if (result !== 0) throw new OrcaSliceError(result, wasmError(module, session, result))
     const gcodePtr = module.getValue(outPtrPtr, 'i32')
@@ -124,6 +151,55 @@ export function sliceMultiStl(
       return module.UTF8ToString(gcodePtr, gcodeLen)
     } finally {
       module._orc_free(gcodePtr)
+    }
+  })
+}
+
+/** Run a current-plate operation and return one canonical transform per STL. */
+export function preparePlate(
+  module: OrcaModule,
+  session: number,
+  data: Uint8Array,
+  offsets: Int32Array,
+  nFiles: number,
+  configJson: string,
+  operation: PlateAction,
+  transforms?: Float32Array,
+): string {
+  validateTransformTable(transforms, nFiles)
+  initSession(module, session, configJson)
+  return withAllocations(module, (allocate) => {
+    const dataPtr = allocate(data.length, 'combined STL data')
+    module.HEAPU8.set(data, dataPtr)
+    const offsetsPtr = allocate(offsets.length * 4, 'STL offset table')
+    for (let i = 0; i < offsets.length; i++) module.setValue(offsetsPtr + i * 4, offsets[i], 'i32')
+
+    const transformsPtr = transforms?.length ? allocate(transforms.length * 4, 'object transform table') : 0
+    if (transforms) {
+      for (let i = 0; i < transforms.length; i++) module.setValue(transformsPtr + i * 4, transforms[i], 'float')
+    }
+
+    const outPtrPtr = allocate(4, 'plate transform output pointer')
+    const outLenPtr = allocate(4, 'plate transform output length')
+    const operationCode = operation === 'auto-orient' ? 1 : 2
+    const result = module._orc_prepare_plate(
+      session,
+      dataPtr,
+      data.length,
+      offsetsPtr,
+      nFiles,
+      transformsPtr,
+      operationCode,
+      outPtrPtr,
+      outLenPtr,
+    )
+    if (result !== 0) throw new OrcaSliceError(result, wasmError(module, session, result))
+    const jsonPtr = module.getValue(outPtrPtr, 'i32')
+    const jsonLen = module.getValue(outLenPtr, 'i32')
+    try {
+      return module.UTF8ToString(jsonPtr, jsonLen)
+    } finally {
+      module._orc_free(jsonPtr)
     }
   })
 }

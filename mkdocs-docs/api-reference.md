@@ -6,7 +6,7 @@ Exported by `slicer.wasm` via Emscripten. Called from `src/lib/wasm-loader.ts`.
 
 All functions use C linkage (`extern "C"`). The Emscripten JS glue (`slicer.js`) exposes them with a leading underscore, e.g. `_orc_init`.
 
-`orc_init`, `orc_slice`, and `orc_slice_multi` take a session handle as their
+`orc_init`, `orc_slice`, `orc_slice_multi`, and `orc_prepare_plate` take a session handle as their
 first argument (see [ADR-008](adr/adr-008-session-handle.md)) — allocate one
 with `orc_session_create()` before calling any of them, and free it with
 `orc_session_destroy()` when done. `orc_obj_to_stl` / `orc_cad_to_stl` are pure
@@ -36,7 +36,8 @@ the worker's entire lifetime.
 int orc_init(void* session, const char* config_json, int json_len);
 ```
 
-Initialise the slicer with a JSON configuration object. Must be called before `orc_slice` or `orc_slice_multi`.
+Initialise the slicer with a JSON configuration object. Must be called before
+`orc_slice`, `orc_slice_multi`, or `orc_prepare_plate`.
 
 **Parameters**
 
@@ -68,7 +69,8 @@ Initialise the slicer with a JSON configuration object. Must be called before `o
 int orc_slice(
     void*       session,
     const void* stl_data, int stl_len,
-    char**      out_gcode, int* out_len
+    char**      out_gcode, int* out_len,
+    const float* transforms
 );
 ```
 
@@ -81,6 +83,10 @@ Slice an STL file and write G-code to a newly allocated buffer.
 - `stl_len` — byte length of the STL
 - `out_gcode` — on success, written with the address of a malloc'd, null-terminated G-code string
 - `out_len` — on success, written with the byte length of the G-code (excluding null terminator)
+- `transforms` — nullable pointer to one 11-float transform record; pass `0` for
+  legacy placement. The record is `[scale xyz, rotation xyz in radians, mirror
+  xyz, offset xy]`; the offset is relative to bed centre and two NaNs delegate
+  placement to the engine's single-object placement path.
 
 **Returns**
 
@@ -108,7 +114,8 @@ int orc_slice_multi(
     const void* all_stl, int all_stl_len,
     const int*  offsets,  int n_files,
     const int*  extruder_ids,
-    char**      out_gcode, int* out_len
+    char**      out_gcode, int* out_len,
+    const float* transforms
 );
 ```
 
@@ -136,12 +143,45 @@ Requires `orc_init` to have been called first on the same session.
   parameter existed).
 - `out_gcode` — on success, written with the address of the output G-code buffer
 - `out_len` — on success, written with the byte length of the output buffer
+- `transforms` — nullable pointer to `n_files * 11` floats. Each record is
+  `[scale xyz, rotation xyz in radians, mirror xyz, offset xy]`; finite offsets
+  are relative to bed centre and pinned during arrangement, while two NaNs let
+  `arrange_objects()` choose the position. Pass `0` to preserve the legacy
+  placement path.
 
 **Returns** — same error code convention as `orc_slice`.
 
 **Arrangement** uses OrcaSlicer's `arrange_objects()` (libnest2d + NLopt, single-threaded) with a 2 mm minimum gap. Objects that cannot fit on the bed are placed at bed centre rather than triggering an error. For circular beds (`bed_shape: "circle"`), the arrangement boundary is the largest inscribed square (half-side = radius / √2).
 
 **Memory:** caller must free `*out_gcode` with `orc_free()` after reading it.
+
+---
+
+### `orc_prepare_plate`
+
+```c
+int orc_prepare_plate(
+    void*       session,
+    const void* all_stl, int all_stl_len,
+    const int*  offsets, int n_files,
+    const float* transforms, int operation,
+    char**      out_transforms_json, int* out_len
+);
+```
+
+Run a current-plate operation without slicing. Use `operation = 1` for
+auto-orient or `operation = 2` for arrange. The result is a JSON array with
+one canonical transform per input STL, ready to pass back to `_orc_slice` or
+`_orc_slice_multi` on the next slice. Arrange preserves finite input offsets
+as pinned objects and arranges NaN-offset objects around them.
+
+The transform record is 11 floats: scale XYZ, rotation XYZ in radians, mirror
+XYZ (`1` or `-1`), and X/Y offset in millimetres relative to bed centre. Use
+NaN for both offset values when placement belongs to arrange.
+
+**Memory:** caller must free `*out_transforms_json` with `orc_free()` after reading it.
+
+**Returns:** the same `-1` to `-9` error convention as `orc_slice`.
 
 ---
 
@@ -316,7 +356,7 @@ Pass the **session** used for a failing `orc_init` / `orc_slice` / `orc_slice_mu
 **Usage pattern**
 
 ```typescript
-const rc = module._orc_slice(session, stlPtr, stlLen, ptrPtr, lenPtr)
+const rc = module._orc_slice(session, stlPtr, stlLen, ptrPtr, lenPtr, 0)
 if (rc !== 0) {
   const errPtr = module._orc_decode_exception(session)
   const message = module.UTF8ToString(errPtr)
@@ -382,12 +422,21 @@ interface OrcaModule {
     session: number,
     stlPtr: number, stlLen: number,
     outPtrPtr: number, outLenPtr: number,
+    transformsPtr: number, // nullable (0) 11-float transform table
   ): number
   _orc_slice_multi(
     session: number,
     dataPtr: number, dataLen: number,
     offsetsPtr: number, nFiles: number,
     extruderIdsPtr: number,                      // nullable (0) i32 array pointer
+    outPtrPtr: number, outLenPtr: number,
+    transformsPtr: number,                       // nullable (0) 11-float table
+  ): number
+  _orc_prepare_plate(
+    session: number,
+    dataPtr: number, dataLen: number,
+    offsetsPtr: number, nFiles: number,
+    transformsPtr: number, operation: 1 | 2,
     outPtrPtr: number, outLenPtr: number,
   ): number
   _orc_obj_to_stl(
