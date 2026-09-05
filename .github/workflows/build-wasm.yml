@@ -36,20 +36,69 @@ permissions:
   contents: write  # needed to create/update releases
 
 # Two overlapping publishing builds (workflow_dispatch, or a tag push right
-# after one) for the same ORCA_VERSION would independently compute the same
-# next patch number and collide on `gh release create` — the loser fails
-# outright after a multi-hour build with nothing published (see "Upload to
-# GitHub Release" below, which intentionally has no `|| true` fallback
-# anymore now that releases are immutable). Serialize same-version builds
-# so races queue instead of colliding; deliberately no cancel-in-progress,
-# since cancelling a multi-hour build mid-flight would waste it for nothing.
-# PR-validation builds (which never publish) get their own per-PR group so
-# unrelated PRs touching orca-wasm/ don't needlessly queue behind each other.
+# after one) for the same ORCA_VERSION must not race while choosing a release
+# number. The `release_version` job computes one shared patch before the ST/MT
+# matrix starts; the workflow-level concurrency group serializes separate runs
+# of the same version. PR-validation builds (which never publish) get their
+# own per-PR group so unrelated PRs touching orca-wasm/ don't needlessly queue
+# behind each other.
 concurrency:
   group: build-wasm-${{ github.event_name == 'pull_request' && github.event.pull_request.number || (github.event.inputs.orca_version || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v2.4.2') }}
 
 jobs:
+  # Resolve the next immutable release number once, before the ST/MT matrix.
+  # Both variants consume this output, so they can only publish the paired
+  # tags wasm-vX.Y.Z-patchN and wasm-vX.Y.Z-patchN-multithreaded. The previous
+  # implementation repeated this read-modify-create calculation in each
+  # matrix leg, which let one leg observe the other's newly-created tag and
+  # produce patchN/patchN+1.
+  release_version:
+    runs-on: ubuntu-latest
+    outputs:
+      next_patch: ${{ steps.resolve.outputs.next_patch }}
+    env:
+      ORCA_VERSION: ${{ github.event.inputs.orca_version || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v2.4.2' }}
+    steps:
+      - name: Resolve shared release patch
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # PR builds validate the compiler but never publish. Keep a valid
+          # output so the dependent build matrix still runs on pull_request.
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            echo "next_patch=0" >> "$GITHUB_OUTPUT"
+            echo "PR validation — release number is not used"
+            exit 0
+          fi
+
+          BASE_TAG="wasm-$ORCA_VERSION"
+          # Include both ST and MT families in the same max. Strip the
+          # optional -multithreaded suffix before validating the numeric patch
+          # so the next shared number is above every existing sibling tag.
+          LATEST_PATCH=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq "
+            [.[] | .tagName |
+              if . == \"${BASE_TAG}\" then 0
+              elif startswith(\"${BASE_TAG}-patch\") then
+                (ltrimstr(\"${BASE_TAG}-patch\")
+                  | rtrimstr(\"-multithreaded\")
+                  | select(test(\"^[0-9]+\$\"))
+                  | tonumber)
+              else empty
+              end
+            ]
+            | max // -1
+          ")
+          if (( LATEST_PATCH < 0 )); then
+            NEXT_PATCH=0
+          else
+            NEXT_PATCH=$((LATEST_PATCH + 1))
+          fi
+          echo "Latest shared patch: ${LATEST_PATCH}; next shared patch: ${NEXT_PATCH}"
+          echo "next_patch=${NEXT_PATCH}" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: release_version
     runs-on: ubuntu-latest
     timeout-minutes: 240  # deps ~100 min (incl. OCCT ~45 min) + main build ~60 min
 
@@ -914,12 +963,11 @@ jobs:
       # "Resolve latest WASM release" step) rather than assuming a fixed tag.
       #
       # The mt variant publishes to the SAME tag with a "-multithreaded"
-      # suffix, sharing one patch counter with st (both matrix legs derive
-      # the same next-patch number independently from the same st-tag-family
-      # scan — see ADR-011 — so "wasm-v2.4.0-patch5" and
-      # "wasm-v2.4.0-patch5-multithreaded" always describe the same source
-      # commit, just two build variants of it). This mirrors the pattern
-      # already proven out in poc/wasm-threads/'s
+      # suffix, sharing one patch counter with st. The release_version job
+      # computes that counter once before the matrix, so
+      # "wasm-v2.4.0-patch5" and "wasm-v2.4.0-patch5-multithreaded" always
+      # describe the same source commit, just two build variants of it. This
+      # mirrors the pattern already proven out in poc/wasm-threads/'s
       # build-wasm-threads-poc.yml, now applied to the real engine.
       - name: Upload to GitHub Release
         if: github.event_name != 'pull_request'
@@ -927,19 +975,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BASE_TAG="wasm-$ORCA_VERSION"
-          if gh release view "$BASE_TAG" --repo "$GITHUB_REPOSITORY" &>/dev/null; then
-            # Require a purely numeric "-patchN" suffix — startswith() alone
-            # also matches unrelated releases like "-patch2-multithreaded"
-            # from other in-flight work, whose non-numeric suffix would crash
-            # tonumber (see the matching fix in deploy.yml's WASM_TAG lookup).
-            LATEST_PATCH=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq "
-              [.[] | .tagName | select(startswith(\"${BASE_TAG}-patch\") and (split(\"-patch\")[1] | test(\"^[0-9]+\$\"))) | split(\"-patch\")[1] | tonumber]
-              | max // 0
-            ")
-            NEXT_PATCH=$((LATEST_PATCH + 1))
-          else
-            NEXT_PATCH=0
+          RELEASE_PATCH="${{ needs.release_version.outputs.next_patch }}"
+          if [[ ! "$RELEASE_PATCH" =~ ^[0-9]+$ ]]; then
+            echo "::error::Invalid shared release patch: '$RELEASE_PATCH'"
+            exit 1
           fi
+          NEXT_PATCH="$RELEASE_PATCH"
           # ── Release notes with a changelog since the previous release ──
           # The previous release is the newest existing wasm-v* release
           # overall, not just within $BASE_TAG's family: the first build of
@@ -989,47 +1030,40 @@ jobs:
           echo "── release-notes.md ──"
           cat release-notes.md
 
-          # Deleting a release does not delete its underlying git tag, and
-          # GitHub refuses to reuse a tag_name that was ever used by an
-          # immutable release — `gh release create` fails with "tag_name was
-          # used by an immutable release" even though `gh release list` no
-          # longer shows it. Retry with the next patch number when that (or a
-          # same-number race from a concurrent build) happens, instead of
-          # failing a multi-hour build outright.
-          for i in $(seq 0 20); do
-            PATCH=$((NEXT_PATCH + i))
-            if [ "$PATCH" -eq 0 ]; then
-              TAG="$BASE_TAG"
-            else
-              TAG="${BASE_TAG}-patch${PATCH}"
-            fi
-            if [[ "${{ matrix.variant }}" == "mt" ]]; then
-              TAG="${TAG}-multithreaded"
-            fi
-            echo "Attempting to publish release: $TAG"
-            # Attach assets in the same `gh release create` call rather than a
-            # separate `gh release upload` afterward: GitHub now marks a
-            # release immutable as soon as it's created, so a later upload
-            # call fails with "HTTP 422: Cannot upload assets to an immutable
-            # release." Passing the files as trailing args uploads them
-            # atomically as part of creation, before that immutability applies.
-            if OUTPUT=$(gh release create "$TAG" wasm-artifacts/* \
-                --title "WASM build for OrcaSlicer $ORCA_VERSION ($TAG)" \
-                --notes-file release-notes.md \
-                --repo "$GITHUB_REPOSITORY" 2>&1); then
-              echo "$OUTPUT"
-              echo "Published: $TAG"
-              exit 0
-            fi
+          PATCH="$NEXT_PATCH"
+          if [ "$PATCH" -eq 0 ]; then
+            TAG="$BASE_TAG"
+          else
+            TAG="${BASE_TAG}-patch${PATCH}"
+          fi
+          if [[ "${{ matrix.variant }}" == "mt" ]]; then
+            TAG="${TAG}-multithreaded"
+          fi
+          echo "Attempting to publish release: $TAG"
+          # Attach assets in the same `gh release create` call rather than a
+          # separate `gh release upload` afterward: GitHub now marks a
+          # release immutable as soon as it's created, so a later upload
+          # call fails with "HTTP 422: Cannot upload assets to an immutable
+          # release." Passing the files as trailing args uploads them
+          # atomically as part of creation, before that immutability applies.
+          # Pin the tag to this run's source commit — without --target, GitHub
+          # may attach it to a newer master tip (for example an auto-bump
+          # commit pushed while this multi-minute build was running).
+          if OUTPUT=$(gh release create "$TAG" wasm-artifacts/* \
+              --target "$GITHUB_SHA" \
+              --title "WASM build for OrcaSlicer $ORCA_VERSION ($TAG)" \
+              --notes-file release-notes.md \
+              --repo "$GITHUB_REPOSITORY" 2>&1); then
             echo "$OUTPUT"
-            if echo "$OUTPUT" | grep -qi "used by an immutable release\|already_exists\|already exists"; then
-              echo "Tag $TAG unavailable, trying next patch number..."
-              continue
-            fi
+            echo "Published: $TAG"
+            exit 0
+          fi
+          echo "$OUTPUT"
+          if echo "$OUTPUT" | grep -qi "used by an immutable release\|already_exists\|already exists"; then
+            echo "::error::Release tag $TAG already exists; rerun this workflow to recompute the shared patch"
+          else
             echo "::error::gh release create failed for a reason other than a tag collision"
-            exit 1
-          done
-          echo "::error::Exhausted patch-number retries without finding a free tag"
+          fi
           exit 1
 
   # ── Phase 4 correctness check — st vs. mt must slice identically ────────
