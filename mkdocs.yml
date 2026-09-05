@@ -45,6 +45,7 @@ nav:
     - Getting Started: getting-started.md
     - User Guide: user-guide.md
     - Profiles: profiles.md
+    - Self-hosting with Docker: docker.md
   - Developers:
     - Architecture: architecture.md
     - Integration Guide: integration.md
