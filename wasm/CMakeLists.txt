@@ -95,6 +95,7 @@ target_link_options(slicer PRIVATE
 '_orc_init',\
 '_orc_slice',\
 '_orc_slice_multi',\
+'_orc_prepare_plate',\
 '_orc_obj_to_stl',\
 '_orc_cad_to_stl',\
 '_orc_write_3mf',\
