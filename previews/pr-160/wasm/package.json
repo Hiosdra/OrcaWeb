@@ -1,0 +1,4 @@
+{
+  "_comment": "Forces Node to treat everything under public/wasm/ (Emscripten's non-ES6 MODULARIZE output) as CommonJS, overriding the repo root package.json's \"type\": \"module\". Needed so Node's worker_threads.Worker can load slicer-mt.js directly by real file path when Emscripten spawns pthread workers (see orca-wasm/scripts/smoke-test.mjs's loadModule() and mainScriptUrlOrBlob comment) — without this, Node parses the file as ESM and its unconditional require('worker_threads') throws ReferenceError.",
+  "type": "commonjs"
+}

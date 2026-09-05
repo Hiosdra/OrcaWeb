@@ -1,0 +1,19 @@
+# Cloudflare Workers/Pages static-assets header rules.
+#
+# Cross-origin isolation is what lets the Cloudflare mirror run the
+# multithreaded (MT) WASM engine: SharedArrayBuffer (required by Emscripten
+# pthreads — see orca-wasm/MT-PLAN.md) is only available on a page where
+# self.crossOriginIsolated is true, which requires both headers below on
+# every document/worker response. GitHub Pages (the primary deployment)
+# cannot send custom response headers at all, so it stays ST-only regardless
+# — this file only affects the Cloudflare mirror, and is a no-op there
+# (ignored) if wrangler ever changes hosts.
+#
+# COEP require-corp still lets this page load slicer-mt.wasm cross-origin
+# from GitHub Pages: that response already carries
+# Access-Control-Allow-Origin: * (verified live), which satisfies COEP for a
+# CORS-mode fetch even without an explicit Cross-Origin-Resource-Policy
+# header on the GitHub Pages side.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
