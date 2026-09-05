@@ -18,9 +18,16 @@ export const REPO = 'Hiosdra/OrcaWeb'
 // contains "." which is a regex metacharacter; matching it literally this
 // way sidesteps needing to escape it correctly rather than risking getting
 // that escaping subtly wrong.
-export async function resolveLatestWasmTag() {
-  const baseTag = `wasm-${ORCA_VERSION}`
-  const patchPrefix = `${baseTag}-patch`
+//
+// Pass { multithreaded: true } to resolve the sibling "-multithreaded"
+// release family instead (wasm-$ORCA_VERSION-multithreaded, then
+// -patchN-multithreaded) — same tag scheme build-wasm.yml/deploy.yml use for
+// the MT engine. Callers that don't care about MT (cf-build.mjs, and
+// download-wasm.mjs's default ST fetch) can keep calling this with no args.
+export async function resolveLatestWasmTag({ multithreaded = false } = {}) {
+  const mtSuffix = multithreaded ? '-multithreaded' : ''
+  const baseTag = `wasm-${ORCA_VERSION}${mtSuffix}`
+  const patchPrefix = `wasm-${ORCA_VERSION}-patch`
   // Opportunistically authenticate if a token is available (CI always has
   // one; local devs might). Unauthenticated GitHub API calls are capped at
   // 60/hour — easy to hit if this script runs often (e.g. every checkout).
@@ -34,11 +41,19 @@ export async function resolveLatestWasmTag() {
   let bestPatch = -1
   for (const r of releases) {
     const tag = r.tag_name
+    // Reject the other family outright before even looking at -patchN: e.g.
+    // "wasm-v2.4.2-patch3" (ST) trivially satisfies `endsWith('')`, so without
+    // this an ST lookup (mtSuffix === '') would also match MT-suffixed tags.
+    if (tag.endsWith('-multithreaded') !== multithreaded) continue
+
     let patch
     if (tag === baseTag) {
       patch = 0
     } else if (tag.startsWith(patchPrefix)) {
-      const n = Number(tag.slice(patchPrefix.length))
+      // Strip the shared "-patch" prefix and the (possibly empty) MT suffix,
+      // leaving just the numeric patch — e.g. "wasm-v2.4.2-patch3" (ST) or
+      // "wasm-v2.4.2-patch3-multithreaded" (MT).
+      const n = Number(tag.slice(patchPrefix.length, tag.length - mtSuffix.length))
       if (!Number.isInteger(n) || n < 1) continue
       patch = n
     } else {
@@ -57,15 +72,18 @@ export async function resolveLatestWasmTag() {
   // previous gh-pages deploy) for the same reason: a version bump landing
   // shouldn't hard-block every other PR/local dev just because the new
   // engine hasn't been built and published yet. Fall back to whichever
-  // wasm-v* release is newest overall (the GitHub API returns releases
-  // newest-first) — for local dev that's a working, if not-yet-current,
-  // engine; for e2e-smoke.yml it's still a real published binary to drive
-  // the UI against, which is all that check needs (see ADR-010 — it
-  // validates the UI/worker glue, not the pinned engine version itself).
-  const fallback = releases.find((r) => r.tag_name.startsWith('wasm-v'))
+  // wasm-v* release (of the right ST/MT family) is newest overall (the
+  // GitHub API returns releases newest-first) — for local dev that's a
+  // working, if not-yet-current, engine; for e2e-smoke.yml it's still a real
+  // published binary to drive the UI against, which is all that check needs
+  // (see ADR-010 — it validates the UI/worker glue, not the pinned engine
+  // version itself).
+  const fallback = releases.find(
+    (r) => r.tag_name.startsWith('wasm-v') && r.tag_name.endsWith('-multithreaded') === multithreaded,
+  )
   if (!fallback) {
     throw new Error(
-      `No release found matching ${baseTag}(-patchN), and no other wasm-v* release exists to fall back to`,
+      `No release found matching ${baseTag}(-patchN), and no other wasm-v*${mtSuffix} release exists to fall back to`,
     )
   }
   console.warn(

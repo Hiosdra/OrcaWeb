@@ -31,6 +31,18 @@ const ARTIFACTS = [
   { name: 'slicer.wasm', approxSize: 36_000_000 },
 ]
 
+// Opt-in: also fetch the multithreaded engine alongside ST. Off by default so
+// plain `npm run setup` / `npm run dev` keep the smaller, always-published ST
+// fallback described in README. The self-hosted Docker image sets this,
+// since it bundles both engines side by side so the app's runtime probe (and
+// the /st manual override — see worker-singleton.ts) has something to pick
+// between, matching how GitHub Pages + the Cloudflare mirror already do it.
+const INCLUDE_MT = process.env.WASM_MT === '1'
+const MT_ARTIFACTS = [
+  { name: 'slicer-mt.js', approxSize: 220_000 },
+  { name: 'slicer-mt.wasm', approxSize: 37_000_000 },
+]
+
 // Release-tag resolution (wasm-$ORCA_VERSION / -patchN, with fallback when
 // the pinned version has no release yet) lives in lib/wasm-release.mjs —
 // shared with cf-build.mjs, which needs the same "which engine build is
@@ -110,6 +122,16 @@ async function main() {
     await download(name, approxSize, releaseBase, tag)
   }
   writeFileSync(TAG_MARKER, `${tag}\n`)
+
+  if (INCLUDE_MT) {
+    console.log('\n  Fetching multithreaded (MT) engine too (WASM_MT=1)...\n')
+    const mtTag = await resolveLatestWasmTag({ multithreaded: true })
+    console.log(`  Using MT release: ${mtTag}\n`)
+    const mtReleaseBase = `https://github.com/${REPO}/releases/download/${mtTag}`
+    for (const { name, approxSize } of MT_ARTIFACTS) {
+      await download(name, approxSize, mtReleaseBase, mtTag)
+    }
+  }
 
   // Mirror the engine-version.json that deploy.yml publishes next to the
   // engine on gh-pages (version = sha256 of the wasm bytes, first 16 hex;
