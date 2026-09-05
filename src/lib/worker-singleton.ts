@@ -71,6 +71,13 @@ export function getWorker(): Worker {
   // WASM files live in public/wasm/ which gets deployed at <BASE_URL>wasm/.
   const wasmBase = import.meta.env.VITE_WASM_BASE_URL ?? `${import.meta.env.BASE_URL}wasm`
   wasmStatus = 'loading'
+  // /st is a manual escape hatch to the single-threaded engine, for a host
+  // that ships both engines side by side (e.g. the self-hosted Docker image,
+  // which bundles slicer-mt.* alongside slicer.* precisely so this path
+  // works) — the SPA fallback (nginx/Cloudflare/GitHub Pages) already serves
+  // the same app bundle at any path, so no server-side routing is needed;
+  // this is the one place that path is actually read.
+  const forceSt = typeof location !== 'undefined' && location.pathname.startsWith('/st')
   // These are the build-time baked values; the worker resolves the live
   // engine version + label at load from engine-version.json and only falls
   // back to these if that fetch fails (see slicer.worker.ts). __WASM_VERSION__
@@ -81,6 +88,7 @@ export function getWorker(): Worker {
     url: `${wasmBase}/slicer.js`,
     version: __WASM_VERSION__,
     engineLabel: __ORCA_ENGINE_VERSION__,
+    forceSt,
   })
 
   return worker

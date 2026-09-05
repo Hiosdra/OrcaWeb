@@ -40,3 +40,6 @@ blob-report/
 
 # wrangler (Cloudflare) local state
 .wrangler
+
+# nix shell
+*.nix

@@ -201,6 +201,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerInMessage>) =>
       // wrangler.jsonc for that host's setup). Same pattern already proven
       // end-to-end in poc/wasm-threads/public/worker.js.
       const canUseThreads =
+        !msg.forceSt &&
         typeof SharedArrayBuffer !== 'undefined' &&
         (self as unknown as { crossOriginIsolated?: boolean }).crossOriginIsolated === true
 

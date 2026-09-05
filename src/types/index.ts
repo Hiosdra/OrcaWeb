@@ -242,8 +242,11 @@ export type WorkerInMessage =
   // version is appended as a cache-busting query param to the slicer.js/
   // slicer.wasm fetch URLs — see slicer.worker.ts for why. engineLabel is the
   // human-readable resolved WASM release tag (__ORCA_ENGINE_VERSION__), used
-  // only for console diagnostics, never for cache-busting or URLs.
-  | { type: 'LOAD_WASM'; url: string; version: string; engineLabel: string }
+  // only for console diagnostics, never for cache-busting or URLs. forceSt
+  // skips the multithreaded engine probe entirely (see worker-singleton.ts's
+  // /st path escape hatch) — for a host that ships both engines side by
+  // side, e.g. the self-hosted Docker image.
+  | { type: 'LOAD_WASM'; url: string; version: string; engineLabel: string; forceSt?: boolean }
   | {
       type: 'SLICE'
       stl: ArrayBuffer
