@@ -5,9 +5,11 @@
  *   orc_session_create()                                          → opaque session handle (0 = alloc failed)
  *   orc_session_destroy(session)
  *   orc_init(session, json, len)                                  → 0 = ok
- *   orc_slice(session, stl, stlLen, outPtr, outLen)                → 0 = ok
+ *   orc_slice(session, stl, stlLen, outPtr, outLen, transforms)    → 0 = ok
  *   orc_slice_multi(session, all, allLen, offsets, n,
- *                   extruderIds, out, outLen)                     → 0 = ok
+ *                   extruderIds, out, outLen, transforms)         → 0 = ok
+ *   orc_prepare_plate(session, all, allLen, offsets, n, transforms,
+ *                     operation, out, outLen)                    → 0 = ok
  *   orc_obj_to_stl(obj, objLen, outPtr, outLen)                   → 0 = ok
  *   orc_cad_to_stl(cad, cadLen, outPtr, outLen)                   → 0 = ok (STEP)
  *   orc_write_3mf(session, stl, stlLen, outPtr, outLen)           → 0 = ok
@@ -19,7 +21,8 @@
  * orc_obj_to_stl / orc_cad_to_stl / orc_read_3mf are pure format conversions
  * — they never touch slicer config state, so they take no session handle.
  *
- * Error codes for orc_slice / orc_init / orc_slice_multi / orc_write_3mf:
+ * Error codes for orc_slice / orc_init / orc_slice_multi / orc_prepare_plate /
+ * orc_write_3mf:
  *   -1  invalid / uninitialized state (includes a null/invalid session handle)
  *   -2  JSON parse failure
  *   -3  STL write to MEMFS failed
@@ -36,6 +39,7 @@
  */
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -44,6 +48,8 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <limits>
+#include <utility>
 #include <sys/stat.h>
 
 #include <emscripten.h>
@@ -55,6 +61,7 @@
 #include "libslic3r/libslic3r.h"
 #include "libslic3r/Model.hpp"
 #include "libslic3r/ModelArrange.hpp"
+#include "libslic3r/Orient.hpp"
 #include "libslic3r/Print.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Slicing.hpp"
@@ -369,6 +376,197 @@ static void center_object_xy_only(Slic3r::ModelObject* obj) {
     shift.z() = -bbox.min.z();
     obj->translate(shift);
     obj->origin_translation += shift;
+}
+
+// Public transform ABI shared by the single-file and multi-file slice calls:
+// [scale xyz, rotation xyz (radians), mirror xyz (+/-1), offset xy (mm)].
+// The offset is relative to the selected bed centre; NaN in both offset slots
+// means that the arrangement pass owns placement.
+static constexpr int OBJECT_TRANSFORM_STRIDE = 11;
+
+struct ObjectTransformInput {
+    Slic3r::Vec3d scale  = Slic3r::Vec3d(1., 1., 1.);
+    Slic3r::Vec3d rotation = Slic3r::Vec3d(0., 0., 0.);
+    Slic3r::Vec3d mirror = Slic3r::Vec3d(1., 1., 1.);
+    bool has_offset = false;
+    double offset_x = 0.;
+    double offset_y = 0.;
+};
+
+static bool read_object_transform(const float* table, std::size_t index,
+                                  ObjectTransformInput& out, std::string& error) {
+    if (!table) return true;
+    const float* values = table + index * OBJECT_TRANSFORM_STRIDE;
+    for (int i = 0; i < 9; ++i) {
+        if (!std::isfinite(values[i])) {
+            error = "object transform contains a non-finite scale, rotation or mirror value";
+            return false;
+        }
+    }
+    if (values[0] <= 0.f || values[1] <= 0.f || values[2] <= 0.f) {
+        error = "object transform scale must be greater than zero";
+        return false;
+    }
+    for (int i = 6; i < 9; ++i) {
+        if (values[i] != 1.f && values[i] != -1.f) {
+            error = "object transform mirror values must be 1 or -1";
+            return false;
+        }
+    }
+
+    const bool x_nan = std::isnan(values[9]);
+    const bool y_nan = std::isnan(values[10]);
+    if (x_nan != y_nan) {
+        error = "object transform offset must contain two finite values or two NaN values";
+        return false;
+    }
+    if (!x_nan && (!std::isfinite(values[9]) || !std::isfinite(values[10]))) {
+        error = "object transform offset must be finite";
+        return false;
+    }
+
+    out.scale = Slic3r::Vec3d(values[0], values[1], values[2]);
+    out.rotation = Slic3r::Vec3d(values[3], values[4], values[5]);
+    out.mirror = Slic3r::Vec3d(values[6], values[7], values[8]);
+    out.has_offset = !x_nan;
+    if (out.has_offset) {
+        out.offset_x = values[9];
+        out.offset_y = values[10];
+    }
+    return true;
+}
+
+static Slic3r::ModelInstance* add_transformed_instance(
+    Slic3r::ModelObject* obj, const OrcSession& session,
+    const ObjectTransformInput& transform, bool default_to_bed_center) {
+    Slic3r::Vec3d offset = default_to_bed_center
+        ? Slic3r::Vec3d(session.bed_cx, session.bed_cy, 0.)
+        : Slic3r::Vec3d::Zero();
+    if (transform.has_offset)
+        offset = Slic3r::Vec3d(session.bed_cx + transform.offset_x,
+                               session.bed_cy + transform.offset_y, 0.);
+    return obj->add_instance(offset, transform.scale, transform.rotation, transform.mirror);
+}
+
+static Slic3r::BoundingBox arrangement_bed(const OrcSession& session) {
+    const double half_w = session.bed_shape == "circle"
+        ? session.bed_cx / std::sqrt(2.)
+        : session.bed_cx;
+    const double half_h = session.bed_shape == "circle"
+        ? session.bed_cy / std::sqrt(2.)
+        : session.bed_cy;
+    return Slic3r::BoundingBox(
+        Slic3r::Point(
+            static_cast<coord_t>((session.bed_cx - half_w) * 1e6),
+            static_cast<coord_t>((session.bed_cy - half_h) * 1e6)),
+        Slic3r::Point(
+            static_cast<coord_t>((session.bed_cx + half_w) * 1e6),
+            static_cast<coord_t>((session.bed_cy + half_h) * 1e6)));
+}
+
+static Slic3r::ArrangeParams arrangement_params() {
+    Slic3r::ArrangeParams params;
+    params.min_obj_distance = static_cast<coord_t>(2. * 1e6); // 2 mm gap
+#ifdef SLIC3R_WASM_MT
+    params.parallel = true;
+#else
+    params.parallel = false;
+#endif
+    return params;
+}
+
+// Arrange transformed instances while treating finite offsets as pinned
+// objects. NaN-offset instances remain movable, so a later Arrange action can
+// preserve explicit positions and still pack the rest around them.
+static void arrange_transformed_model(Slic3r::Model& model, const OrcSession& session,
+                                      const std::vector<bool>* pinned = nullptr) {
+    Slic3r::arrangement::ArrangePolygons movable;
+    Slic3r::arrangement::ArrangePolygons excludes;
+    Slic3r::ModelInstancePtrs instances;
+
+    for (std::size_t i = 0; i < model.objects.size(); ++i) {
+        auto* obj = model.objects[i];
+        if (obj->instances.empty()) continue;
+        auto* instance = obj->instances.front();
+        Slic3r::arrangement::ArrangePolygon polygon;
+        instance->get_arrange_polygon(&polygon);
+        polygon.bed_idx = 0;
+        const bool fixed = pinned && i < pinned->size() && (*pinned)[i];
+        if (fixed)
+            excludes.push_back(std::move(polygon));
+        else {
+            instances.push_back(instance);
+            movable.push_back(std::move(polygon));
+        }
+    }
+
+    if (movable.empty()) return;
+    auto params = arrangement_params();
+    const auto bed = arrangement_bed(session);
+    Slic3r::arrangement::arrange(movable, excludes, bed, params);
+    Slic3r::apply_arrange_polys(movable, instances,
+        [&session](Slic3r::arrangement::ArrangePolygon& polygon) {
+            polygon.translation = Slic3r::Vec2crd(
+                static_cast<coord_t>(session.bed_cx * 1e6),
+                static_cast<coord_t>(session.bed_cy * 1e6));
+        });
+}
+
+static void auto_orient_model(Slic3r::Model& model) {
+    for (auto* obj : model.objects) {
+        if (obj->instances.empty()) continue;
+        Slic3r::orientation::orient(obj->instances.front());
+        obj->invalidate_bounding_box();
+        obj->ensure_on_bed();
+    }
+}
+
+static nlohmann::json serialize_object_transform(const Slic3r::ModelInstance& instance,
+                                                 const OrcSession& session,
+                                                 bool keep_position) {
+    const Slic3r::Vec3d scale = instance.get_scaling_factor();
+    const Slic3r::Vec3d rotation = instance.get_rotation();
+    const Slic3r::Vec3d mirror = instance.get_mirror();
+    nlohmann::json value;
+    value["scale"] = nlohmann::json::array({scale.x(), scale.y(), scale.z()});
+    value["rotation"] = nlohmann::json::array({rotation.x(), rotation.y(), rotation.z()});
+    value["mirror"] = nlohmann::json::array({mirror.x(), mirror.y(), mirror.z()});
+    if (keep_position) {
+        const Slic3r::Vec3d offset = instance.get_offset();
+        value["offset"] = nlohmann::json::array({offset.x() - session.bed_cx, offset.y() - session.bed_cy});
+    } else {
+        value["offset"] = nullptr;
+    }
+    return value;
+}
+
+static int write_transform_json(OrcSession& session, const Slic3r::Model& model,
+                                const std::vector<bool>& keep_positions,
+                                char** out_transforms, int* out_len) {
+    nlohmann::json result = nlohmann::json::array();
+    for (std::size_t i = 0; i < model.objects.size(); ++i) {
+        if (model.objects[i]->instances.empty()) {
+            record_error(session, "model object has no instance");
+            return -5;
+        }
+        const bool keep = i < keep_positions.size() && keep_positions[i];
+        result.push_back(serialize_object_transform(*model.objects[i]->instances.front(), session, keep));
+    }
+    const std::string json = result.dump();
+    if (json.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()) - 1) {
+        record_error(session, "plate transform output is too large");
+        return -9;
+    }
+    char* buffer = static_cast<char*>(std::malloc(json.size() + 1));
+    if (!buffer) {
+        record_error(session, "out of memory");
+        return -9;
+    }
+    std::memcpy(buffer, json.data(), json.size());
+    buffer[json.size()] = '\0';
+    *out_transforms = buffer;
+    *out_len = static_cast<int>(json.size());
+    return 0;
 }
 
 // Print::m_origin (the plate offset, read via get_plate_origin()) has no
@@ -687,7 +885,7 @@ int orc_init(void* session_ptr, const char* json_data, int json_len) {
  */
 EMSCRIPTEN_KEEPALIVE
 int orc_slice(void* session_ptr, const void* stl_data, int stl_len,
-              char** out_gcode, int* out_len) {
+              char** out_gcode, int* out_len, const float* transforms) {
     OrcSession* session = as_session(session_ptr);
     if (!session) return -1;
     session->last_error.clear();
@@ -718,13 +916,29 @@ int orc_slice(void* session_ptr, const void* stl_data, int stl_len,
         }
 
         // ── place model on bed ───────────────────────────────────────
-        // Center the mesh in X/Y, then offset to bed centre.
-        for (auto* obj : model.objects) {
-            center_object_xy_only(obj);
-            if (obj->instances.empty()) {
-                auto* inst = obj->add_instance();
-                // Place at bed centre, derived from bed_size_x / bed_size_y in config.
-                inst->set_offset(Slic3r::Vec3d(session->bed_cx, session->bed_cy, 0.0));
+        // The null-transform path is intentionally the historical placement
+        // code: old JS callers and old WASM artifacts remain byte-compatible.
+        if (!transforms) {
+            // Center the mesh in X/Y, then offset to bed centre.
+            for (auto* obj : model.objects) {
+                center_object_xy_only(obj);
+                if (obj->instances.empty()) {
+                    auto* inst = obj->add_instance();
+                    // Place at bed centre, derived from bed_size_x / bed_size_y in config.
+                    inst->set_offset(Slic3r::Vec3d(session->bed_cx, session->bed_cy, 0.0));
+                }
+            }
+        } else {
+            ObjectTransformInput transform;
+            std::string transform_error;
+            if (!read_object_transform(transforms, 0, transform, transform_error)) {
+                record_error(*session, transform_error);
+                return -1;
+            }
+            for (auto* obj : model.objects) {
+                center_object_xy_only(obj);
+                add_transformed_instance(obj, *session, transform, true);
+                obj->ensure_on_bed();
             }
         }
 
@@ -797,6 +1011,101 @@ int orc_slice(void* session_ptr, const void* stl_data, int stl_len,
         *out_len   = static_cast<int>(sz);
         return 0;
 
+    } catch (const std::exception& e) {
+        record_error(*session, e.what());
+        return -9;
+    }
+}
+
+/**
+ * Prepare the current plate without slicing it.
+ *
+ * operation 1 = auto-orient each object, operation 2 = arrange the plate.
+ * The returned JSON contains one transform object per input STL and is
+ * consumed by the browser before the next slice. A nullable transform table
+ * means identity transforms. In the arrange operation finite input offsets
+ * are pinned and NaN offsets remain movable.
+ */
+EMSCRIPTEN_KEEPALIVE
+int orc_prepare_plate(
+    void* session_ptr,
+    const void* all_stl, int all_stl_len,
+    const int* offsets, int n_files,
+    const float* transforms,
+    int operation,
+    char** out_transforms, int* out_len)
+{
+    OrcSession* session = as_session(session_ptr);
+    if (!session) return -1;
+    session->last_error.clear();
+    if (!session->initialized) { record_error(*session, "call orc_init first"); return -1; }
+    if (!all_stl || all_stl_len <= 0 || !offsets || n_files <= 0 ||
+        !out_transforms || !out_len || (operation != 1 && operation != 2)) {
+        record_error(*session, "invalid current-plate arguments");
+        return -1;
+    }
+
+    const char* base = static_cast<const char*>(all_stl);
+    try {
+        Slic3r::Model model;
+        for (int i = 0; i < n_files; ++i) {
+            const int start = offsets[i * 2];
+            const int len = offsets[i * 2 + 1];
+            if (start < 0 || len <= 0 || start > all_stl_len || len > all_stl_len - start) {
+                record_error(*session, "invalid offset table");
+                return -1;
+            }
+            const std::string path = "/tmp/ow_prepare_" + std::to_string(i) + ".stl";
+            TempFileGuard input_guard(path);
+            FILE* file = std::fopen(path.c_str(), "wb");
+            if (!file) {
+                record_error(*session, "cannot write temp STL");
+                return -3;
+            }
+            const std::size_t written = std::fwrite(base + start, 1, static_cast<std::size_t>(len), file);
+            std::fclose(file);
+            if (written != static_cast<std::size_t>(len)) {
+                record_error(*session, "failed to write complete STL data");
+                return -3;
+            }
+            if (!Slic3r::load_stl(path.c_str(), &model, ("object_" + std::to_string(i)).c_str())) {
+                record_error(*session, "STL load failed for file " + std::to_string(i));
+                return -4;
+            }
+        }
+
+        if (model.objects.empty()) {
+            record_error(*session, "no objects loaded");
+            return -5;
+        }
+        if (model.objects.size() != static_cast<std::size_t>(n_files)) {
+            record_error(*session, "current-plate actions require one printable object per STL file");
+            return -1;
+        }
+
+        std::vector<bool> pinned(model.objects.size(), false);
+        std::vector<bool> keep_positions(model.objects.size(), operation == 2);
+        for (std::size_t i = 0; i < model.objects.size(); ++i) {
+            ObjectTransformInput transform;
+            std::string transform_error;
+            if (!read_object_transform(transforms, i, transform, transform_error)) {
+                record_error(*session, transform_error);
+                return -1;
+            }
+            pinned[i] = transform.has_offset;
+            keep_positions[i] = operation == 2 || transform.has_offset;
+            auto* obj = model.objects[i];
+            center_object_xy_only(obj);
+            add_transformed_instance(obj, *session, transform, operation == 1);
+            obj->ensure_on_bed();
+        }
+
+        if (operation == 1)
+            auto_orient_model(model);
+        else
+            arrange_transformed_model(model, *session, &pinned);
+
+        return write_transform_json(*session, model, keep_positions, out_transforms, out_len);
     } catch (const std::exception& e) {
         record_error(*session, e.what());
         return -9;
@@ -924,6 +1233,9 @@ int orc_obj_to_stl(const char* obj_data, int obj_len,
  *              json_array_to_config_string() above.
  *              Ignored (no-op) when null, so existing single-extruder callers
  *              are unaffected.
+ * transforms   nullable float table of 11 values per file: scale xyz,
+ *              rotation xyz (radians), mirror xyz, and X/Y offset in mm
+ *              relative to bed centre. NaN X/Y delegates placement to arrange.
  *
  * Error codes: same convention as orc_slice.
  */
@@ -933,7 +1245,8 @@ int orc_slice_multi(
     const void* all_stl, int all_stl_len,
     const int* offsets, int n_files,
     const int* extruder_ids,
-    char** out_gcode, int* out_len)
+    char** out_gcode, int* out_len,
+    const float* transforms)
 {
     OrcSession* session = as_session(session_ptr);
     if (!session) return -1;
@@ -951,7 +1264,7 @@ int orc_slice_multi(
         for (int i = 0; i < n_files; i++) {
             const int start = offsets[i * 2];
             const int len   = offsets[i * 2 + 1];
-            if (start < 0 || len <= 0 || start + len > all_stl_len) {
+            if (start < 0 || len <= 0 || start > all_stl_len || len > all_stl_len - start) {
                 record_error(*session, "invalid offset table");
                 return -1;
             }
@@ -973,6 +1286,14 @@ int orc_slice_multi(
 
         if (model.objects.empty()) { record_error(*session, "no objects loaded"); return -5; }
 
+        // The transform table is parallel to input files. A malformed or
+        // unusual STL load must not make the transform loop read past that
+        // table if one file expands into multiple model objects.
+        if (transforms && model.objects.size() != static_cast<std::size_t>(n_files)) {
+            record_error(*session, "current-plate transforms require one printable object per STL file");
+            return -1;
+        }
+
         // Per-object extruder override requires an exact 1:1 file→object
         // correspondence (true for the common case of one watertight solid
         // per STL). If any file expanded into more than one object, skip the
@@ -981,59 +1302,82 @@ int orc_slice_multi(
             extruder_ids != nullptr && model.objects.size() == static_cast<std::size_t>(n_files);
 
         // ── centre each mesh; give each one an instance; optional extruder override ──
-        for (std::size_t i = 0; i < model.objects.size(); i++) {
-            auto* obj = model.objects[i];
-            center_object_xy_only(obj);
-            if (obj->instances.empty())
-                obj->add_instance();
-            if (can_map_extruders && extruder_ids[i] > 0) {
-                obj->config.set("extruder", extruder_ids[i]);
+        if (!transforms) {
+            // Keep the legacy path untouched when no transform table is sent.
+            for (std::size_t i = 0; i < model.objects.size(); i++) {
+                auto* obj = model.objects[i];
+                center_object_xy_only(obj);
+                if (obj->instances.empty())
+                    obj->add_instance();
+                if (can_map_extruders && extruder_ids[i] > 0) {
+                    obj->config.set("extruder", extruder_ids[i]);
+                }
             }
+        } else {
+            std::vector<bool> pinned(model.objects.size(), false);
+            for (std::size_t i = 0; i < model.objects.size(); i++) {
+                ObjectTransformInput transform;
+                std::string transform_error;
+                if (!read_object_transform(transforms, i, transform, transform_error)) {
+                    record_error(*session, transform_error);
+                    return -1;
+                }
+                pinned[i] = transform.has_offset;
+                auto* obj = model.objects[i];
+                center_object_xy_only(obj);
+                add_transformed_instance(obj, *session, transform, false);
+                obj->ensure_on_bed();
+                if (can_map_extruders && extruder_ids[i] > 0)
+                    obj->config.set("extruder", extruder_ids[i]);
+            }
+            arrange_transformed_model(model, *session, &pinned);
         }
 
         // ── auto-arrange on the bed ───────────────────────────────────────
-        // coord_t uses 1 µm resolution: 1 mm = 1,000,000 units.
-        // For circular beds the arrangement boundary is the largest axis-aligned
-        // square inscribed in the circle (half-side = radius / √2) so objects are
-        // never placed in the rectangle corners that fall outside the printable area.
-        const double half_w = (session->bed_shape == "circle")
-            ? session->bed_cx / std::sqrt(2.0)
-            : session->bed_cx;
-        const double half_h = (session->bed_shape == "circle")
-            ? session->bed_cy / std::sqrt(2.0)
-            : session->bed_cy;
-        const Slic3r::BoundingBox bed(
-            Slic3r::Point(
-                static_cast<coord_t>((session->bed_cx - half_w) * 1e6),
-                static_cast<coord_t>((session->bed_cy - half_h) * 1e6)
-            ),
-            Slic3r::Point(
-                static_cast<coord_t>((session->bed_cx + half_w) * 1e6),
-                static_cast<coord_t>((session->bed_cy + half_h) * 1e6)
-            )
-        );
+        if (!transforms) {
+            // coord_t uses 1 µm resolution: 1 mm = 1,000,000 units.
+            // For circular beds the arrangement boundary is the largest axis-aligned
+            // square inscribed in the circle (half-side = radius / √2) so objects are
+            // never placed in the rectangle corners that fall outside the printable area.
+            const double half_w = (session->bed_shape == "circle")
+                ? session->bed_cx / std::sqrt(2.0)
+                : session->bed_cx;
+            const double half_h = (session->bed_shape == "circle")
+                ? session->bed_cy / std::sqrt(2.0)
+                : session->bed_cy;
+            const Slic3r::BoundingBox bed(
+                Slic3r::Point(
+                    static_cast<coord_t>((session->bed_cx - half_w) * 1e6),
+                    static_cast<coord_t>((session->bed_cy - half_h) * 1e6)
+                ),
+                Slic3r::Point(
+                    static_cast<coord_t>((session->bed_cx + half_w) * 1e6),
+                    static_cast<coord_t>((session->bed_cy + half_h) * 1e6)
+                )
+            );
 
-        Slic3r::ArrangeParams params;
-        params.min_obj_distance = static_cast<coord_t>(2.0 * 1e6); // 2 mm gap
-        // See orca-wasm/MT-PLAN.md / bridge/CMakeLists.txt's SLIC3R_WASM_MT
-        // option — the only threading-aware line in the entire bridge.
-        // Everything else runs in parallel automatically via real oneTBB
-        // (built from source in CI) once that option is set; the sequential
-        // build (default) is unaffected.
+            Slic3r::ArrangeParams params;
+            params.min_obj_distance = static_cast<coord_t>(2.0 * 1e6); // 2 mm gap
+            // See orca-wasm/MT-PLAN.md / bridge/CMakeLists.txt's SLIC3R_WASM_MT
+            // option — the only threading-aware line in the entire bridge.
+            // Everything else runs in parallel automatically via real oneTBB
+            // (built from source in CI) once that option is set; the sequential
+            // build (default) is unaffected.
 #ifdef SLIC3R_WASM_MT
-        params.parallel         = true;
+            params.parallel         = true;
 #else
-        params.parallel         = false; // WASM is single-threaded
+            params.parallel         = false; // WASM is single-threaded
 #endif
 
-        // Objects that don't fit land at bed centre instead of throwing
-        Slic3r::arrange_objects(model, bed, params,
-            [session](Slic3r::arrangement::ArrangePolygon& ap) {
-                ap.translation = Slic3r::Vec2crd(
-                    static_cast<coord_t>(session->bed_cx * 1e6),
-                    static_cast<coord_t>(session->bed_cy * 1e6)
-                );
-            });
+            // Objects that don't fit land at bed centre instead of throwing
+            Slic3r::arrange_objects(model, bed, params,
+                [session](Slic3r::arrangement::ArrangePolygon& ap) {
+                    ap.translation = Slic3r::Vec2crd(
+                        static_cast<coord_t>(session->bed_cx * 1e6),
+                        static_cast<coord_t>(session->bed_cy * 1e6)
+                    );
+                });
+        }
 
         // ── configure & slice ─────────────────────────────────────────────
         // Fit the prime tower onto the bed before applying the config — the

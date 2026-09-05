@@ -179,7 +179,7 @@ const stlPtr = module._malloc(stl.length)
 module.HEAPU8.set(stl, stlPtr)  // Buffer extends Uint8Array — pass directly to avoid pool-offset bug
 const ptrPtr = module._malloc(4)
 const lenPtr = module._malloc(4)
-const rc = module._orc_slice(session, stlPtr, stl.length, ptrPtr, lenPtr)
+const rc = module._orc_slice(session, stlPtr, stl.length, ptrPtr, lenPtr, 0)
 module._free(stlPtr)
 if (rc !== 0) throw new Error(`orc_slice failed: ${rc} — ${module.UTF8ToString(module._orc_decode_exception(session))}`)
 
@@ -551,7 +551,7 @@ async function sliceFile(stlBytes: Uint8Array, config: object): Promise<string> 
   const ptrPtr = module._malloc(4)
   const lenPtr = module._malloc(4)
 
-  const rc = module._orc_slice(_session, stlPtr, stlBytes.length, ptrPtr, lenPtr)
+  const rc = module._orc_slice(_session, stlPtr, stlBytes.length, ptrPtr, lenPtr, 0)
   module._free(stlPtr)
 
   if (rc !== 0) {

@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { logError, logWarn } from '../lib/log'
+import { identityObjectTransform, parseObjectTransforms } from '../lib/model-transforms'
 import { filamentSlotLabels, parseOrcaProfileJson } from '../lib/profiles'
 import { addWorkerListener, getWasmStatus, getWorker, terminateWorker, type WasmStatus } from '../lib/worker-singleton'
-import type { ConversionKind, OrcaConfig, QueueItem, SliceProgress, WorkerOutMessage } from '../types'
+import type {
+  ConversionKind,
+  ObjectTransform,
+  OrcaConfig,
+  PlateAction,
+  QueueItem,
+  SliceProgress,
+  WorkerOutMessage,
+} from '../types'
 
 export interface PlateState {
   slicing: boolean
@@ -44,6 +53,7 @@ type QueueAction =
   | { type: 'ADD_ITEMS'; items: QueueItem[] }
   | { type: 'PATCH_ITEM'; id: string; patch: Partial<QueueItem> }
   | { type: 'ASSIGN_EXTRUDER'; id: string; extruderId?: number }
+  | { type: 'APPLY_TRANSFORMS'; updates: { id: string; transform: ObjectTransform }[] }
   | { type: 'CONVERSION_DONE'; id: string; stl: ArrayBuffer }
   | { type: 'REMOVE_ITEM'; id: string }
   | { type: 'RUN_QUEUE' }
@@ -105,6 +115,14 @@ export function buildPlateExtruderIds(items: Pick<QueueItem, 'extruderId'>[]): n
   return ids.some((id) => id > 0) ? ids : undefined
 }
 
+function isSliceablePlateItem(item: QueueItem): item is QueueItem & { stlFile: File } {
+  return (item.status === 'ready' || (item.status === 'done' && item.stale === true)) && item.stlFile != null
+}
+
+function isPlateActionItem(item: QueueItem): item is QueueItem & { stlFile: File } {
+  return (item.status === 'ready' || item.status === 'done') && item.stlFile != null
+}
+
 function toGcodeFilename(name: string): string {
   return `${name.replace(/\.(stl|3mf|obj|step|stp)$/i, '')}.gcode`
 }
@@ -148,6 +166,23 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
         // The plate mixes every object, so it goes stale on any reassignment
         // — including one made while it is still slicing, where PLATE_STARTED
         // has cleared gcode and there is nothing yet to test for.
+        plate: state.plate.gcode || state.plate.slicing ? { ...state.plate, stale: true } : state.plate,
+      }
+    }
+
+    case 'APPLY_TRANSFORMS': {
+      const updates = new Map(action.updates.map(({ id, transform }) => [id, transform]))
+      return {
+        ...state,
+        items: state.items.map((item) => {
+          const transform = updates.get(item.id)
+          if (!transform) return item
+          return {
+            ...item,
+            transform,
+            ...(item.status === 'done' || item.status === 'slicing' ? { stale: true } : {}),
+          }
+        }),
         plate: state.plate.gcode || state.plate.slicing ? { ...state.plate, stale: true } : state.plate,
       }
     }
@@ -352,6 +387,14 @@ export interface SliceQueue {
   /** Assign an item to a 1-based filament/extruder slot for plate slicing
    *  (0 = inherit the config default). No-op for single slicing. */
   assignExtruder: (id: string, extruderId: number) => void
+  /** Current-plate action currently running, if any. */
+  plateAction: PlateAction | null
+  /** Last current-plate action error, shown next to the action controls. */
+  plateActionError: string | null
+  /** Orient all actionable objects on the current plate. */
+  autoOrientPlate: () => void
+  /** Arrange all actionable objects on the current plate. */
+  arrangePlate: () => void
   /** Arrange all ready items on one plate and slice them together. */
   slicePlate: () => void
   /** Abort the running slice — terminates the worker and restarts the engine. */
@@ -370,6 +413,8 @@ export function useSliceQueue(
   // Starts as the build-time baked label; replaced by the runtime-resolved
   // one the worker sends with WASM_LOADED (from engine-version.json).
   const [engineLabel, setEngineLabel] = useState<string>(__ORCA_ENGINE_VERSION__)
+  const [plateAction, setPlateAction] = useState<PlateAction | null>(null)
+  const [plateActionError, setPlateActionError] = useState<string | null>(null)
 
   const configSnapshotRef = useRef({ config, epoch: 0 })
 
@@ -383,9 +428,11 @@ export function useSliceQueue(
   // ignoring the removal (the item quietly survives into the resulting
   // G-code — the WASM call is synchronous, so once posted nothing short of
   // a worker restart can pull one object back out) or nuking every plate
-  // slice on any unrelated removal. Set at the start of slicePlate() (before
-  // its async STL-read gap) and cleared once that request truly concludes.
+  // slice on any unrelated removal. Set at the start of runPlateAction() /
+  // slicePlate() (before their async STL-read gap) and cleared once that
+  // request truly concludes.
   const platePreparedIdsRef = useRef<Set<string> | null>(null)
+  const plateActionRef = useRef<string | null>(null)
 
   const onSettingsImportedRef = useRef(onSettingsImported)
   useEffect(() => {
@@ -410,6 +457,9 @@ export function useSliceQueue(
       }
     >(),
   )
+  const plateActionResolvers = useRef(
+    new Map<string, { resolve: (transforms: ObjectTransform[]) => void; reject: (err: Error) => void }>(),
+  )
 
   // Terminating the worker (cancel/removeItem) or a WASM_ERROR both orphan
   // any in-flight WRITE_3MF/READ_3MF requests — nothing will ever answer
@@ -422,6 +472,18 @@ export function useSliceQueue(
       const pending = [...resolvers.values()]
       resolvers.clear()
       for (const { reject } of pending) reject(new Error(message))
+    }
+  }, [])
+
+  const rejectAllPendingPlateActions = useCallback((message: string) => {
+    const pending = [...plateActionResolvers.current.values()]
+    plateActionResolvers.current.clear()
+    for (const { reject } of pending) reject(new Error(message))
+    if (plateActionRef.current !== null) {
+      plateActionRef.current = null
+      platePreparedIdsRef.current = null
+      setPlateAction(null)
+      setPlateActionError(message)
     }
   }, [])
 
@@ -465,6 +527,7 @@ export function useSliceQueue(
           setWasmStatus('error')
           dispatch({ type: 'ENGINE_FAILED', message: `Slicer engine failed: ${msg.message}` })
           rejectAllPendingMf(`Slicer engine failed: ${msg.message}`)
+          rejectAllPendingPlateActions(`Slicer engine failed: ${msg.message}`)
           platePreparedIdsRef.current = null
           return
         case 'SLICE_PROGRESS':
@@ -486,6 +549,43 @@ export function useSliceQueue(
           dispatch({ type: 'PLATE_FAILED', message: msg.message })
           platePreparedIdsRef.current = null
           return
+        case 'PLATE_TRANSFORMS_COMPLETE': {
+          const resolver = plateActionResolvers.current.get(msg.requestId)
+          if (!resolver) return
+          let transforms: ObjectTransform[]
+          try {
+            transforms = parseObjectTransforms(msg.transforms)
+          } catch (err) {
+            plateActionResolvers.current.delete(msg.requestId)
+            plateActionRef.current = null
+            platePreparedIdsRef.current = null
+            setPlateAction(null)
+            const message = err instanceof Error ? err.message : String(err)
+            setPlateActionError(message)
+            resolver.reject(new Error(message))
+            return
+          }
+          plateActionResolvers.current.delete(msg.requestId)
+          plateActionRef.current = null
+          platePreparedIdsRef.current = null
+          setPlateAction(null)
+          setPlateActionError(null)
+          resolver.resolve(transforms)
+          return
+        }
+        case 'PLATE_TRANSFORMS_ERROR': {
+          logError(`[queue] PLATE_TRANSFORMS_ERROR for request ${msg.requestId}:`, msg.message)
+          const resolver = plateActionResolvers.current.get(msg.requestId)
+          if (resolver) {
+            plateActionResolvers.current.delete(msg.requestId)
+            plateActionRef.current = null
+            platePreparedIdsRef.current = null
+            setPlateAction(null)
+            setPlateActionError(msg.message)
+            resolver.reject(new Error(msg.message))
+          }
+          return
+        }
         case 'OBJ_STL_COMPLETE':
         case 'CAD_STL_COMPLETE':
           dispatch({ type: 'CONVERSION_DONE', id: msg.requestId, stl: msg.stl })
@@ -547,7 +647,7 @@ export function useSliceQueue(
     // rejectAllPendingMf is a useCallback with an empty dependency list, so
     // its reference is stable for the hook's lifetime — listing it keeps the
     // linter honest without ever re-registering the worker listener.
-  }, [rejectAllPendingMf])
+  }, [rejectAllPendingMf, rejectAllPendingPlateActions])
 
   // ── Queue auto-advance ────────────────────────────────────────────────────
   // Single side-effect driving the engine: whenever the queue is running and
@@ -556,7 +656,7 @@ export function useSliceQueue(
   // engine-error path fails it via ENGINE_FAILED.
   const { items, currentId, running, plate } = state
   useEffect(() => {
-    if (!running || currentId || plate.slicing) return
+    if (!running || currentId || plate.slicing || plateActionRef.current !== null) return
 
     // Narrowed via the predicate so `next.stlFile` stays non-null inside the
     // async closure below, where a property narrowing wouldn't survive.
@@ -581,6 +681,7 @@ export function useSliceQueue(
             stl,
             config: configSnapshot.config,
             ...(next.extruderId ? { extruderId: next.extruderId } : {}),
+            ...(next.transform ? { transform: next.transform } : {}),
           },
           [stl],
         )
@@ -760,9 +861,9 @@ export function useSliceQueue(
   }, [state.items, postConversion, importMf3, rejectPendingForItem])
 
   const cancel = useCallback(() => {
-    if (!state.currentId && !state.plate.slicing) return
+    if (!state.currentId && !state.plate.slicing && plateActionRef.current === null) return
     logWarn(
-      `[queue] cancel requested (currentId=${state.currentId ?? 'none'}, plate.slicing=${state.plate.slicing}) — restarting engine`,
+      `[queue] cancel requested (currentId=${state.currentId ?? 'none'}, plate.slicing=${state.plate.slicing}, plateAction=${plateActionRef.current ?? 'none'}) — restarting engine`,
     )
     sliceRequestGeneration.current += 1
     terminateWorker()
@@ -770,9 +871,10 @@ export function useSliceQueue(
     dispatch({ type: 'CANCELLED' })
     const postReplacements = prepareConversionReposts()
     rejectAllPendingMf('Slice cancelled — engine restarted')
+    rejectAllPendingPlateActions('Current-plate action cancelled — engine restarted')
     postReplacements()
     platePreparedIdsRef.current = null
-  }, [state.currentId, state.plate.slicing, prepareConversionReposts, rejectAllPendingMf])
+  }, [state.currentId, state.plate.slicing, prepareConversionReposts, rejectAllPendingMf, rejectAllPendingPlateActions])
 
   const removeItem = useCallback(
     (id: string) => {
@@ -796,6 +898,7 @@ export function useSliceQueue(
         setWasmStatus('idle')
         const postReplacements = prepareConversionReposts()
         rejectAllPendingMf('Engine restarted — export cancelled')
+        rejectAllPendingPlateActions('Engine restarted — current-plate action cancelled')
         postReplacements()
         if (isPlateTarget) {
           platePreparedIdsRef.current = null
@@ -809,11 +912,11 @@ export function useSliceQueue(
       rejectPendingForItem(id, 'Item removed from queue')
       dispatch({ type: 'REMOVE_ITEM', id })
     },
-    [state.currentId, prepareConversionReposts, rejectAllPendingMf, rejectPendingForItem],
+    [state.currentId, prepareConversionReposts, rejectAllPendingMf, rejectAllPendingPlateActions, rejectPendingForItem],
   )
 
   const sliceAll = useCallback(() => {
-    if (state.plate.slicing) return
+    if (state.plate.slicing || plateActionRef.current !== null) return
     dispatch({ type: 'RUN_QUEUE' })
   }, [state.plate.slicing])
 
@@ -822,6 +925,86 @@ export function useSliceQueue(
     // only builds an extruderIds array when at least one object is assigned.
     dispatch({ type: 'ASSIGN_EXTRUDER', id, extruderId: extruderId > 0 ? extruderId : undefined })
   }, [])
+
+  const runPlateAction = useCallback(
+    (operation: PlateAction) => {
+      if (state.plate.slicing || state.currentId !== null || state.running || plateActionRef.current !== null) return
+      const targetItems = state.items.filter(isPlateActionItem)
+      if (targetItems.length === 0) return
+
+      const requestId = crypto.randomUUID()
+      const configSnapshot = configSnapshotRef.current
+      const hasExistingTransforms = targetItems.some((item) => item.transform !== undefined)
+      const transforms = hasExistingTransforms
+        ? targetItems.map((item) => item.transform ?? identityObjectTransform())
+        : undefined
+      const requestGeneration = sliceRequestGeneration.current
+
+      plateActionRef.current = requestId
+      platePreparedIdsRef.current = new Set(targetItems.map((item) => item.id))
+      setPlateAction(operation)
+      setPlateActionError(null)
+
+      const result = new Promise<ObjectTransform[]>((resolve, reject) => {
+        plateActionResolvers.current.set(requestId, { resolve, reject })
+      })
+
+      void result
+        .then((nextTransforms) => {
+          if (configSnapshotRef.current.epoch !== configSnapshot.epoch) {
+            setPlateActionError('Settings changed while preparing the current plate; run the action again')
+            return
+          }
+          if (nextTransforms.length !== targetItems.length) {
+            setPlateActionError('The slicer returned an incomplete current-plate transform list')
+            return
+          }
+          dispatch({
+            type: 'APPLY_TRANSFORMS',
+            updates: targetItems.map((item, index) => ({ id: item.id, transform: nextTransforms[index] })),
+          })
+        })
+        .catch(() => {
+          // The worker listener and the local read failure path already expose
+          // the actionable error. This catch prevents an orphaned rejected
+          // promise from becoming an unhandled rejection after cancellation.
+        })
+
+      void (async () => {
+        try {
+          const stls = await Promise.all(targetItems.map((item) => item.stlFile.arrayBuffer()))
+          if (requestGeneration !== sliceRequestGeneration.current) return
+          if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
+          getWorker().postMessage(
+            {
+              type: 'PREPARE_PLATE',
+              stls,
+              config: configSnapshot.config,
+              operation,
+              ...(transforms ? { transforms } : {}),
+              requestId,
+            },
+            stls,
+          )
+        } catch (err) {
+          if (requestGeneration !== sliceRequestGeneration.current) return
+          const resolver = plateActionResolvers.current.get(requestId)
+          if (!resolver) return
+          plateActionResolvers.current.delete(requestId)
+          plateActionRef.current = null
+          platePreparedIdsRef.current = null
+          setPlateAction(null)
+          const message = err instanceof Error ? err.message : String(err)
+          setPlateActionError(message)
+          resolver.reject(new Error(message))
+        }
+      })()
+    },
+    [state.plate.slicing, state.currentId, state.running, state.items],
+  )
+
+  const autoOrientPlate = useCallback(() => runPlateAction('auto-orient'), [runPlateAction])
+  const arrangePlate = useCallback(() => runPlateAction('arrange'), [runPlateAction])
 
   // Exports one queue item's current STL + config snapshot as a .3mf.
   // Independent of slicing — works on any item with STL data, sliced or not.
@@ -848,16 +1031,18 @@ export function useSliceQueue(
   }, [])
 
   const slicePlate = useCallback(() => {
-    if (state.plate.slicing || state.currentId !== null || state.running) return
-    const readyItems = state.items.filter(
-      (i): i is QueueItem & { stlFile: File } => i.status === 'ready' && i.stlFile != null,
-    )
+    if (state.plate.slicing || state.currentId !== null || state.running || plateActionRef.current !== null) return
+    const readyItems = state.items.filter(isSliceablePlateItem)
     if (readyItems.length === 0) return
 
     const configSnapshot = configSnapshotRef.current
     // Per-object filament/extruder-slot assignment, parallel to readyItems;
     // undefined (omitted from the message) when nothing is assigned.
     const extruderIds = buildPlateExtruderIds(readyItems)
+    const hasExistingTransforms = readyItems.some((item) => item.transform !== undefined)
+    const transforms = hasExistingTransforms
+      ? readyItems.map((item) => item.transform ?? identityObjectTransform())
+      : undefined
     dispatch({ type: 'PLATE_STARTED', configEpoch: configSnapshot.epoch })
     const requestGeneration = sliceRequestGeneration.current
     // Recorded synchronously (before the STL-read await below) so a
@@ -870,7 +1055,13 @@ export function useSliceQueue(
         if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
         getWorker().postMessage(
-          { type: 'SLICE_MULTI', stls, config: configSnapshot.config, ...(extruderIds ? { extruderIds } : {}) },
+          {
+            type: 'SLICE_MULTI',
+            stls,
+            config: configSnapshot.config,
+            ...(extruderIds ? { extruderIds } : {}),
+            ...(transforms ? { transforms } : {}),
+          },
           stls,
         )
       } catch (err) {
@@ -893,11 +1084,15 @@ export function useSliceQueue(
     plate,
     wasmStatus,
     engineLabel,
-    isSlicing: currentId !== null || running,
+    isSlicing: currentId !== null || running || plateAction !== null,
     addFiles,
     removeItem,
     sliceAll,
     assignExtruder,
+    plateAction,
+    plateActionError,
+    autoOrientPlate,
+    arrangePlate,
     slicePlate,
     cancel,
     export3mf,

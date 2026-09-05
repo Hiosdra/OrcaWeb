@@ -176,6 +176,20 @@ export type QueueItemStatus = 'converting' | 'ready' | 'slicing' | 'done' | 'err
 /** OBJ mesh, CAD B-rep (STEP), or an OrcaSlicer 3MF project. */
 export type ConversionKind = 'obj' | 'cad' | '3mf'
 
+/** Engine-side transform for one object on the current plate. */
+export interface ObjectTransform {
+  /** Per-axis scale. Values must be finite and greater than zero. */
+  scale: [number, number, number]
+  /** Euler rotation in radians, in engine X/Y/Z order. */
+  rotation: [number, number, number]
+  /** Per-axis mirror signs. Each value is either 1 or -1. */
+  mirror: [number, number, number]
+  /** Offset from the bed centre in millimetres; null lets arrange choose it. */
+  offset: [number, number] | null
+}
+
+export type PlateAction = 'auto-orient' | 'arrange'
+
 export interface QueueItem {
   id: string
   name: string
@@ -213,6 +227,8 @@ export interface QueueItem {
    *  silently not handling `.3mf` after a worker restart was exactly that
    *  bug. `undefined` means the file is already an STL. */
   conversion?: ConversionKind
+  /** Last transform returned by an engine-side current-plate action. */
+  transform?: ObjectTransform
 }
 
 export interface SliceProgress {
@@ -236,6 +252,8 @@ export type WorkerInMessage =
       // Routed through orc_slice_multi as a single-object plate, since only
       // that entry point takes a per-object assignment.
       extruderId?: number
+      /** Optional one-object transform table entry. */
+      transform?: ObjectTransform
     }
   | {
       type: 'SLICE_MULTI'
@@ -244,6 +262,17 @@ export type WorkerInMessage =
       // Optional per-object "extruder" override, parallel to stls (0/omitted
       // = inherit default). See orc_slice_multi in orca-wasm/bridge/slicer.cpp.
       extruderIds?: number[]
+      /** One transform per STL file. Omitted means the legacy placement path. */
+      transforms?: ObjectTransform[]
+    }
+  | {
+      type: 'PREPARE_PLATE'
+      stls: ArrayBuffer[]
+      config: OrcaConfig
+      operation: PlateAction
+      /** Existing transforms, parallel to stls; omitted means identity. */
+      transforms?: ObjectTransform[]
+      requestId: string
     }
   // requestId is opaque to the worker — echoed back verbatim on the matching
   // *_COMPLETE/*_ERROR so the main thread can correlate responses (it uses
@@ -268,6 +297,8 @@ export type WorkerOutMessage =
   | { type: 'SLICE_ERROR'; code: number; message: string }
   | { type: 'SLICE_MULTI_COMPLETE'; gcode: string }
   | { type: 'SLICE_MULTI_ERROR'; code: number; message: string }
+  | { type: 'PLATE_TRANSFORMS_COMPLETE'; transforms: ObjectTransform[]; requestId: string }
+  | { type: 'PLATE_TRANSFORMS_ERROR'; code: number; message: string; requestId: string }
   | { type: 'OBJ_STL_COMPLETE'; stl: ArrayBuffer; requestId: string }
   | { type: 'OBJ_STL_ERROR'; message: string; requestId: string }
   | { type: 'CAD_STL_COMPLETE'; stl: ArrayBuffer; requestId: string }
@@ -300,7 +331,15 @@ export interface OrcaModule {
   _orc_session_create(): number
   _orc_session_destroy(session: number): void
   _orc_init(session: number, payloadPtr: number, payloadLen: number): number
-  _orc_slice(session: number, inputPtr: number, inputLen: number, outputPtrPtr: number, outputLenPtr: number): number
+  _orc_slice(
+    session: number,
+    inputPtr: number,
+    inputLen: number,
+    outputPtrPtr: number,
+    outputLenPtr: number,
+    /** Nullable (pass 0) 11-float transform table pointer. */
+    transformsPtr: number,
+  ): number
   _orc_obj_to_stl(objPtr: number, objLen: number, outputPtrPtr: number, outputLenPtr: number): number
   _orc_slice_multi(
     session: number,
@@ -312,6 +351,19 @@ export interface OrcaModule {
     // file (0 = inherit default). See orca-wasm/bridge/slicer.cpp's
     // orc_slice_multi doc comment for exactly what this does and does not enable.
     extruderIdsPtr: number,
+    outputPtrPtr: number,
+    outputLenPtr: number,
+    /** Nullable (pass 0) 11-float transform table pointer. */
+    transformsPtr: number,
+  ): number
+  _orc_prepare_plate(
+    session: number,
+    dataPtr: number,
+    dataLen: number,
+    offsetsPtr: number,
+    nFiles: number,
+    transformsPtr: number,
+    operation: number,
     outputPtrPtr: number,
     outputLenPtr: number,
   ): number
@@ -326,7 +378,8 @@ export interface OrcaModule {
     outConfigLenPtr: number,
   ): number
   _orc_free(ptr: number): void
-  // Pass the session used for a failing _orc_init/_orc_slice/_orc_slice_multi
+  // Pass the session used for a failing _orc_init/_orc_slice/_orc_slice_multi/
+  // _orc_prepare_plate
   // call; pass 0 after a failing _orc_obj_to_stl/_orc_cad_to_stl/_orc_read_3mf
   // call (those take no session).
   _orc_decode_exception(session: number): number

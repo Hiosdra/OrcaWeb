@@ -1,15 +1,21 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import { isWebGLAvailable } from '../lib/webgl'
+import type { ObjectTransform } from '../types'
+
+export interface ModelPreview {
+  id: string
+  file: File
+  transform?: ObjectTransform
+}
 
 interface Props {
-  /** One or more STL files to preview together, laid out on a simple grid —
-   *  NOT the engine's real "One plate" arrangement (only orc_slice_multi's
-   *  arrange_objects() computes that); this is just enough to see every
-   *  loaded model at once instead of only the first. */
+  /** One or more STL files to preview together. */
   files: File[]
+  /** Optional stable IDs and engine-side transforms for the current plate. */
+  models?: ModelPreview[]
   /** Bed width (X axis) in mm — default 256 */
   bedX?: number
   /** Bed depth (Y axis) in mm — default 256 */
@@ -88,13 +94,25 @@ function buildBed(scene: THREE.Scene, bedX: number, bedY: number, bedShape: 'rec
  */
 const MAX_PREVIEW_MODELS = 12
 
-export function ModelViewer({ files, bedX = 256, bedY = 256, bedShape = 'rectangle' }: Props) {
+function applyTransform(mesh: THREE.Mesh, transform: ObjectTransform | undefined): void {
+  if (!transform) return
+  mesh.scale.set(
+    transform.scale[0] * transform.mirror[0],
+    transform.scale[1] * transform.mirror[1],
+    transform.scale[2] * transform.mirror[2],
+  )
+  mesh.rotation.set(transform.rotation[0], transform.rotation[1], transform.rotation[2])
+}
+
+export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 'rectangle' }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
   // Blocking: nothing could be drawn, so the overlay covering the canvas is
   // the whole content. Distinct from `notice` below, which annotates a
   // preview that did render and so must not hide it.
   const [loadError, setLoadError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const fileModels = useMemo(() => files.map((file, index) => ({ id: `file-${index}`, file })), [files])
+  const previewModels = models ?? fileModels
 
   useEffect(() => {
     const el = mountRef.current
@@ -150,24 +168,26 @@ export function ModelViewer({ files, bedX = 256, bedY = 256, bedShape = 'rectang
     })
     let cancelled = false
 
-    const shown = files.slice(0, MAX_PREVIEW_MODELS)
-    const skippedCount = files.length - shown.length
+    const shown = previewModels.slice(0, MAX_PREVIEW_MODELS)
+    const skippedCount = previewModels.length - shown.length
 
     void Promise.all(
-      shown.map(async (file) => {
+      shown.map(async (model) => {
         try {
-          const buffer = await file.arrayBuffer()
+          const buffer = await model.file.arrayBuffer()
           const geometry = loader.parse(buffer)
           geometry.computeBoundingBox()
           const box = geometry.boundingBox
           if (!box) return null
-          return { geometry, box }
+          return { geometry, box, model }
         } catch {
           return null
         }
       }),
     ).then((results) => {
-      const loaded = results.filter((r): r is { geometry: THREE.BufferGeometry; box: THREE.Box3 } => r !== null)
+      const loaded = results.filter(
+        (r): r is { geometry: THREE.BufferGeometry; box: THREE.Box3; model: ModelPreview } => r !== null,
+      )
       if (cancelled) {
         // Unmounted (or the file set changed) while these were decoding —
         // none of them ever reached the scene, so nothing else will free them.
@@ -184,41 +204,68 @@ export function ModelViewer({ files, bedX = 256, bedY = 256, bedShape = 'rectang
       // load behind a message about the ones that didn't.
       const notices = [
         failedCount > 0 ? `${failedCount} of ${results.length} files could not be read` : null,
-        skippedCount > 0 ? `showing the first ${shown.length} of ${files.length} models` : null,
+        skippedCount > 0 ? `showing the first ${shown.length} of ${previewModels.length} models` : null,
       ].filter((n): n is string => n !== null)
       if (notices.length > 0) setNotice(notices.join(' · '))
 
-      // Naive preview grid, not the engine's real "One plate" arrangement:
-      // equal-sized cells sized to the largest loaded object's footprint
-      // plus a fixed gap, filled row-major and centred on the bed origin.
-      const sizes = loaded.map(({ box }) => box.getSize(new THREE.Vector3()))
-      const gap = 10
-      const cellX = Math.max(...sizes.map((s) => s.x)) + gap
-      const cellY = Math.max(...sizes.map((s) => s.y)) + gap
-      const cols = Math.ceil(Math.sqrt(loaded.length))
-      const gridW = cols * cellX
-      const gridH = Math.ceil(loaded.length / cols) * cellY
-
-      let maxZ = 0
-      loaded.forEach(({ geometry, box }, i) => {
-        const col = i % cols
-        const row = Math.floor(i / cols)
-        const cellCenterX = -gridW / 2 + cellX * (col + 0.5)
-        const cellCenterY = gridH / 2 - cellY * (row + 0.5)
-
+      // Centre every raw mesh like the bridge does before applying the
+      // instance transform. Models without an explicit arranged offset still
+      // use a small fallback grid so a freshly uploaded plate remains legible.
+      const transformed = loaded.map(({ geometry, box, model }) => {
         const center = box.getCenter(new THREE.Vector3())
-        // Centre this object within its cell; bottom at Z=0 (engine: X/Y flat, Z = height)
-        geometry.translate(cellCenterX - center.x, cellCenterY - center.y, -box.min.z)
-
+        geometry.translate(-center.x, -center.y, -box.min.z)
         const mesh = new THREE.Mesh(geometry, material)
         mesh.castShadow = true
-        scene.add(mesh)
-        meshes.push(mesh)
-        maxZ = Math.max(maxZ, box.max.z - box.min.z)
+        applyTransform(mesh, model.transform)
+        mesh.updateMatrixWorld(true)
+        const size = new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3())
+        return { mesh, model, size }
       })
 
-      // Fit camera to the whole grid — Z-up: position camera above and to the side
-      const maxDim = Math.max(gridW, gridH, maxZ, 50)
+      const gridItems = transformed.filter(({ model }) => model.transform?.offset == null)
+      const gap = 10
+      const cellX = (gridItems.length > 0 ? Math.max(...gridItems.map(({ size }) => size.x)) : 0) + gap
+      const cellY = (gridItems.length > 0 ? Math.max(...gridItems.map(({ size }) => size.y)) : 0) + gap
+      const cols = Math.max(1, Math.ceil(Math.sqrt(gridItems.length)))
+      const gridW = cols * cellX
+      const gridH = Math.ceil(gridItems.length / cols) * cellY
+
+      let gridIndex = 0
+      const sceneBounds = new THREE.Box3()
+      transformed.forEach(({ mesh, model }) => {
+        if (model.transform?.offset) {
+          mesh.position.x = model.transform.offset[0]
+          mesh.position.y = model.transform.offset[1]
+        } else {
+          const col = gridIndex % cols
+          const row = Math.floor(gridIndex / cols)
+          mesh.position.x = -gridW / 2 + cellX * (col + 0.5)
+          mesh.position.y = gridH / 2 - cellY * (row + 0.5)
+          gridIndex++
+        }
+        // Engine ensure_on_bed() is applied after rotation and scaling. Do the
+        // same for the visual model so an auto-oriented object never floats or
+        // clips through the preview bed.
+        mesh.updateMatrixWorld(true)
+        const placedBounds = new THREE.Box3().setFromObject(mesh)
+        mesh.position.z -= placedBounds.min.z
+        mesh.updateMatrixWorld(true)
+        scene.add(mesh)
+        meshes.push(mesh)
+        sceneBounds.union(new THREE.Box3().setFromObject(mesh))
+      })
+
+      // Fit camera to the bed and all transformed models — Z-up: position
+      // camera above and to the side.
+      const maxZ = Math.max(sceneBounds.max.z, 0)
+      const maxDim = Math.max(
+        bedX,
+        bedY,
+        sceneBounds.getSize(new THREE.Vector3()).x,
+        sceneBounds.getSize(new THREE.Vector3()).y,
+        maxZ,
+        50,
+      )
       const dist = maxDim * 2
       camera.position.set(dist * 0.6, -dist, dist * 0.7)
       controls.target.set(0, 0, maxZ / 2)
@@ -264,7 +311,7 @@ export function ModelViewer({ files, bedX = 256, bedY = 256, bedShape = 'rectang
       }
       el.removeChild(renderer.domElement)
     }
-  }, [files, bedX, bedY, bedShape])
+  }, [previewModels, bedX, bedY, bedShape])
 
   return (
     <div className="relative w-full h-full min-h-48">

@@ -254,7 +254,7 @@ function sliceOnce(module, session, stlBytes) {
     try {
       const outLenPtr = checkedMalloc(module, 4, 'G-code output length')
       try {
-        const rc = module._orc_slice(session, stlPtr, stlBytes.length, outPtrPtr, outLenPtr)
+        const rc = module._orc_slice(session, stlPtr, stlBytes.length, outPtrPtr, outLenPtr, 0)
         if (rc !== 0) throw new Error(`orc_slice failed (${rc}): ${decodeError(module, session)}`)
         const gcodePtr = module.getValue(outPtrPtr, 'i32'),
           gcodeLen = module.getValue(outLenPtr, 'i32')

@@ -183,6 +183,12 @@ With two or more ready files, **One plate** arranges them all on a single bed
 and produces one combined G-code file, and **Download All (.zip)** bundles
 every finished G-code into a single ZIP archive.
 
+The 3D preview also exposes **Auto orient objects on current plate** and
+**Arrange objects on current plate**. Both operations run in the OrcaSlicer
+engine and keep the returned per-object transforms in the queue, so the next
+slice reuses the orientation and any explicit placement; arrangement-owned
+positions remain available for the normal multi-object arrangement pass.
+
 !!! note "Changing settings after slicing"
     If you change any setting after a file was sliced, its result is marked
     **"Sliced with previous settings"** and the Slice button turns into

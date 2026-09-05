@@ -2,7 +2,8 @@ import clsx from 'clsx'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FileUpload } from './components/FileUpload'
 import { ErrorDotIcon, GithubIcon, ModelIconSm, OrcaLogo, SpinnerIcon, XIcon } from './components/icons'
-import { ModelViewer } from './components/ModelViewer'
+import { type ModelPreview, ModelViewer } from './components/ModelViewer'
+import { PlateActions } from './components/PlateActions'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ConfigSummary, PlateResultCard, QueueItemCard, SliceHeader } from './components/SliceCards'
 import { ViewerErrorBoundary } from './components/ViewerErrorBoundary'
@@ -10,6 +11,7 @@ import { useSliceQueue } from './hooks/useSliceQueue'
 import { type ConfigField, mergeConfigLayers, resolveConfig, revertField } from './lib/config-layers'
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
+import { sameObjectTransform } from './lib/model-transforms'
 import type { ImportedProfileType } from './lib/profiles'
 import {
   buildConfig,
@@ -229,29 +231,17 @@ function filamentSelectionForImport(profile: ImportedProfile, current: string[])
   })
 }
 
-// Returns an array with the same File objects, in the same order, as `next`
-// — but reuses the *previous* array reference whenever the actual set of
-// files hasn't changed. `queue` (from useSliceQueue) gets a brand-new array
-// reference on every SLICE_PROGRESS/CONFIG_CHANGED dispatch even though the
-// underlying File objects didn't change, so deriving previewFiles with a
-// plain `useMemo(..., [queue])` gave ModelViewer a "new" `files` prop on
-// every progress tick — tearing down and rebuilding the whole WebGL scene
-// (re-parsing every STL, resetting camera framing, visible flicker) while
-// slicing. Comparing by File identity here instead of by wrapper-array
-// identity keeps the prop stable across those unrelated re-renders.
-//
-// The ref write below happens during render, which is safe here specifically
-// because this is a pure cache: the write is idempotent, derives only from
-// `next`, and the comparison re-runs on every render — so a render that
-// concurrent React throws away can't leave a wrong value behind, only a
-// harmlessly-primed one. (A `useMemo` keyed on a derived identity string
-// would avoid the write, but then the memo's real dependency — `queue` — is
-// absent from its dependency list, which trades a documented ref cache for a
-// lint suppression.)
-function useStableFileList(next: File[]): File[] {
-  const ref = useRef<File[]>([])
+function useStableModelList(next: ModelPreview[]): ModelPreview[] {
+  const ref = useRef<ModelPreview[]>([])
   const prev = ref.current
-  const same = prev.length === next.length && prev.every((f, i) => f === next[i])
+  const same =
+    prev.length === next.length &&
+    prev.every(
+      (model, index) =>
+        model.id === next[index].id &&
+        model.file === next[index].file &&
+        sameObjectTransform(model.transform, next[index].transform),
+    )
   if (!same) ref.current = next
   return ref.current
 }
@@ -467,6 +457,7 @@ export default function App() {
     plate,
     wasmStatus,
     engineLabel,
+    isSlicing,
     addFiles,
     removeItem,
     sliceAll,
@@ -474,6 +465,10 @@ export default function App() {
     slicePlate,
     cancel,
     export3mf,
+    plateAction,
+    plateActionError,
+    autoOrientPlate,
+    arrangePlate,
   } = useSliceQueue(config, handleSettingsImported)
 
   const bedX = config.bed_size_x ?? DISPLAY_DEFAULTS.bed_size_x
@@ -588,14 +583,17 @@ export default function App() {
 
   // ── Derived state ─────────────────────────────────────────────────────────
 
-  // Every ready/done model, not just the first — the preview shows the whole
-  // set laid out on a grid (see ModelViewer's doc comment) instead of only
-  // ever showing one object when multiple files are queued. Passed through
-  // useStableFileList so a queue update that doesn't actually add/remove/
-  // replace a model (e.g. a SLICE_PROGRESS tick) doesn't hand ModelViewer a
-  // "new" files array and force it to rebuild the WebGL scene.
-  const rawPreviewFiles = useMemo(() => queue.map((i) => i.stlFile).filter((f): f is File => f != null), [queue])
-  const previewFiles = useStableFileList(rawPreviewFiles)
+  // Every loaded model, not just the first — the preview shows the whole
+  // current plate. Transform changes deliberately invalidate the stable list,
+  // while progress/config updates with the same files and transforms do not
+  // rebuild the WebGL scene.
+  const rawPreviewModels = useMemo(
+    () =>
+      queue.flatMap((item) => (item.stlFile ? [{ id: item.id, file: item.stlFile, transform: item.transform }] : [])),
+    [queue],
+  )
+  const previewModels = useStableModelList(rawPreviewModels)
+  const previewFiles = useMemo(() => previewModels.map((model) => model.file), [previewModels])
   // Clears a previous ViewerErrorBoundary crash when the file set actually
   // changes (passed as resetKey, not key — see the boundary's own doc
   // comment for why remounting the viewer here would be the wrong tool).
@@ -604,6 +602,11 @@ export default function App() {
   const previewFilesKey = previewFiles.map((f) => `${f.name}:${f.size}:${f.lastModified}`).join('|')
   const hasAnyReady = queue.some((i) => i.stlFile != null)
   const isConverting = queue.some((i) => i.status === 'converting')
+  const plateModelCount = queue.filter(
+    (item) => (item.status === 'ready' || item.status === 'done') && item.stlFile != null,
+  ).length
+  const plateActionsDisabled =
+    isConverting || isSlicing || plate.slicing || plateAction !== null || plateModelCount === 0
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -711,11 +714,28 @@ export default function App() {
               </div>
             )}
 
-            {previewFiles.length > 0 && (
-              <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white" style={{ height: 300 }}>
-                <ViewerErrorBoundary resetKey={previewFilesKey} message="3D preview unavailable">
-                  <ModelViewer files={previewFiles} bedX={bedX} bedY={bedY} bedShape={bedShape} />
-                </ViewerErrorBoundary>
+            {previewModels.length > 0 && (
+              <div className="space-y-3">
+                <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white" style={{ height: 300 }}>
+                  <ViewerErrorBoundary resetKey={previewFilesKey} message="3D preview unavailable">
+                    <ModelViewer
+                      files={previewFiles}
+                      models={previewModels}
+                      bedX={bedX}
+                      bedY={bedY}
+                      bedShape={bedShape}
+                    />
+                  </ViewerErrorBoundary>
+                </div>
+                <PlateActions
+                  modelCount={plateModelCount}
+                  activeAction={plateAction}
+                  disabled={plateActionsDisabled}
+                  error={plateActionError}
+                  onAutoOrient={autoOrientPlate}
+                  onArrange={arrangePlate}
+                  onCancel={cancel}
+                />
               </div>
             )}
 
@@ -736,14 +756,28 @@ export default function App() {
         {/* ── Settings tab ── */}
         {activeTab === 'settings' && hasAnyReady && (
           <div className="grid sm:grid-cols-[1fr_1.4fr] gap-6">
-            {previewFiles.length > 0 && (
-              <div
-                className="rounded-2xl overflow-hidden border border-slate-200 bg-white order-last sm:order-first"
-                style={{ height: 320 }}
-              >
-                <ViewerErrorBoundary resetKey={previewFilesKey} message="3D preview unavailable">
-                  <ModelViewer files={previewFiles} bedX={bedX} bedY={bedY} bedShape={bedShape} />
-                </ViewerErrorBoundary>
+            {previewModels.length > 0 && (
+              <div className="space-y-3 order-last sm:order-first">
+                <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white" style={{ height: 320 }}>
+                  <ViewerErrorBoundary resetKey={previewFilesKey} message="3D preview unavailable">
+                    <ModelViewer
+                      files={previewFiles}
+                      models={previewModels}
+                      bedX={bedX}
+                      bedY={bedY}
+                      bedShape={bedShape}
+                    />
+                  </ViewerErrorBoundary>
+                </div>
+                <PlateActions
+                  modelCount={plateModelCount}
+                  activeAction={plateAction}
+                  disabled={plateActionsDisabled}
+                  error={plateActionError}
+                  onAutoOrient={autoOrientPlate}
+                  onArrange={arrangePlate}
+                  onCancel={cancel}
+                />
               </div>
             )}
             <div className="bg-white rounded-2xl border border-slate-200 p-5 overflow-y-auto">
@@ -800,6 +834,7 @@ export default function App() {
               onSliceAll={sliceAll}
               onSlicePlate={slicePlate}
               onCancel={cancel}
+              plateAction={plateAction}
             />
 
             {(plate.gcode || plate.slicing || plate.error) && (

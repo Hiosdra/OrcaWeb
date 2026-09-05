@@ -1,6 +1,7 @@
 // Shared Node test harness for the OrcaSlicer WASM engine — used by
 // smoke-test.mjs and compare-st-mt.mjs. Centralizes the ABI-coupled pieces
-// (module loading + heap marshaling for orc_init/orc_slice/orc_slice_multi)
+// (module loading + heap marshaling for orc_init/orc_slice/orc_slice_multi/
+// orc_prepare_plate)
 // so the C bridge's calling convention lives in ONE place instead of being
 // copy-pasted and drifting between scripts.
 //
@@ -151,6 +152,21 @@ export async function loadModule(wasmDir, engine) {
 // than imported — this runs as plain Node ESM with no TS build step, and
 // wasm-loader.ts is TypeScript.
 
+const OBJECT_TRANSFORM_STRIDE = 11
+
+export function encodeObjectTransforms(transforms) {
+  const table = new Float32Array(transforms.length * OBJECT_TRANSFORM_STRIDE)
+  transforms.forEach((transform, index) => {
+    const offset = index * OBJECT_TRANSFORM_STRIDE
+    table.set(transform.scale, offset)
+    table.set(transform.rotation, offset + 3)
+    table.set(transform.mirror, offset + 6)
+    table[offset + 9] = transform.offset?.[0] ?? Number.NaN
+    table[offset + 10] = transform.offset?.[1] ?? Number.NaN
+  })
+  return table
+}
+
 export function writeBytes(module, bytes) {
   const ptr = checkedMalloc(module, bytes.length, 'input data')
   module.HEAPU8.set(bytes, ptr)
@@ -184,24 +200,34 @@ export function initSession(module, session, configJson) {
   if (rc !== 0) throw new Error(`orc_init failed (${rc}): ${decodeError(module, session)}`)
 }
 
-export function sliceOnce(module, session, stlBytes) {
+function writeFloat32Table(module, values, label) {
+  if (!values?.length) return 0
+  const ptr = checkedMalloc(module, values.length * 4, label)
+  for (let i = 0; i < values.length; i++) module.setValue(ptr + i * 4, values[i], 'float')
+  return ptr
+}
+
+export function sliceOnce(module, session, stlBytes, transforms = null) {
   const stlPtr = writeBytes(module, stlBytes)
   try {
     const outPtrPtr = checkedMalloc(module, 4, 'G-code output pointer')
     try {
       const outLenPtr = checkedMalloc(module, 4, 'G-code output length')
       try {
-        const rc = module._orc_slice(session, stlPtr, stlBytes.length, outPtrPtr, outLenPtr)
-        if (rc !== 0) throw new Error(`orc_slice failed (${rc}): ${decodeError(module, session)}`)
-        const gcodePtr = module.getValue(outPtrPtr, 'i32')
-        const gcodeLen = module.getValue(outLenPtr, 'i32')
-        try { return module.UTF8ToString(gcodePtr, gcodeLen) } finally { module._orc_free(gcodePtr) }
+        const transformsPtr = writeFloat32Table(module, transforms, 'object transform table')
+        try {
+          const rc = module._orc_slice(session, stlPtr, stlBytes.length, outPtrPtr, outLenPtr, transformsPtr)
+          if (rc !== 0) throw new Error(`orc_slice failed (${rc}): ${decodeError(module, session)}`)
+          const gcodePtr = module.getValue(outPtrPtr, 'i32')
+          const gcodeLen = module.getValue(outLenPtr, 'i32')
+          try { return module.UTF8ToString(gcodePtr, gcodeLen) } finally { module._orc_free(gcodePtr) }
+        } finally { free(module, transformsPtr) }
       } finally { module._free(outLenPtr) }
     } finally { module._free(outPtrPtr) }
   } finally { free(module, stlPtr) }
 }
 
-export function sliceMultiOnce(module, session, stlBytesArr, extruderIds) {
+export function sliceMultiOnce(module, session, stlBytesArr, extruderIds, transforms = null) {
   const totalLen = stlBytesArr.reduce((sum, b) => sum + b.length, 0)
   const combined = new Uint8Array(totalLen)
   const offsets = new Int32Array(stlBytesArr.length * 2)
@@ -220,17 +246,64 @@ export function sliceMultiOnce(module, session, stlBytesArr, extruderIds) {
       const extruderIdsPtr = extruderIds?.length ? checkedMalloc(module, extruderIds.length * 4, 'extruder ID table') : 0
       try {
         if (extruderIdsPtr) for (let i = 0; i < extruderIds.length; i++) module.setValue(extruderIdsPtr + i * 4, extruderIds[i], 'i32')
-        const outPtrPtr = checkedMalloc(module, 4, 'G-code output pointer')
+        const transformsPtr = writeFloat32Table(module, transforms, 'object transform table')
         try {
-          const outLenPtr = checkedMalloc(module, 4, 'G-code output length')
+          const outPtrPtr = checkedMalloc(module, 4, 'G-code output pointer')
           try {
-            const rc = module._orc_slice_multi(session, dataPtr, combined.length, offsetsPtr, stlBytesArr.length, extruderIdsPtr, outPtrPtr, outLenPtr)
-            if (rc !== 0) throw new Error(`orc_slice_multi failed (${rc}): ${decodeError(module, session)}`)
-            const gcodePtr = module.getValue(outPtrPtr, 'i32'), gcodeLen = module.getValue(outLenPtr, 'i32')
-            try { return module.UTF8ToString(gcodePtr, gcodeLen) } finally { module._orc_free(gcodePtr) }
+            const outLenPtr = checkedMalloc(module, 4, 'G-code output length')
+            try {
+              const rc = module._orc_slice_multi(session, dataPtr, combined.length, offsetsPtr, stlBytesArr.length, extruderIdsPtr, outPtrPtr, outLenPtr, transformsPtr)
+              if (rc !== 0) throw new Error(`orc_slice_multi failed (${rc}): ${decodeError(module, session)}`)
+              const gcodePtr = module.getValue(outPtrPtr, 'i32'), gcodeLen = module.getValue(outLenPtr, 'i32')
+              try { return module.UTF8ToString(gcodePtr, gcodeLen) } finally { module._orc_free(gcodePtr) }
+            } finally { module._free(outLenPtr) }
+          } finally { module._free(outPtrPtr) }
+        } finally { free(module, transformsPtr) }
+      } finally { if (extruderIdsPtr) module._free(extruderIdsPtr) }
+    } finally { free(module, offsetsPtr) }
+  } finally { free(module, dataPtr) }
+}
+
+export function preparePlateOnce(module, session, stlBytesArr, operation, transforms = null) {
+  const totalLen = stlBytesArr.reduce((sum, b) => sum + b.length, 0)
+  const combined = new Uint8Array(totalLen)
+  const offsets = new Int32Array(stlBytesArr.length * 2)
+  let pos = 0
+  for (let i = 0; i < stlBytesArr.length; i++) {
+    combined.set(stlBytesArr[i], pos)
+    offsets[i * 2] = pos
+    offsets[i * 2 + 1] = stlBytesArr[i].length
+    pos += stlBytesArr[i].length
+  }
+
+  const dataPtr = writeBytes(module, combined)
+  try {
+    const offsetsPtr = checkedMalloc(module, offsets.length * 4, 'STL offset table')
+    try {
+      for (let i = 0; i < offsets.length; i++) module.setValue(offsetsPtr + i * 4, offsets[i], 'i32')
+      const transformsPtr = writeFloat32Table(module, transforms, 'object transform table')
+      try {
+        const outPtrPtr = checkedMalloc(module, 4, 'plate transform output pointer')
+        try {
+          const outLenPtr = checkedMalloc(module, 4, 'plate transform output length')
+          try {
+            const rc = module._orc_prepare_plate(
+              session,
+              dataPtr,
+              combined.length,
+              offsetsPtr,
+              stlBytesArr.length,
+              transformsPtr,
+              operation,
+              outPtrPtr,
+              outLenPtr,
+            )
+            if (rc !== 0) throw new Error(`orc_prepare_plate failed (${rc}): ${decodeError(module, session)}`)
+            const jsonPtr = module.getValue(outPtrPtr, 'i32'), jsonLen = module.getValue(outLenPtr, 'i32')
+            try { return JSON.parse(module.UTF8ToString(jsonPtr, jsonLen)) } finally { module._orc_free(jsonPtr) }
           } finally { module._free(outLenPtr) }
         } finally { module._free(outPtrPtr) }
-      } finally { if (extruderIdsPtr) module._free(extruderIdsPtr) }
+      } finally { if (transformsPtr) module._free(transformsPtr) }
     } finally { free(module, offsetsPtr) }
   } finally { free(module, dataPtr) }
 }

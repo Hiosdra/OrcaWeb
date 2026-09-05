@@ -39,6 +39,8 @@ The React web UI is a temporary proof-of-concept to demonstrate the engine. It i
 │   │      │   + SLICE_PROGRESS { percent, stage }    │    │
 │   │      ├── _orc_slice_multi(session, stls,        │    │
 │   │      │       extruderIds) → gcode string        │    │
+│   │      ├── _orc_prepare_plate(session, stls,     │    │
+│   │      │       operation) → transforms            │    │
 │   │      ├── _orc_obj_to_stl(obj) → stl bytes      │    │
 │   │      └── _orc_cad_to_stl(step) → stl bytes     │    │
 │   └──────────────────┬─────────────────────────────┘    │

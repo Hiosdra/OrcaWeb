@@ -6,7 +6,7 @@ import { downloadBlob } from '../lib/download'
 import { extractGcodeStats, gcodeStatsLabel } from '../lib/gcode-stats'
 import { DISPLAY_DEFAULTS, filamentSlotLabels } from '../lib/profiles'
 import type { WasmStatus } from '../lib/worker-singleton'
-import type { OrcaConfig, QueueItem } from '../types'
+import type { OrcaConfig, PlateAction, QueueItem } from '../types'
 import { GcodeViewer } from './GcodeViewer'
 import {
   CheckCircleIcon,
@@ -60,6 +60,7 @@ export function SliceHeader({
   onSliceAll,
   onSlicePlate,
   onCancel,
+  plateAction,
 }: {
   queue: QueueItem[]
   plate: PlateState
@@ -67,6 +68,7 @@ export function SliceHeader({
   onSliceAll: () => void
   onSlicePlate: () => void
   onCancel: () => void
+  plateAction?: PlateAction | null
 }) {
   const totalCount = queue.length
   const readyCount = queue.filter((i) => i.status === 'ready').length
@@ -75,17 +77,20 @@ export function SliceHeader({
   const errorCount = queue.filter((i) => i.status === 'error').length
   const busyCount = queue.filter((i) => i.status === 'slicing').length
   const isSlicing = busyCount > 0
+  const isPlateAction = plateAction != null
   const sliceableCount = readyCount + staleCount
 
-  const readyForPlate = queue.filter((i) => i.status === 'ready' && i.stlFile != null).length
+  const readyForPlate = queue.filter(
+    (i) => (i.status === 'ready' || (i.status === 'done' && i.stale)) && i.stlFile != null,
+  ).length
   const allDone = totalCount > 0 && doneCount + errorCount === totalCount && staleCount === 0
-  const canSlice = sliceableCount > 0 && !isSlicing && !plate.slicing
+  const canSlice = sliceableCount > 0 && !isSlicing && !plate.slicing && !isPlateAction
   // No wasmStatus gate here, matching canSlice: doSliceMulti() buffers the
   // request in pendingPlate exactly like doSlice() buffers pendingSlice while
   // the engine is still loading (slicer.worker.ts), so there's no need to
   // block the click — it would just needlessly make users wait for the
   // engine before they can even queue a plate slice.
-  const canPlate = readyForPlate >= 2 && !isSlicing && !plate.slicing
+  const canPlate = readyForPlate >= 2 && !isSlicing && !plate.slicing && !isPlateAction
 
   const sliceLabel = isSlicing
     ? `Slicing… (${doneCount + busyCount}/${totalCount})`
@@ -117,7 +122,7 @@ export function SliceHeader({
         {sliceLabel}
       </button>
 
-      {(isSlicing || plate.slicing) && (
+      {(isSlicing || plate.slicing || isPlateAction) && (
         <button
           type="button"
           onClick={onCancel}
@@ -160,7 +165,7 @@ export function SliceHeader({
         </button>
       )}
 
-      {wasmStatus === 'loading' && readyCount === 0 && !isSlicing && (
+      {wasmStatus === 'loading' && readyCount === 0 && !isSlicing && !isPlateAction && (
         <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
           Loading slicer engine…
         </span>

@@ -43,7 +43,8 @@ import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   sphereStl, loadModule, writeBytes, decodeError,
-  initSession, sliceOnce, sliceMultiOnce, checkedMalloc, free,
+  initSession, sliceOnce, sliceMultiOnce, preparePlateOnce, encodeObjectTransforms,
+  checkedMalloc, free,
 } from './lib/engine-harness.mjs'
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
@@ -388,6 +389,44 @@ function assertWipeTowerOnBed(gcode, bedX, bedY, label) {
   }
 }
 
+function assertValidPlateTransforms(transforms, expectedCount, label, requireFiniteOffsets) {
+  if (!Array.isArray(transforms) || transforms.length !== expectedCount) {
+    throw new Error(`${label}: expected ${expectedCount} object transforms, got ${JSON.stringify(transforms)}`)
+  }
+  for (let i = 0; i < transforms.length; i++) {
+    const transform = transforms[i]
+    if (
+      !transform ||
+      !Array.isArray(transform.scale) ||
+      transform.scale.length !== 3 ||
+      !transform.scale.every(Number.isFinite) ||
+      transform.scale.some((value) => value <= 0)
+    ) {
+      throw new Error(`${label}: transform ${i} has an invalid scale`)
+    }
+    if (!Array.isArray(transform.rotation) || transform.rotation.length !== 3 || !transform.rotation.every(Number.isFinite)) {
+      throw new Error(`${label}: transform ${i} has an invalid rotation`)
+    }
+    if (
+      !Array.isArray(transform.mirror) ||
+      transform.mirror.length !== 3 ||
+      !transform.mirror.every((value) => value === 1 || value === -1)
+    ) {
+      throw new Error(`${label}: transform ${i} has an invalid mirror`)
+    }
+    if (requireFiniteOffsets) {
+      if (!Array.isArray(transform.offset) || transform.offset.length !== 2 || !transform.offset.every(Number.isFinite)) {
+        throw new Error(`${label}: transform ${i} has no finite arranged offset`)
+      }
+    } else if (
+      transform.offset !== null &&
+      (!Array.isArray(transform.offset) || transform.offset.length !== 2 || !transform.offset.every(Number.isFinite))
+    ) {
+      throw new Error(`${label}: transform ${i} has an invalid optional offset`)
+    }
+  }
+}
+
 // ── test meshes ──────────────────────────────────────────────────────────────
 // Repo root — this script lives in orca-wasm/scripts/.
 const VORON_CUBE_PATH = resolve(import.meta.dirname, '../../e2e/fixtures/voron-design-cube-v7.stl')
@@ -416,6 +455,11 @@ async function main() {
   const meshes = collectMeshes(fixture)
   for (const mesh of meshes) {
     console.log(`[smoke-test] mesh: ${mesh.label} (${mesh.bytes.length} bytes)`)
+  }
+
+  const supportsPlateActions = typeof module._orc_prepare_plate === 'function'
+  if (!supportsPlateActions) {
+    console.warn('[smoke-test] WARN: loaded engine has no _orc_prepare_plate export — skipping current-plate action scenarios')
   }
 
   const session = module._orc_session_create()
@@ -635,6 +679,47 @@ async function main() {
       }
 
       console.log(`PASS (${actualTris} tris, ${Object.keys(config).length} config keys)`)
+    } catch (err) {
+      failures++
+      console.log('FAIL')
+      console.error(`  ${err.message}`)
+    }
+  }
+
+  if (supportsPlateActions) {
+    const autoOrientLabel = '[current plate] auto-orient objects'
+    process.stdout.write(`[smoke-test] ${autoOrientLabel} ... `)
+    try {
+      initSession(module, session, JSON.stringify(BASE_CONFIG))
+      const autoOrientMeshes = [meshes[0].bytes, meshes[0].bytes]
+      const transforms = preparePlateOnce(module, session, autoOrientMeshes, 1)
+      assertValidPlateTransforms(transforms, autoOrientMeshes.length, autoOrientLabel, false)
+      const gcode = sliceMultiOnce(module, session, autoOrientMeshes, undefined, encodeObjectTransforms(transforms))
+      assertSaneGcode(gcode, autoOrientLabel)
+      assertRestsOnBed(gcode, autoOrientLabel, BASE_CONFIG.initial_layer_print_height)
+      console.log(`PASS (${transforms.length} transforms)`)
+    } catch (err) {
+      failures++
+      console.log('FAIL')
+      console.error(`  ${err.message}`)
+    }
+
+    const arrangeLabel = '[current plate] arrange objects'
+    process.stdout.write(`[smoke-test] ${arrangeLabel} ... `)
+    try {
+      initSession(module, session, JSON.stringify(BASE_CONFIG))
+      const transforms = preparePlateOnce(module, session, [meshes[0].bytes, meshes[0].bytes], 2)
+      assertValidPlateTransforms(transforms, 2, arrangeLabel, true)
+      const gcode = sliceMultiOnce(
+        module,
+        session,
+        [meshes[0].bytes, meshes[0].bytes],
+        undefined,
+        encodeObjectTransforms(transforms),
+      )
+      assertSaneGcode(gcode, arrangeLabel)
+      assertRestsOnBed(gcode, arrangeLabel, BASE_CONFIG.initial_layer_print_height)
+      console.log(`PASS (${transforms.length} transforms)`)
     } catch (err) {
       failures++
       console.log('FAIL')

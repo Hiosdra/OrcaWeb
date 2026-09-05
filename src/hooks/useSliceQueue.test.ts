@@ -68,6 +68,34 @@ describe('per-object filament-slot assignment', () => {
   })
 })
 
+describe('engine-side current-plate transforms', () => {
+  it('stores returned transforms and marks existing item and plate G-code stale', () => {
+    const items = [
+      { id: 'a', status: 'done', gcode: 'G1', stale: false },
+      { id: 'b', status: 'ready' },
+    ] as unknown as typeof state.items
+    const transform = {
+      scale: [1, 1, 1] as [number, number, number],
+      rotation: [0, 0, 0] as [number, number, number],
+      mirror: [1, 1, 1] as [number, number, number],
+      offset: [10, -5] as [number, number],
+    }
+    const next = sliceQueueReducer(
+      { ...state, items, plate: { ...state.plate, gcode: 'G1 X0' } },
+      {
+        type: 'APPLY_TRANSFORMS',
+        updates: [
+          { id: 'a', transform },
+          { id: 'b', transform },
+        ],
+      },
+    )
+    expect(next.items[0]).toMatchObject({ transform, stale: true })
+    expect(next.items[1]).toMatchObject({ transform })
+    expect(next.plate.stale).toBe(true)
+  })
+})
+
 describe('reassigning a slot while the slice is still running', () => {
   // The request already went out carrying the old assignment, so the result
   // that comes back is outdated the moment the picker changes. A config edit
