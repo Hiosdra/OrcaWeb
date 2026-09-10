@@ -9,9 +9,9 @@ Strategy
 * C++ *stub .cpp* files (OCCT, OpenVDB, OpenCV, Draco) are NOT
   modified.  The CMake injection in section 4c marks originals as
   HEADER_FILE_ONLY and adds our override implementations from
-  ``orca-wasm/overrides/``.
+  ``overrides/``.
 * C++ *stub .hpp* files whose originals include unavailable headers (OCCT,
-  OpenVDB, OpenCV) ARE copied from ``orca-wasm/overrides/`` directly into
+  OpenVDB, OpenCV) ARE copied from ``overrides/`` directly into
   the orca/ source tree (section 4b).  GCC/Clang always search the including
   file's directory before any -I path, so the only reliable override is to
   replace the file in-place.  The canonical stub source remains in overrides/.
@@ -19,7 +19,7 @@ Strategy
   thumbnail jpg→png) are still patched in-place; these are genuine
   compatibility issues that should be upstreamed to OrcaSlicer.
 
-Run from orca-wasm/ with:
+Run from the repository root with:
 
     python3 patches/apply.py [--check]
 
@@ -49,7 +49,7 @@ DRY_RUN = _cli_args.check
 
 
 def copy_override(rel_path: str) -> None:
-    """Copy an override file from orca-wasm/overrides/ into the orca/ source tree."""
+    """Copy an override file from overrides/ into the orca/ source tree."""
     src = OVERRIDES / rel_path
     dst = ORCA / rel_path
     if not src.exists():
@@ -133,7 +133,7 @@ patch("CMakeLists.txt", [
         1,
     ),
     # No guard needed for wxWidgets: it's only found() in src/CMakeLists.txt
-    # inside `if(SLIC3R_GUI)`, and orca-wasm/CMakeLists.txt already forces
+    # inside `if(SLIC3R_GUI)`, and the root CMakeLists.txt already forces
     # SLIC3R_GUI OFF for WASM builds.
     #
     # Downgrade CMP0167 so the legacy FindBoost.cmake (module mode) is used.
@@ -198,10 +198,10 @@ patch("src/libslic3r/CMakeLists.txt", [
         r'TKDESTEP',
         0,
     ),
-    # No guard needed for `opencv_world` or draco: orca-wasm/cmake/FindOpenCV.cmake
+    # No guard needed for `opencv_world` or draco: cmake/FindOpenCV.cmake
     # and Finddraco.cmake already stub `opencv_world` and `draco::draco` as
     # empty INTERFACE targets and set *_FOUND, and this repo's WASM build
-    # always prepends orca-wasm/cmake to CMAKE_MODULE_PATH, so those stubs are
+    # always prepends cmake/ to CMAKE_MODULE_PATH, so those stubs are
     # the only Find modules that can ever resolve here. (OpenVDB's genexpr
     # guard below is kept — it interacts with the Layer 2 override injection
     # in a way these two don't.)
@@ -213,7 +213,7 @@ patch("src/libslic3r/CMakeLists.txt", [
     ),
     # JPEG: embuilder pre-builds libjpeg into the Emscripten sysroot, so
     # find_package(JPEG) finds it automatically — no WASM guard needed.
-    # No guard needed for FREETYPE_LIBRARIES either: orca-wasm/cmake/FindFreetype.cmake
+    # No guard needed for FREETYPE_LIBRARIES either: cmake/FindFreetype.cmake
     # already stubs it to an empty INTERFACE target, so linking it
     # unconditionally is inert under WASM.
     # fontconfig (Linux non-WASM only)
@@ -271,7 +271,7 @@ patch("src/libslic3r/AABBTreeLines.hpp", [
 #     GCC/Clang search the *including file's* directory before any -I path
 #     for #include "..." directives, so the only reliable way to override a
 #     header that lives next to its includer is to physically replace it.
-#     The canonical stub content stays in orca-wasm/overrides/.
+#     The canonical stub content stays in overrides/.
 # NOTE: Format/STEP.hpp is NOT overridden — the real OrcaSlicer header is used
 #       now that OCCT is compiled into the engine.
 # =============================================================================
@@ -282,15 +282,15 @@ copy_override("src/libslic3r/ObjColorUtils.hpp")
 # 4c. src/libslic3r/CMakeLists.txt — inject WASM override sources
 #     Appended (not inline-patched) so it survives minor upstream reshuffles.
 #     Marks original stub-only files as HEADER_FILE_ONLY (not compiled) and
-#     adds the clean override files from orca-wasm/overrides/.
+#     adds the clean override files from overrides/.
 #     Also injects the overrides include path at higher priority than orca/src/
 #     so that #include "Format/STEP.hpp" etc. find our stubs first.
 # =============================================================================
 LIBSLIC3R_OVERRIDES_INJECTION = """\
 
-# ── orca-wasm WASM overrides (injected by orca-wasm/patches/apply.py) ──────────
+# ── WASM overrides (injected by patches/apply.py) ─────────────────────────────
 # Original C++ stub files are excluded from compilation; clean override
-# implementations from orca-wasm/overrides/ are added instead.
+# implementations from overrides/ are added instead.
 # This keeps the orca/ source tree free of C++ modifications.
 if(SLIC3R_WASM AND DEFINED ORCA_WEB_OVERRIDES_DIR)
   # Files always present in OrcaSlicer
@@ -330,7 +330,7 @@ endif()
 _libslic3r_cmake = ORCA / "src/libslic3r/CMakeLists.txt"
 if _libslic3r_cmake.exists():
     _lc = _libslic3r_cmake.read_text(encoding="utf-8")
-    _marker = "# ── orca-wasm WASM overrides"
+    _marker = "# ── WASM overrides"
     if _marker not in _lc:
         if not DRY_RUN:
             _libslic3r_cmake.write_text(_lc + LIBSLIC3R_OVERRIDES_INJECTION, encoding="utf-8")
@@ -612,7 +612,7 @@ patch("src/libslic3r/Arachne/WallToolPaths.cpp", [
 #     make_paths_params() never actually sees a missing option). The real
 #     cause was Boost.Log's broken default sink amplifying Arachne's
 #     per-edge warning storm — see the DisableBoostLogOnInit comment in
-#     orca-wasm/bridge/slicer.cpp. This patch stays as defensive
+#     bridge/slicer.cpp. This patch stays as defensive
 #     initialization for genuinely-uninitialized construction paths.
 # =============================================================================
 patch("src/libslic3r/Arachne/WallToolPaths.hpp", [
@@ -644,7 +644,7 @@ verify_contains(
 #     special-case) calls pthread_setname_np()/pthread_getname_np()
 #     unconditionally on any non-Windows/non-Apple platform, which includes
 #     Emscripten (it defines the usual posix macros). This build is
-#     single-threaded (see ADR-007 — no real pthreads), so these symbols
+#     single-threaded (no real pthreads), so these symbols
 #     don't exist; normal Release linking has so far gotten away with it
 #     because nothing reachable from an ordinary slice calls set_thread_name()
 #     — wasm-ld's --gc-sections silently drops the whole function, symbol and
@@ -661,7 +661,7 @@ patch("src/libslic3r/Thread.cpp", [
     (
         r'#else\n\n// posix\nbool set_thread_name\(std::thread &thread, const char \*thread_name\)\n\{\n   \tpthread_setname_np\(thread\.native_handle\(\), thread_name\);',
         r'#elif defined(__EMSCRIPTEN__)\n\n'
-        r'// Single-threaded WASM build (ADR-007) — no real pthread_setname_np.\n'
+        r'// Single-threaded WASM build — no real pthread_setname_np.\n'
         r'// Thread naming is a debugging aid only; no-op rather than link against\n'
         r'// a symbol this build does not provide.\n'
         r'bool set_thread_name(std::thread &thread, const char *thread_name)\n'
@@ -692,11 +692,11 @@ verify_contains(
 )
 
 # =============================================================================
-# 9. Root CMakeLists.txt — append orca-wasm bridge + WASM link target
+# 9. Root CMakeLists.txt — append the bridge + WASM link target
 # =============================================================================
 BRIDGE_INJECTION = """\
 
-# ── orca-wasm WASM bridge (injected by orca-wasm/patches/apply.py) ─────────────
+# ── WASM bridge (injected by patches/apply.py) ─────────────────────────────────
 if(SLIC3R_WASM AND DEFINED ORCA_WEB_BRIDGE_DIR)
   # Expose OrcaSlicer src/ as ORCA_SRC for the bridge CMakeLists.
   set(ORCA_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -708,7 +708,7 @@ endif()
 _orca_root_cmake = ORCA / "CMakeLists.txt"
 if _orca_root_cmake.exists():
     _content = _orca_root_cmake.read_text(encoding="utf-8")
-    if "orca-wasm WASM bridge" not in _content:
+    if "WASM bridge (injected by patches/apply.py)" not in _content:
         if not DRY_RUN:
             _orca_root_cmake.write_text(_content + BRIDGE_INJECTION, encoding="utf-8")
         print(f"  {'WOULD PATCH' if DRY_RUN else 'PATCHED'}: CMakeLists.txt (bridge injection)")

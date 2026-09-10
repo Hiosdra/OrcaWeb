@@ -103,7 +103,7 @@ while (i < lines.length) {
         break
       }
       // Single-line `run: <command>` (no `|` block) — the whole step is one
-      // line, e.g. "run: python3 orca-wasm/patches/apply.py". Without this
+      // line, e.g. "run: python3 patches/apply.py". Without this
       // branch the step is silently dropped: runLine stays -1, the `if`
       // below never fires, and nothing gets pushed to `steps`.
       const inline = lines[j].match(/^\s*run:\s*(?!\|)(\S.*)$/)
@@ -169,7 +169,7 @@ ccache --max-size=2G >/dev/null 2>&1 || true
 # escape hatch (3.31+) and applies to every invocation without patching each
 # dep's CMakeLists.txt. Not needed in CI, so not added to build-wasm.yml.
 export CMAKE_POLICY_VERSION_MINIMUM=3.5
-cd "$(dirname "$0")/../.."   # repo root (this script lives in orca-wasm/scripts/)
+cd "$(dirname "$0")/.."   # repo root (this script lives in scripts/)
 echo "[build-local-wsl] repo root: $(pwd)"
 echo "[build-local-wsl] ORCA_VERSION=$ORCA_VERSION VARIANT=$VARIANT"
 `
@@ -180,13 +180,13 @@ echo "[build-local-wsl] ORCA_VERSION=$ORCA_VERSION VARIANT=$VARIANT"
 // Only this one step needs it: every dependency step already guards itself
 // with a stamp file, and cmake/ninja are naturally idempotent.
 const LOCAL_OVERRIDES = {
-  'Checkout OrcaSlicer ${{ env.ORCA_VERSION }}': `if [ -d orca-wasm/orca/.git ]; then
-  echo "[checkout] orca-wasm/orca already present — skip"
+  'Checkout OrcaSlicer ${{ env.ORCA_VERSION }}': `if [ -d orca/.git ]; then
+  echo "[checkout] orca already present — skip"
 else
-  rm -rf orca-wasm/orca
+  rm -rf orca
   git clone --depth 1 --branch "$ORCA_VERSION" \\
     https://github.com/SoftFever/OrcaSlicer.git \\
-    orca-wasm/orca
+    orca
 fi`,
 }
 
@@ -211,6 +211,6 @@ for (const s of steps) {
   }
 }
 
-const outPath = join(__dirname, '../orca-wasm/scripts/build-local-wsl.sh')
+const outPath = join(__dirname, 'build-local-wsl.sh')
 writeFileSync(outPath, out, { mode: 0o755 })
 console.log(`Wrote ${out.length} bytes to ${outPath}`)

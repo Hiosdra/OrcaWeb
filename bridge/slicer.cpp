@@ -57,7 +57,8 @@
 // OrcaSlicer core
 // (note: an earlier attempt to cap oneTBB via tbb::global_control lived here;
 // it deadlocked — see wasm/CMakeLists.txt's PTHREAD_POOL_SIZE comment and
-// orca-wasm/MT-PLAN.md. The pool is sized to hardware_concurrency instead.)
+// the multithreaded build notes. The pool is sized to hardware_concurrency
+// instead.)
 #include "libslic3r/libslic3r.h"
 #include "libslic3r/Model.hpp"
 #include "libslic3r/ModelArrange.hpp"
@@ -1358,7 +1359,7 @@ int orc_slice_multi(
 
             Slic3r::ArrangeParams params;
             params.min_obj_distance = static_cast<coord_t>(2.0 * 1e6); // 2 mm gap
-            // See orca-wasm/MT-PLAN.md / bridge/CMakeLists.txt's SLIC3R_WASM_MT
+            // See bridge/CMakeLists.txt's SLIC3R_WASM_MT
             // option — the only threading-aware line in the entire bridge.
             // Everything else runs in parallel automatically via real oneTBB
             // (built from source in CI) once that option is set; the sequential
@@ -1576,7 +1577,7 @@ int orc_cad_to_stl(const char* cad_data, int cad_len,
 /**
  * Export a single mesh + the session's current config as a .3mf file
  * (geometry + embedded OrcaSlicer settings — no plate/G-code/thumbnail data;
- * see orca-wasm bridge design notes for why that's out of scope here).
+ * see the bridge design notes for why that's out of scope here).
  *
  * On success *out_3mf points to a malloc'd buffer containing the .3mf (a ZIP
  * archive — contains embedded NUL bytes, so callers must use the returned

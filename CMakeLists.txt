@@ -59,7 +59,7 @@ set(LIBSLIC3R_SOURCE_DIR "${ORCA_SRC}/libslic3r")
 if(NOT EXISTS "${LIBSLIC3R_SOURCE_DIR}/CMakeLists.txt")
   message(FATAL_ERROR
     "orca/ submodule not found at ${ORCA_ROOT}.\n"
-    "Run:  git submodule update --init --depth 1 -- orca-wasm/orca")
+    "Run:  git submodule update --init --depth 1 -- orca")
 endif()
 
 add_subdirectory("${ORCA_SRC}/libslic3r" libslic3r_build)

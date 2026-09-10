@@ -2,9 +2,7 @@ name: Build WASM
 
 # Trigger manually, on a tag wasm-v*.*.* that signals a new OrcaSlicer target,
 # or automatically whenever a merge to master touches the WASM build pipeline.
-# The compiled artifacts are uploaded as a release asset on orca-wasm and then
-# pulled into the deploy workflow (which chains off this workflow's completion
-# via workflow_run — see deploy.yml).
+# The compiled artifacts are uploaded as release assets in this repository.
 on:
   workflow_dispatch:
     inputs:
@@ -20,16 +18,30 @@ on:
     # the release before the next deploy) is exactly what caused the
     # "Engine error" incident from 395d3fe. Path-filtered for the same reason
     # as the pull_request trigger below: skip the multi-hour build on pushes
-    # that don't touch orca-wasm/.
+    # that don't touch the engine or its build pipeline.
     branches: [master]
     paths:
-      - 'orca-wasm/**'
+      - 'bridge/**'
+      - 'cmake/**'
+      - 'overrides/**'
+      - 'patches/**'
+      - 'scripts/**'
+      - 'wasm/**'
+      - 'CMakeLists.txt'
+      - '.gitmodules'
       - '.github/workflows/build-wasm.yml'
   # Run on PRs that touch the WASM build pipeline so compilation breakage is
-  # caught before merge.  Path-filtered to avoid a ~3 h build on host integration-only PRs.
+  # caught before merge.
   pull_request:
     paths:
-      - 'orca-wasm/**'
+      - 'bridge/**'
+      - 'cmake/**'
+      - 'overrides/**'
+      - 'patches/**'
+      - 'scripts/**'
+      - 'wasm/**'
+      - 'CMakeLists.txt'
+      - '.gitmodules'
       - '.github/workflows/build-wasm.yml'
 
 permissions:
@@ -40,7 +52,7 @@ permissions:
 # number. The `release_version` job computes one shared patch before the ST/MT
 # matrix starts; the workflow-level concurrency group serializes separate runs
 # of the same version. PR-validation builds (which never publish) get their
-# own per-PR group so unrelated PRs touching orca-wasm/ don't needlessly queue
+# own per-PR group so unrelated PRs don't needlessly queue
 # behind each other.
 concurrency:
   group: build-wasm-${{ github.event_name == 'pull_request' && github.event.pull_request.number || (github.event.inputs.orca_version || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v2.4.2') }}
@@ -102,11 +114,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 240  # deps ~100 min (incl. OCCT ~45 min) + main build ~60 min
 
-    # Two variants built from the same source, same as
-    # poc/wasm-threads/build.sh's dual-artifact pattern (see
-    # ADR-011): "st" is today's existing sequential build
-    # (unchanged behavior), "mt" links against real oneTBB (built from
-    # source below, real Emscripten pthreads — see ADR-011) for real
+    # Two variants are built from the same source: "st" is the existing
+    # sequential build, while "mt" links against real oneTBB (built from
+    # source below) for Emscripten pthreads and parallel slicing.
     # multi-core slicing. fail-fast: false so an "mt"-only failure (the
     # newer, less-proven variant) never cancels the "st" build that
     # production already depends on.
@@ -119,7 +129,7 @@ jobs:
       ORCA_VERSION: ${{ github.event.inputs.orca_version || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'v2.4.2' }}
       OCCT_VERSION: "7.8.1"
       # Pinned (not "latest") for reproducible builds — matches the version
-      # documented for local builds in mkdocs-docs/wasm-build.md.
+      # documented for local builds in the repository README.
       EMSDK_VERSION: "3.1.74"
       ONETBB_VERSION: "v2021.13.2"
       EMSDK: /opt/emsdk
@@ -129,7 +139,7 @@ jobs:
       # shim path, so the two variants share one script. EXTRA_CXX_FLAGS
       # carries -pthread for mt (empty for st) so every dep + the engine
       # compile with pthread-consistent codegen — mixing pthread and
-      # non-pthread objects doesn't link (see ADR-011).
+      # non-pthread objects doesn't link).
       OUTPUT_NAME: ${{ matrix.variant == 'mt' && 'slicer-mt' || 'slicer' }}
       BOOST_THREADING: ${{ matrix.variant == 'mt' && 'multi' || 'single' }}
       SLIC3R_WASM_MT: ${{ matrix.variant == 'mt' && 'ON' || 'OFF' }}
@@ -213,15 +223,15 @@ jobs:
         run: |
           git clone --depth 1 --branch "$ORCA_VERSION" \
             https://github.com/SoftFever/OrcaSlicer.git \
-            orca-wasm/orca
+            orca
 
       # ── Apply WASM patches ───────────────────────────────────────────
       - name: Patch OrcaSlicer source
-        run: python3 orca-wasm/patches/apply.py
+        run: python3 patches/apply.py
 
       # ── Restore cached WASM deps ─────────────────────────────────────
       # Cache key: runner OS + variant + OrcaSlicer version + deps script
-      # version. Cached dir: orca-wasm/deps-install/ (all dep installs
+      # version. Cached dir: deps-install/ (all dep installs
       # unified here; each matrix leg runs on its own isolated runner, so
       # st/mt never share a filesystem regardless of the path, but the key
       # is still variant-suffixed so a restore-keys fallback can never pull
@@ -234,7 +244,7 @@ jobs:
         id: dep-cache
         uses: actions/cache/restore@v6
         with:
-          path: orca-wasm/deps-install
+          path: deps-install
           key: wasm-deps-${{ runner.os }}-${{ matrix.variant }}-orca-${{ env.ORCA_VERSION }}-occt-${{ env.OCCT_VERSION }}-onetbb-${{ env.ONETBB_VERSION }}-v17
           # On a key bump, fall back to the closest previous cache. Stamp files
           # make partial deps-install safe, so only changed deps get rebuilt
@@ -265,7 +275,7 @@ jobs:
       # explicitly disables Boost.Thread's own pthread support) and adds
       # -pthread to Boost's own compile flags, since Emscripten's -pthread
       # affects codegen (TLS model, atomics) and mixing pthread/non-pthread
-      # object code is not safe to link — see ADR-011.
+      # object code is not safe to link.
       #
       # BOOST_LOG_NO_THREADS stays defined for BOTH variants, unlike the
       # other two — found live when mt's link step failed with ~30
@@ -284,7 +294,7 @@ jobs:
           source "$EMSDK/emsdk_env.sh"
           BOOST_VERSION="1.83.0"
           BOOST_UNDERSCORE="${BOOST_VERSION//./_}"
-          INSTALL="$(pwd)/orca-wasm/deps-install"
+          INSTALL="$(pwd)/deps-install"
           # _v2 suffix: manually bumped, not tied to BOOST_VERSION — the
           # BOOST_LOG_NO_THREADS fix above changed Boost's build *flags*,
           # not its pinned version, so BOOST_VERSION alone wouldn't
@@ -359,7 +369,7 @@ jobs:
           touch "${STAMP}"
 
       # ── GMP / MPFR / CGAL ────────────────────────────────────────────
-      # No threading-specific *code paths* (see ADR-011), but GMP/MPFR
+      # No threading-specific *code paths*, but GMP/MPFR
       # are real compiled libraries statically
       # linked into the final slicer-mt.wasm — every object linked into a
       # --shared-memory binary must itself be compiled with atomics/
@@ -374,7 +384,7 @@ jobs:
       - name: Build WASM deps — GMP / MPFR / CGAL
         run: |
           source "$EMSDK/emsdk_env.sh"
-          INSTALL="$(pwd)/orca-wasm/deps-install"
+          INSTALL="$(pwd)/deps-install"
           STAMP="${INSTALL}/.math_built_${{ matrix.variant }}"
           [[ -f "${STAMP}" ]] && echo "[math] stamp exists — skip" && exit 0
 
@@ -443,7 +453,7 @@ jobs:
       - name: Build WASM deps — Eigen3 / nlohmann / EXPAT / NLopt
         run: |
           source "$EMSDK/emsdk_env.sh"
-          INSTALL="$(pwd)/orca-wasm/deps-install"
+          INSTALL="$(pwd)/deps-install"
           # Stamp name is version-suffixed (like the OCCT step below) AND
           # variant-suffixed (new — EXPAT/NLopt's compiled objects now
           # differ by -pthread) so that bumping either invalidates it even
@@ -524,7 +534,7 @@ jobs:
       - name: Build WASM deps — libnoise
         run: |
           source "$EMSDK/emsdk_env.sh"
-          INSTALL="$(pwd)/orca-wasm/deps-install"
+          INSTALL="$(pwd)/deps-install"
           STAMP="${INSTALL}/.libnoise_built_${{ matrix.variant }}"
           [[ -f "${STAMP}" ]] && echo "[libnoise] stamp exists — skip" && exit 0
 
@@ -556,7 +566,7 @@ jobs:
           source "$EMSDK/emsdk_env.sh"
           OCCT_VERSION="7.8.1"
           OCCT_TAG="V${OCCT_VERSION//./_}"
-          INSTALL="$(pwd)/orca-wasm/deps-install"
+          INSTALL="$(pwd)/deps-install"
           # _v2 suffix: manually bumped, not tied to OCCT_TAG — the -pthread
           # fix below changed OCCT's build *flags* for mt, not its pinned
           # version, so OCCT_TAG alone wouldn't invalidate a stale cached
@@ -816,7 +826,7 @@ jobs:
         if: matrix.variant == 'mt'
         run: |
           source "$EMSDK/emsdk_env.sh"
-          INSTALL="$(pwd)/orca-wasm/deps-install"
+          INSTALL="$(pwd)/deps-install"
           STAMP="${INSTALL}/.onetbb_${ONETBB_VERSION}"
           [[ -f "${STAMP}" ]] && echo "[oneTBB] cached" && exit 0
 
@@ -839,7 +849,7 @@ jobs:
         if: steps.dep-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
-          path: orca-wasm/deps-install
+          path: deps-install
           key: wasm-deps-${{ runner.os }}-${{ matrix.variant }}-orca-${{ env.ORCA_VERSION }}-occt-${{ env.OCCT_VERSION }}-onetbb-${{ env.ONETBB_VERSION }}-v17
 
       # ── Configure WASM build ─────────────────────────────────────────
@@ -849,31 +859,31 @@ jobs:
         run: |
           source "$EMSDK/emsdk_env.sh"
           WORK="$(pwd)"
-          DEP_INSTALL="${WORK}/orca-wasm/deps-install"
-          mkdir -p orca-wasm/build-wasm
+          DEP_INSTALL="${WORK}/deps-install"
+          mkdir -p build-wasm
 
           # mt adds -pthread at compile time for the whole tree (libslic3r,
           # bridge, and the final slicer target all need pthread-consistent
-          # object code — see ADR-011) and switches the TBB
+          # object code) and switches the TBB
           # include dir (real oneTBB headers instead of the ST shims) +
-          # SLIC3R_WASM_MT compile define (see orca-wasm/bridge/CMakeLists.txt)
+          # SLIC3R_WASM_MT compile define (see bridge/CMakeLists.txt)
           # so the one threading-aware bridge line flips.
-          COMMON_SHIM_DIR="${WORK}/orca-wasm/wasm/shims-common"
-          TBB_INCLUDE_DIR="${WORK}/orca-wasm/wasm/shims"
+          COMMON_SHIM_DIR="${WORK}/wasm/shims-common"
+          TBB_INCLUDE_DIR="${WORK}/wasm/shims"
           if [[ "${{ matrix.variant }}" == "mt" ]]; then
             TBB_INCLUDE_DIR="${DEP_INSTALL}/include"
           fi
 
           emcmake cmake \
-            -S orca-wasm/orca \
-            -B orca-wasm/build-wasm \
+            -S orca \
+            -B build-wasm \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${DEP_INSTALL}" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_MODULE_PATH="${WORK}/orca-wasm/cmake" \
-            -DCMAKE_PROJECT_INCLUDE_BEFORE="${WORK}/orca-wasm/cmake/wasm_find_paths.cmake" \
+            -DCMAKE_MODULE_PATH="${WORK}/cmake" \
+            -DCMAKE_PROJECT_INCLUDE_BEFORE="${WORK}/cmake/wasm_find_paths.cmake" \
             -DSLIC3R_WASM=ON \
             -DSLIC3R_WASM_MT=${{ env.SLIC3R_WASM_MT }} \
             -DSLIC3R_GUI=OFF \
@@ -882,10 +892,10 @@ jobs:
             -DOCCT_WASM_DIR="${DEP_INSTALL}" \
             -DSLIC3R_OPENGL_IMGUI=OFF \
             -DTBB_SHIM_DIR="${TBB_INCLUDE_DIR}" \
-            -DORCA_WEB_BRIDGE_DIR="${WORK}/orca-wasm/bridge" \
-            -DORCA_WEB_WASM_DIR="${WORK}/orca-wasm/wasm" \
+            -DORCA_WEB_BRIDGE_DIR="${WORK}/bridge" \
+            -DORCA_WEB_WASM_DIR="${WORK}/wasm" \
             -DORCA_WEB_SHIM_DIR="${TBB_INCLUDE_DIR}" \
-            -DORCA_WEB_OVERRIDES_DIR="${WORK}/orca-wasm/overrides" \
+            -DORCA_WEB_OVERRIDES_DIR="${WORK}/overrides" \
             -DORCA_WEB_WASM_OUTPUT_NAME="${OUTPUT_NAME}" \
             -DBoost_NO_SYSTEM_PATHS=ON \
             -DBoost_NO_BOOST_CMAKE=ON \
@@ -901,7 +911,7 @@ jobs:
       - name: Build WASM module
         run: |
           source "$EMSDK/emsdk_env.sh"
-          emmake cmake --build orca-wasm/build-wasm --target slicer -j4
+          emmake cmake --build build-wasm --target slicer -j4
           echo "--- ccache stats ---"
           ccache -s || true
 
@@ -910,14 +920,14 @@ jobs:
       - name: Package WASM artifacts
         run: |
           echo "--- build output ---"
-          ls -lh orca-wasm/build-wasm/wasm/ 2>/dev/null || ls -lh orca-wasm/build-wasm/ || true
+          ls -lh build-wasm/wasm/ 2>/dev/null || ls -lh build-wasm/ || true
           echo "--- artifacts/ ---"
           ls -lh artifacts/ 2>/dev/null || true
 
           # Fallback copy if POST_BUILD didn't run.  ${OUTPUT_NAME}.data only
           # exists when a --preload-file bundle is used; the v2.4.2 engine
           # has none, so it is copied only if present.
-          BUILDDIR="orca-wasm/build-wasm/wasm"
+          BUILDDIR="build-wasm/wasm"
           if [[ ! -f "artifacts/${OUTPUT_NAME}.js" ]] && [[ -f "${BUILDDIR}/${OUTPUT_NAME}.js" ]]; then
             mkdir -p artifacts
             cp "${BUILDDIR}/${OUTPUT_NAME}.js"   "artifacts/${OUTPUT_NAME}.js"
@@ -935,14 +945,14 @@ jobs:
       # A build can compile cleanly and still be functionally broken (the
       # Voron Cube wall-generator crash and the boost::log/nozzle_info.json
       # crash both slipped through compile-only checks in the past — see
-      # orca-wasm/bridge/slicer.cpp's ensure_nozzle_info_json() comment and
+      # bridge/slicer.cpp's ensure_nozzle_info_json() comment and
       # wasm/CMakeLists.txt's --profiling-funcs comment). Actually slice
       # something with the freshly built engine before trusting it enough to
       # publish a release or upload it as an artifact anyone might use.
       # Runs before both "Upload artifacts" and the release step below so a
       # broken engine never reaches either.
       - name: Smoke test WASM module
-        run: node orca-wasm/scripts/smoke-test.mjs --wasm-dir artifacts --engine "${OUTPUT_NAME}"
+        run: node scripts/smoke-test.mjs --wasm-dir artifacts --engine "${OUTPUT_NAME}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -967,8 +977,8 @@ jobs:
       # computes that counter once before the matrix, so
       # "wasm-v2.4.0-patch5" and "wasm-v2.4.0-patch5-multithreaded" always
       # describe the same source commit, just two build variants of it. This
-      # mirrors the pattern already proven out in poc/wasm-threads/'s
-      # build-wasm-threads-poc.yml, now applied to the real engine.
+      # mirrors the paired-variant release pattern
+      # The release contains paired single-threaded and multithreaded assets.
       - name: Upload to GitHub Release
         if: github.event_name != 'pull_request'
         env:
@@ -987,7 +997,7 @@ jobs:
           # a new upstream version should still describe what changed since
           # the last published engine. `gh release list` sorts newest-first.
           # Matched as "wasm-v" (not just "wasm-") to exclude sibling release
-          # families like wasm-poc-* (see build-wasm-threads-poc.yml) that
+          # unrelated release families that
           # would otherwise be picked up as a bogus "previous engine release",
           # and excludes "-multithreaded" so the mt leg's changelog is
           # computed against the previous mt release, not the st one.
@@ -997,9 +1007,9 @@ jobs:
           # --notes "...\n\n..." passed the backslash-n sequences literally,
           # so published notes showed a verbatim "\n\n" instead of a blank line.
           cat > release-notes.md <<EOF
-          Pre-built WASM artifacts for OrcaSlicer $ORCA_VERSION ($( [[ "${{ matrix.variant }}" == "mt" ]] && echo "multithreaded — requires COOP/COEP headers, see ADR-011" || echo "single-threaded" )).
+          Pre-built WASM artifacts for OrcaSlicer $ORCA_VERSION ($( [[ "${{ matrix.variant }}" == "mt" ]] && echo "multithreaded — requires COOP/COEP headers" || echo "single-threaded" )).
 
-          Used internally by the deploy workflow. Immutable — a fix to orca-wasm/ publishes a new *-patchN release rather than overwriting this one.
+          Used by consumers of this repository. Immutable — a fix to the engine publishes a new *-patchN release rather than overwriting this one.
           EOF
           if [ -n "$PREV_TAG" ]; then
             # Fetch the tag explicitly rather than trusting checkout to have
@@ -1009,10 +1019,10 @@ jobs:
             # than mislabel the release as a no-change rebuild.
             if git fetch --quiet origin "refs/tags/${PREV_TAG}:refs/tags/${PREV_TAG}"; then
               # Path filter matches this workflow's own push triggers, so the
-              # list shows engine/pipeline changes only — no host integration PRs, no
+              # list shows engine/pipeline changes only — no unrelated
               # auto-bump commits. Master is squash-merged, so subjects are PR
               # titles whose (#NN) references GitHub auto-links in the body.
-              CHANGELOG=$(git log --format='- %s' "${PREV_TAG}..HEAD" -- orca-wasm/ .github/workflows/build-wasm.yml)
+              CHANGELOG=$(git log --format='- %s' "${PREV_TAG}..HEAD" -- .)
               {
                 echo ""
                 echo "## Changes since ${PREV_TAG}"
@@ -1100,12 +1110,10 @@ jobs:
 
       # Both downloads target artifacts/, not some fresh scratch directory
       # — st ships slicer.js/.wasm, mt ships slicer-mt.js/.wasm, so the
-      # filenames never collide, and artifacts/package.json ({"type":
-      # "commonjs"}, committed — see its own comment) is already there to
-      # override the repo root's "type": "module" for whichever directory
-      # compare-st-mt.mjs loads the engines from. A fresh directory here
-      # (the original "wasm-compare" this job shipped with) has no such
-      # override, so Node parses Emscripten's CommonJS output as ESM and
+      # filenames never collide. The Node harness loads the generated module
+      # through a data URL, so it does not require a package file beside the
+      # artifacts. A direct import would make Node parse Emscripten's
+      # CommonJS output as ESM and
       # its unconditional `require('worker_threads')` throws — the exact
       # ERR_WORKER_PATH-adjacent bug already fixed once for smoke-test.mjs,
       # just hit again here because this job downloads into a directory
@@ -1123,4 +1131,4 @@ jobs:
           path: artifacts
 
       - name: Run st vs. mt G-code comparison
-        run: node orca-wasm/scripts/compare-st-mt.mjs --wasm-dir artifacts
+        run: node scripts/compare-st-mt.mjs --wasm-dir artifacts

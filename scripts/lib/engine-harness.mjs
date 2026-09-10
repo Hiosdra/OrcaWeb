@@ -5,9 +5,8 @@
 // so the C bridge's calling convention lives in ONE place instead of being
 // copy-pasted and drifting between scripts.
 //
-// Plain Node ESM (no TS build step); the host app uses host loader
-// for the same job. The two are intentionally separate — this one has no TS
-// toolchain and runs standalone from the repo.
+// Plain Node ESM (no TS build step); host runtimes use their own loader for
+// the same job. This harness runs standalone from the repository.
 
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -122,7 +121,7 @@ export async function loadModule(wasmDir, engine) {
   const jsPath = resolve(wasmDir, `${engine}.js`)
   const wasmPath = resolve(wasmDir, `${engine}.wasm`)
   if (!existsSync(jsPath) || !existsSync(wasmPath)) {
-    throw new Error(`${engine}.js/${engine}.wasm not found in ${wasmDir} — build (build-wasm.yml) or download (npm run setup) the engine first`)
+    throw new Error(`${engine}.js/${engine}.wasm not found in ${wasmDir} — run the build workflow or build-local-wsl.sh first`)
   }
   const jsText = readFileSync(jsPath, 'utf8')
   const wasmBinary = readFileSync(wasmPath)
@@ -136,8 +135,7 @@ export async function loadModule(wasmDir, engine) {
     // resolves from `__filename` — but that's polyfilled to '' above (only
     // so the unconditional `__dirname + "/"` assignment doesn't throw), so
     // without this override Node's Worker constructor rejects the empty
-    // path with ERR_WORKER_PATH. Same fix as src/workers/slicer.worker.ts
-    // uses for the host build: hand Emscripten the real script path
+    // path with ERR_WORKER_PATH. Hand Emscripten the real script path
     // directly via the officially-supported override instead of relying on
     // the __filename fallback. Harmless no-op for st (non-pthread) builds,
     // whose output has no code path that reads this option.

@@ -1,5 +1,5 @@
 # Support two build contexts:
-#  A) orca-wasm/CMakeLists.txt (standalone / local dev):
+#  A) root CMakeLists.txt (standalone / local dev):
 #       ORCA_SRC and TBB_SHIM_DIR are set by the parent CMakeLists.
 #  B) OrcaSlicer's root CMakeLists.txt (CI / patches/apply.py injection):
 #       ORCA_SRC is set by the bridge injection block.
@@ -40,7 +40,7 @@ target_compile_definitions(orca_web_bridge PUBLIC
 # slicer.cpp's orc_slice_multi (auto-arrange); everything else is
 # unaffected — real parallelism lives entirely inside libslic3r via the real
 # oneTBB library selected through _SHIM_DIR/FindTBB.cmake above (built from
-# source in CI; see orca-wasm/MT-PLAN.md).
+# source in CI).
 option(SLIC3R_WASM_MT "Build against real oneTBB with Emscripten pthread threading" OFF)
 if(SLIC3R_WASM_MT)
   target_compile_definitions(orca_web_bridge PUBLIC SLIC3R_WASM_MT)

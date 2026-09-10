@@ -1,0 +1,74 @@
+name: Publish WASM artifact mirror
+
+on:
+  workflow_run:
+    workflows: ["Build WASM"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-wasm-pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'master')
+    runs-on: ubuntu-latest
+    env:
+      ORCA_VERSION: v2.4.2
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: master
+          fetch-depth: 1
+
+      - name: Download latest release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p pages/wasm
+          BASE_TAG="wasm-$ORCA_VERSION"
+          WASM_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq "
+            [.[] | .tagName | select(. == \"${BASE_TAG}\" or (startswith(\"${BASE_TAG}-patch\") and (ltrimstr(\"${BASE_TAG}-patch\") | test(\"^[0-9]+\\$\"))))]
+            | sort_by(if . == \"${BASE_TAG}\" then 0 else (ltrimstr(\"${BASE_TAG}-patch\") | tonumber) end)
+            | last // empty
+          ")
+          if [ -z "$WASM_TAG" ]; then
+            echo "No release found for $BASE_TAG" >&2
+            exit 1
+          fi
+          gh release download "$WASM_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'slicer.*' --dir pages/wasm
+
+          BASE_MT_TAG="${BASE_TAG}-multithreaded"
+          MT_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq "
+            [.[] | .tagName | select(. == \"${BASE_MT_TAG}\" or (startswith(\"${BASE_TAG}-patch\") and endswith(\"-multithreaded\") and (ltrimstr(\"${BASE_TAG}-patch\") | rtrimstr(\"-multithreaded\") | test(\"^[0-9]+\\$\"))))]
+            | sort_by(if . == \"${BASE_MT_TAG}\" then 0 else (ltrimstr(\"${BASE_TAG}-patch\") | rtrimstr(\"-multithreaded\") | tonumber) end)
+            | last // empty
+          ")
+          if [ -n "$MT_TAG" ]; then
+            gh release download "$MT_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'slicer-mt.*' --dir pages/wasm
+          fi
+
+          if [ -f pages/wasm/slicer-mt.wasm ]; then
+            VERSION=$(cat pages/wasm/slicer.wasm pages/wasm/slicer-mt.wasm | sha256sum | cut -c1-16)
+          else
+            VERSION=$(sha256sum pages/wasm/slicer.wasm | cut -c1-16)
+          fi
+          jq -n --arg label "${WASM_TAG#wasm-}" --arg version "$VERSION" \
+            '{label: $label, version: $version}' > pages/wasm/engine-version.json
+          touch pages/.nojekyll
+
+      - name: Publish artifact mirror
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./pages
+          force_orphan: true

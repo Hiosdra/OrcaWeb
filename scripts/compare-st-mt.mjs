@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * ST vs MT G-code equivalence check (see ADR-011).
+ * ST vs MT G-code equivalence check.
  *
  * Slices a fixed set of meshes through both engine variants — slicer.js
- * (single-threaded, orca-wasm/wasm/shims/ header stubs) and slicer-mt.js
+ * (single-threaded, wasm/shims/ header stubs) and slicer-mt.js
  * (multithreaded, real oneTBB + Emscripten pthreads) — with identical
  * configs, and compares the resulting G-code. Real parallelism can reorder
- * floating-point reductions (see ADR-011), so this deliberately does NOT
+ * floating-point reductions, so this deliberately does NOT
  * require byte-equal output: it requires an identical toolpath *structure*
  * (same layer count, same number of G0/G1 moves, same move types in the
  * same order) with G0/G1 coordinates matching within a small numeric
@@ -18,11 +18,9 @@
  * sets downloaded into the same directory.
  *
  * Usage:
- *   node orca-wasm/scripts/compare-st-mt.mjs [--wasm-dir artifacts] [--tolerance 0.01]
+ *   node scripts/compare-st-mt.mjs [--wasm-dir artifacts] [--tolerance 0.01]
  */
 
-import { readFileSync, existsSync } from 'node:fs'
-import { resolve } from 'node:path'
 import {
   trianglesToStl, sphereStl, loadModule, writeBytes, decodeError,
   initSession, sliceOnce, sliceMultiOnce,
@@ -41,7 +39,7 @@ function parseArgs(argv) {
 
 // ── test meshes ──────────────────────────────────────────────────────────────
 // A fixed set of STLs (small cube, a >100k-triangle organic mesh, a
-// multi-object plate through orc_slice_multi) — see ADR-011.
+// multi-object plate through orc_slice_multi).
 // sphereStl()/trianglesToStl() live in ./lib/engine-harness.mjs.
 
 function cubeStl(sizeMm) {

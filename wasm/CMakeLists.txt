@@ -7,9 +7,8 @@ add_executable(slicer "${CMAKE_CURRENT_SOURCE_DIR}/empty_main.cpp")
 target_link_libraries(slicer PRIVATE orca_web_bridge)
 
 # Output filename stem — "slicer" for the default sequential build,
-# "slicer-mt" for the multithreaded variant (see orca-wasm/MT-PLAN.md
-# Phase 2), so both can be published/deployed side by side and
-# host loader can pick one at runtime without either
+# "slicer-mt" for the multithreaded variant, so both can be published side by
+# side and a host loader can pick one at runtime without either
 # overwriting the other in artifacts/.
 if(NOT DEFINED ORCA_WEB_WASM_OUTPUT_NAME)
   if(SLIC3R_WASM_MT)
@@ -43,8 +42,7 @@ target_link_options(slicer PRIVATE
   # Pre-spawns the pthread worker pool at module load instead of creating
   # Web Workers lazily on first pthread_create() — required because the
   # slicer's calling thread never yields to the JS event loop while blocked
-  # inside print.process() (see poc/wasm-threads/'s own README/
-  # INTEGRATION-NOTES.md and orca-wasm/MT-PLAN.md: without this, a
+  # inside print.process(): without this, a
   # lazily-created pthread worker never actually materializes and any
   # blocking join/condvar wait on it hangs forever).
   #
@@ -65,7 +63,7 @@ target_link_options(slicer PRIVATE
   # Turn any residual pool exhaustion into a loud, immediate abort (surfaced
   # via onAbort → WASM_ERROR → the app falls back to reload) instead of the
   # silent on-demand-Worker deadlock. With the pool tracking the machine this
-  # should never fire; a fast, debuggable failure still beats a host integration hang.
+  # should never fire; a fast, debuggable failure still beats a runtime hang.
   $<$<BOOL:${SLIC3R_WASM_MT}>:-sPTHREAD_POOL_SIZE_STRICT=2>
   # EMULATE_FUNCTION_POINTER_CASTS + a raised max-func-params was tried here
   # to fix a real crash (slicing the official Voron Design Cube v7 STL traps
@@ -77,7 +75,7 @@ target_link_options(slicer PRIVATE
   # than the original bug (which only hit specific real-world meshes), so
   # it was reverted. The real root cause turned out to be unrelated to
   # function-pointer signatures: uninitialized WallToolPathsParams fields
-  # in Arachne's wall generator (see orca-wasm/patches/apply.py sections
+  # in Arachne's wall generator (see patches/apply.py sections
   # 8/8c/8d/8e/8f), fixed with default member initializers there instead —
   # verified against the Voron Cube, Stanford Bunny, and a 1.1M-triangle
   # model with Arachne enabled.
@@ -126,16 +124,16 @@ set_target_properties(slicer PROPERTIES
   SUFFIX ".js"
 )
 
-# Copy artifacts to the host integration's artifacts/ after build
+# Copy artifacts to the repository's artifacts/ directory after build
 add_custom_command(TARGET slicer POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../artifacts"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../artifacts"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_CURRENT_BINARY_DIR}/${ORCA_WEB_WASM_OUTPUT_NAME}.js"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../artifacts/${ORCA_WEB_WASM_OUTPUT_NAME}.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../artifacts/${ORCA_WEB_WASM_OUTPUT_NAME}.js"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_CURRENT_BINARY_DIR}/${ORCA_WEB_WASM_OUTPUT_NAME}.wasm"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../artifacts/${ORCA_WEB_WASM_OUTPUT_NAME}.wasm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../artifacts/${ORCA_WEB_WASM_OUTPUT_NAME}.wasm"
   # No .data output: the engine is built without --preload-file.
   COMMENT "Copying WASM artifacts to artifacts/"
 )

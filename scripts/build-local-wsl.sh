@@ -46,7 +46,7 @@ ccache --max-size=2G >/dev/null 2>&1 || true
 # escape hatch (3.31+) and applies to every invocation without patching each
 # dep's CMakeLists.txt. Not needed in CI, so not added to build-wasm.yml.
 export CMAKE_POLICY_VERSION_MINIMUM=3.5
-cd "$(dirname "$0")/../.."   # repo root (this script lives in orca-wasm/scripts/)
+cd "$(dirname "$0")/.."   # repo root (this script lives in scripts/)
 echo "[build-local-wsl] repo root: $(pwd)"
 echo "[build-local-wsl] ORCA_VERSION=$ORCA_VERSION VARIANT=$VARIANT"
 
@@ -54,13 +54,13 @@ echo "[build-local-wsl] ORCA_VERSION=$ORCA_VERSION VARIANT=$VARIANT"
 # Checkout OrcaSlicer ${ORCA_VERSION}
 # ══════════════════════════════════════════════════════════
 (
-if [ -d orca-wasm/orca/.git ]; then
-  echo "[checkout] orca-wasm/orca already present — skip"
+if [ -d orca/.git ]; then
+  echo "[checkout] orca already present — skip"
 else
-  rm -rf orca-wasm/orca
+  rm -rf orca
   git clone --depth 1 --branch "$ORCA_VERSION" \
     https://github.com/SoftFever/OrcaSlicer.git \
-    orca-wasm/orca
+    orca
 fi
 )
 
@@ -68,7 +68,7 @@ fi
 # Patch OrcaSlicer source
 # ══════════════════════════════════════════════════════════
 (
-python3 orca-wasm/patches/apply.py
+python3 patches/apply.py
 )
 
 # ══════════════════════════════════════════════════════════
@@ -78,7 +78,7 @@ python3 orca-wasm/patches/apply.py
 source "$EMSDK/emsdk_env.sh"
 BOOST_VERSION="1.83.0"
 BOOST_UNDERSCORE="${BOOST_VERSION//./_}"
-INSTALL="$(pwd)/orca-wasm/deps-install"
+INSTALL="$(pwd)/deps-install"
 # _v2 suffix: manually bumped, not tied to BOOST_VERSION — the
 # BOOST_LOG_NO_THREADS fix above changed Boost's build *flags*,
 # not its pinned version, so BOOST_VERSION alone wouldn't
@@ -159,7 +159,7 @@ touch "${STAMP}"
 # ══════════════════════════════════════════════════════════
 (
 source "$EMSDK/emsdk_env.sh"
-INSTALL="$(pwd)/orca-wasm/deps-install"
+INSTALL="$(pwd)/deps-install"
 STAMP="${INSTALL}/.math_built_${VARIANT}"
 [[ -f "${STAMP}" ]] && echo "[math] stamp exists — skip" && exit 0
 
@@ -226,7 +226,7 @@ touch "${STAMP}"
 # ══════════════════════════════════════════════════════════
 (
 source "$EMSDK/emsdk_env.sh"
-INSTALL="$(pwd)/orca-wasm/deps-install"
+INSTALL="$(pwd)/deps-install"
 # Stamp name is version-suffixed (like the OCCT step below) AND
 # variant-suffixed (new — EXPAT/NLopt's compiled objects now
 # differ by -pthread) so that bumping either invalidates it even
@@ -305,7 +305,7 @@ touch "${STAMP}"
 # ══════════════════════════════════════════════════════════
 (
 source "$EMSDK/emsdk_env.sh"
-INSTALL="$(pwd)/orca-wasm/deps-install"
+INSTALL="$(pwd)/deps-install"
 STAMP="${INSTALL}/.libnoise_built_${VARIANT}"
 [[ -f "${STAMP}" ]] && echo "[libnoise] stamp exists — skip" && exit 0
 
@@ -338,7 +338,7 @@ touch "${STAMP}"
 source "$EMSDK/emsdk_env.sh"
 OCCT_VERSION="7.8.1"
 OCCT_TAG="V${OCCT_VERSION//./_}"
-INSTALL="$(pwd)/orca-wasm/deps-install"
+INSTALL="$(pwd)/deps-install"
 # _v2 suffix: manually bumped, not tied to OCCT_TAG — the -pthread
 # fix below changed OCCT's build *flags* for mt, not its pinned
 # version, so OCCT_TAG alone wouldn't invalidate a stale cached
@@ -571,7 +571,7 @@ ls "${SYSROOT_LIB}/libjpeg.a" && echo "  libjpeg OK"
 if [[ "$VARIANT" == "mt" ]]; then
 (
 source "$EMSDK/emsdk_env.sh"
-INSTALL="$(pwd)/orca-wasm/deps-install"
+INSTALL="$(pwd)/deps-install"
 STAMP="${INSTALL}/.onetbb_${ONETBB_VERSION}"
 [[ -f "${STAMP}" ]] && echo "[oneTBB] cached" && exit 0
 
@@ -601,31 +601,31 @@ fi
 (
 source "$EMSDK/emsdk_env.sh"
 WORK="$(pwd)"
-DEP_INSTALL="${WORK}/orca-wasm/deps-install"
-mkdir -p orca-wasm/build-wasm
+DEP_INSTALL="${WORK}/deps-install"
+mkdir -p build-wasm
 
 # mt adds -pthread at compile time for the whole tree (libslic3r,
 # bridge, and the final slicer target all need pthread-consistent
-# object code — see ADR-011) and switches the TBB
+# object code) and switches the TBB
 # include dir (real oneTBB headers instead of the ST shims) +
-# SLIC3R_WASM_MT compile define (see orca-wasm/bridge/CMakeLists.txt)
+# SLIC3R_WASM_MT compile define (see bridge/CMakeLists.txt)
 # so the one threading-aware bridge line flips.
-COMMON_SHIM_DIR="${WORK}/orca-wasm/wasm/shims-common"
-TBB_INCLUDE_DIR="${WORK}/orca-wasm/wasm/shims"
+COMMON_SHIM_DIR="${WORK}/wasm/shims-common"
+TBB_INCLUDE_DIR="${WORK}/wasm/shims"
 if [[ "${VARIANT}" == "mt" ]]; then
   TBB_INCLUDE_DIR="${DEP_INSTALL}/include"
 fi
 
 emcmake cmake \
-  -S orca-wasm/orca \
-  -B orca-wasm/build-wasm \
+  -S orca \
+  -B build-wasm \
   -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH="${DEP_INSTALL}" \
   -DCMAKE_C_COMPILER_LAUNCHER=ccache \
   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-  -DCMAKE_MODULE_PATH="${WORK}/orca-wasm/cmake" \
-  -DCMAKE_PROJECT_INCLUDE_BEFORE="${WORK}/orca-wasm/cmake/wasm_find_paths.cmake" \
+  -DCMAKE_MODULE_PATH="${WORK}/cmake" \
+  -DCMAKE_PROJECT_INCLUDE_BEFORE="${WORK}/cmake/wasm_find_paths.cmake" \
   -DSLIC3R_WASM=ON \
   -DSLIC3R_WASM_MT=${SLIC3R_WASM_MT} \
   -DSLIC3R_GUI=OFF \
@@ -634,10 +634,10 @@ emcmake cmake \
   -DOCCT_WASM_DIR="${DEP_INSTALL}" \
   -DSLIC3R_OPENGL_IMGUI=OFF \
   -DTBB_SHIM_DIR="${TBB_INCLUDE_DIR}" \
-  -DORCA_WEB_BRIDGE_DIR="${WORK}/orca-wasm/bridge" \
-  -DORCA_WEB_WASM_DIR="${WORK}/orca-wasm/wasm" \
+  -DORCA_WEB_BRIDGE_DIR="${WORK}/bridge" \
+  -DORCA_WEB_WASM_DIR="${WORK}/wasm" \
   -DORCA_WEB_SHIM_DIR="${TBB_INCLUDE_DIR}" \
-  -DORCA_WEB_OVERRIDES_DIR="${WORK}/orca-wasm/overrides" \
+  -DORCA_WEB_OVERRIDES_DIR="${WORK}/overrides" \
   -DORCA_WEB_WASM_OUTPUT_NAME="${OUTPUT_NAME}" \
   -DBoost_NO_SYSTEM_PATHS=ON \
   -DBoost_NO_BOOST_CMAKE=ON \
@@ -656,7 +656,7 @@ emcmake cmake \
 # ══════════════════════════════════════════════════════════
 (
 source "$EMSDK/emsdk_env.sh"
-emmake cmake --build orca-wasm/build-wasm --target slicer -j4
+emmake cmake --build build-wasm --target slicer -j4
 echo "--- ccache stats ---"
 ccache -s || true
 
@@ -667,14 +667,14 @@ ccache -s || true
 # ══════════════════════════════════════════════════════════
 (
 echo "--- build output ---"
-ls -lh orca-wasm/build-wasm/wasm/ 2>/dev/null || ls -lh orca-wasm/build-wasm/ || true
+ls -lh build-wasm/wasm/ 2>/dev/null || ls -lh build-wasm/ || true
 echo "--- artifacts/ ---"
 ls -lh artifacts/ 2>/dev/null || true
 
 # Fallback copy if POST_BUILD didn't run.  ${OUTPUT_NAME}.data only
 # exists when a --preload-file bundle is used; the v2.4.2 engine
 # has none, so it is copied only if present.
-BUILDDIR="orca-wasm/build-wasm/wasm"
+BUILDDIR="build-wasm/wasm"
 if [[ ! -f "artifacts/${OUTPUT_NAME}.js" ]] && [[ -f "${BUILDDIR}/${OUTPUT_NAME}.js" ]]; then
   mkdir -p artifacts
   cp "${BUILDDIR}/${OUTPUT_NAME}.js"   "artifacts/${OUTPUT_NAME}.js"
@@ -694,5 +694,5 @@ ls -lh wasm-artifacts/
 # Smoke test WASM module
 # ══════════════════════════════════════════════════════════
 (
-node orca-wasm/scripts/smoke-test.mjs --wasm-dir artifacts --engine "${OUTPUT_NAME}"
+node scripts/smoke-test.mjs --wasm-dir artifacts --engine "${OUTPUT_NAME}"
 )

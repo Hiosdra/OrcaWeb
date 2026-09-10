@@ -5,42 +5,29 @@
  * Loads the built slicer.js/slicer.wasm and runs several real orc_init +
  * orc_slice(_multi)/orc_write_3mf/orc_read_3mf calls end-to-end, so a broken
  * engine build is caught before it's ever published as a GitHub Release
- * (build-wasm.yml) or trusted by local `npm run dev` after `npm run setup`.
+ * (build-wasm.yml) or trusted by a host after the artifacts are prepared.
  *
  * This formalizes the ad-hoc reproduction script referenced (but never
- * committed) in orca-wasm/wasm/CMakeLists.txt's --profiling-funcs comment,
+ * committed) in wasm/CMakeLists.txt's --profiling-funcs comment,
  * which was used to root-cause the Voron Cube wall-generator crash — a
  * build that compiles fine can still trap on a real slice, and nobody
  * noticed until a live user's host session failed.
  *
  * Usage:
- *   node orca-wasm/scripts/smoke-test.mjs [--wasm-dir artifacts] [--engine slicer] [--fixture path/to.stl]
+ *   node scripts/smoke-test.mjs [--wasm-dir artifacts] [--engine slicer] [--fixture path/to.stl]
  *
- * --engine selects the output-name stem (see orca-wasm/wasm/CMakeLists.txt's
+ * --engine selects the output-name stem (see wasm/CMakeLists.txt's
  * ORCA_WEB_WASM_OUTPUT_NAME) — "slicer" (default, single-threaded) or
- * "slicer-mt" (build-wasm.yml's mt matrix leg, real oneTBB — see
- * ADR-011). The mt build never produces a plain
+ * "slicer-mt" (build-wasm.yml's mt matrix leg, real oneTBB).
+ * The mt build never produces a plain
  * slicer.js/.wasm alias, so this must be passed explicitly for that variant.
  *
- * Without --fixture, every scenario runs against TWO meshes:
- *   1. A synthetic torture-test mesh (a subdivided icosphere, ~5120
- *      triangles), generated in memory — no redistribution question, runs
- *      fully offline, adds zero repo bloat.
- *   2. The real Voron Design Cube v7 (testdata/voron-design-cube-v7.stl,
- *      vendored under GPL-3.0 — see NOTICE.md and ADR-010). This is the
- *      exact real-world mesh that has repeatedly found bugs a synthetic
- *      primitive never would (the Arachne wall-generator crash chain in
- *      apply.py's patches 8/8c/8d/8e/8f, and the Boost.Log default-sink
- *      hang/trap — see the "disable Boost.Log core" fix in
- *      orca-wasm/bridge/slicer.cpp). Skipped with a warning if the fixture
- *      file isn't present (e.g. running this script outside the repo).
- * Pass --fixture to replace both of the above with a single specific STL,
- * for a closer repro of one particular case (that STL is never committed
- * by this script either).
+ * Without --fixture, the scenario runs against a synthetic torture-test mesh
+ * generated in memory.
+ * Pass --fixture to run against a specific STL.
  */
 
-import { readFileSync, existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
 import {
   sphereStl, loadModule, writeBytes, decodeError,
   initSession, sliceOnce, sliceMultiOnce, preparePlateOnce, encodeObjectTransforms,
@@ -428,20 +415,9 @@ function assertValidPlateTransforms(transforms, expectedCount, label, requireFin
 }
 
 // ── test meshes ──────────────────────────────────────────────────────────────
-// Repo root — this script lives in orca-wasm/scripts/.
-const VORON_CUBE_PATH = resolve(import.meta.dirname, '../../testdata/voron-design-cube-v7.stl')
-
 function collectMeshes(fixture) {
-  if (fixture) {
-    return [{ label: fixture, bytes: readFileSync(fixture) }]
-  }
-  const meshes = [{ label: 'synthetic icosphere (~5120 tris)', bytes: generateTortureStl() }]
-  if (existsSync(VORON_CUBE_PATH)) {
-    meshes.push({ label: 'Voron Design Cube v7 (real-world)', bytes: readFileSync(VORON_CUBE_PATH) })
-  } else {
-    console.warn(`[smoke-test] WARN: ${VORON_CUBE_PATH} not found — skipping the real-world mesh`)
-  }
-  return meshes
+  if (fixture) return [{ label: fixture, bytes: readFileSync(fixture) }]
+  return [{ label: 'synthetic icosphere (~5120 tris)', bytes: generateTortureStl() }]
 }
 
 // ── main ──────────────────────────────────────────────────────────────────────
@@ -632,7 +608,7 @@ async function main() {
     }
 
     // orc_write_3mf: mesh + embedded config, no plate/gcode data (see
-    // orca-wasm/bridge/slicer.cpp doc comment and issue #108's scope notes).
+    // bridge/slicer.cpp).
     // Use the real dual-nozzle shape here so the read side also proves it
     // preserves vector boundaries instead of returning one joined scalar per
     // filament/nozzle option.

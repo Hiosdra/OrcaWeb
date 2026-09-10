@@ -1,190 +1,89 @@
-# orca-wasm — OrcaSlicer WASM build
+# orca-wasm — OrcaSlicer WebAssembly engine
 
-Clean-room Emscripten build of [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer) v2.4.2 targeting the host.
+Standalone Emscripten build of [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer)
+v2.4.2. This repository contains the C++ bridge, compatibility patches,
+toolchain configuration, and release workflow for the host-ready engine.
 
-→ **[Full build guide in the docs](https://hiosdra.github.io/orca-wasm/docs/wasm-build/)**
+## Repository layout
 
-## Directory structure
-
-```
-orca-wasm/
-├── orca/                  ← git submodule: SoftFever/OrcaSlicer@v2.4.2
-├── bridge/
-│   ├── slicer.cpp         ← C++ bridge (orc_session_create/destroy, orc_init,
-│   │                          orc_slice, orc_slice_multi, orc_prepare_plate,
-│   │                          orc_obj_to_stl,
-│   │                          orc_cad_to_stl, orc_write_3mf, orc_read_3mf)
-│   └── CMakeLists.txt
-├── wasm/
-│   ├── CMakeLists.txt     ← final Emscripten link target
-│   ├── empty_main.cpp
-│   └── shims/
-│       ├── tbb/           ← sequential TBB stubs (no threading in WASM)
-│       ├── oneapi/tbb/    ← oneAPI TBB redirects
-│       ├── openvdb/       ← minimal OpenVDB type stubs
-│       ├── freetype/      ← minimal FreeType type stubs
-│       └── openssl/       ← minimal OpenSSL/MD5 stub
-├── overrides/             ← no-op C++ stubs replacing OCCT/OpenVDB/OpenCV/Draco
-│   └── src/libslic3r/
-│       ├── Format/STEP.{hpp,cpp}
-│       ├── Format/DRC.cpp
-│       ├── Format/svg.cpp
-│       ├── OpenVDBUtils.{hpp,cpp}
-│       ├── ObjColorUtils.{hpp,cpp}
-│       ├── SLA/Hollowing.cpp
-│       └── Shape/TextShape.cpp
-├── cmake/
-│   ├── FindTBB.cmake      ← creates TBB::tbb from our shims
-│   ├── FindOpenVDB.cmake  ← stub
-│   ├── FindOpenCV.cmake   ← stub
-│   └── Finddraco.cmake    ← stub
-├── patches/
-│   └── apply.py           ← idempotent Python patcher (regex-based)
-├── scripts/
-│   └── build-local-wsl.sh ← end-to-end local build script (generated from
-│                             .github/workflows/build-wasm.yml — see
-│                             ../scripts/gen-wsl-build-script.mjs)
-└── CMakeLists.txt         ← root cmake
+```text
+orca/                 OrcaSlicer source checkout (submodule or shallow clone)
+bridge/               exported C API and host boundary
+cmake/                dependency discovery and WASM configuration
+overrides/            source overrides for unavailable desktop libraries
+patches/              idempotent OrcaSlicer compatibility patcher
+wasm/                 Emscripten target and compatibility shims
+scripts/              local build, smoke-test, and comparison tools
+.github/workflows/    reproducible CI build and release workflow
 ```
 
 ## Artifacts
 
-| File | Size | Description |
-|------|------|-------------|
-| `slicer.wasm` | ~38 MB | Compiled OrcaSlicer v2.4.2 core + OCCT (STEP engine), single-threaded (ST) |
-| `slicer.js` | ~220 KB | Emscripten glue code (CommonJS IIFE), ST |
-| `slicer-mt.wasm` | ~37 MB | Same engine, linked against real oneTBB for multithreading (MT) — see [ADR-011](../mkdocs-docs/adr/adr-011-multithreaded-engine.md) |
-| `slicer-mt.js` | ~250 KB | Emscripten glue code, MT |
+| File | Description |
+|------|-------------|
+| `slicer.js` / `slicer.wasm` | Single-threaded compatibility engine |
+| `slicer-mt.js` / `slicer-mt.wasm` | Multithreaded engine for COOP/COEP hosts |
 
-No `slicer.data` — the headless flat-config slicer never reads `orca/resources` at runtime, so the 200 MB preload file was eliminated entirely.
+The build does not produce `slicer.data`: the headless engine uses its virtual
+filesystem only for input and output files.
 
 ## Local build
 
-Full setup instructions (Linux / macOS / WSL2, including package-manager
-commands): **[mkdocs-docs/wasm-build.md](../mkdocs-docs/wasm-build.md)**.
-
-Short version, once emsdk 3.1.74 and the system build tools (cmake, ninja,
-python3, m4, texinfo, openssl, ccache, a C/C++ toolchain) are installed:
+Install Emscripten 3.1.74 and the system tools used by CI (CMake, Ninja,
+Python 3, `m4`, `texinfo`, OpenSSL, `ccache`, and a C/C++ toolchain). Then run:
 
 ```bash
-# from the repo root, not orca-wasm/
-./orca-wasm/scripts/build-local-wsl.sh
+WASM_VARIANT=st ./scripts/build-local-wsl.sh
+WASM_VARIANT=mt ./scripts/build-local-wsl.sh
 ```
 
-Cold (deps + compile): ~2.5–3 h, mostly OCCT (~45–60 min). Warm (only C++
-changed, deps + ccache already populated): ~10–15 min. Artifacts land
-directly in `../artifacts/` (`slicer.js` + `slicer.wasm`).
+The script builds the pinned OrcaSlicer dependencies, applies `patches/apply.py`,
+and writes the selected pair to `artifacts/`. Use `EMSDK=/path/to/emsdk` when
+the toolchain is not installed at `/opt/emsdk`.
 
-`build-local-wsl.sh` is generated from `.github/workflows/build-wasm.yml`
-via `../scripts/gen-wsl-build-script.mjs`, so it can't silently drift from
-what CI actually runs — re-run the generator after editing the workflow
-instead of hand-editing the script.
+The generated local script is derived from
+`.github/workflows/build-wasm.yml`. After changing that workflow, regenerate it
+with:
+
+```bash
+node scripts/gen-wsl-build-script.mjs
+```
 
 ## C API
 
-Exported by `slicer.wasm` via Emscripten. Called as `_orc_*` from JavaScript.
+The module exports the session and conversion functions used by host runtimes:
 
-```c
-// Create/destroy an opaque session handle scoping config, bed geometry, and
-// last error (see ADR-008). Create once, reuse for every slice.
-void* _orc_session_create(void);
-void  _orc_session_destroy(void* session);
-
-// Initialise the given session with a JSON config (values string-encoded as in OrcaSlicer).
-int _orc_init(void* session, const char* json, int len);   // → 0 success
-
-// Slice an STL file (raw binary bytes) on the given session. The trailing
-// transform pointer is nullable; pass 0 to keep the legacy placement path.
-// *out_gcode is heap-allocated — free with _orc_free().
-int _orc_slice(void* session, const void* stl, int stl_len,
-               char** out_gcode, int* out_len,
-               const float* transforms); // → 0 success
-
-// Slice multiple STLs on one auto-arranged plate → single G-code. The trailing
-// transform pointer is nullable; pass 0 to keep the legacy placement path.
-// extruder_ids may be null (single-extruder callers).
-int _orc_slice_multi(void* session, const void* all_stl, int all_stl_len,
-                      const int* offsets, int n_files, const int* extruder_ids,
-                      char** out_gcode, int* out_len,
-                      const float* transforms); // → 0 success
-
-// Prepare the current plate without slicing. operation: 1 = auto-orient,
-// 2 = arrange. Returns a malloc'd JSON array with one transform per STL.
-int _orc_prepare_plate(void* session, const void* all_stl, int all_stl_len,
-                       const int* offsets, int n_files,
-                       const float* transforms, int operation,
-                       char** out_transforms_json, int* out_len); // → 0 success
-
-// Convert an OBJ file to binary STL (no session required).
-int _orc_obj_to_stl(const char* obj, int obj_len,
-                    char** out_stl, int* out_len); // → 0 success
-
-// Convert a STEP/STP file to binary STL via embedded OCCT (no session required).
-int _orc_cad_to_stl(const char* step, int step_len,
-                    char** out_stl, int* out_len); // → 0 success
-
-// Write the session's current mesh + config as a .3mf archive (mesh + embedded
-// settings only — no plate/G-code/thumbnail data).
-int _orc_write_3mf(void* session, const void* stl, int stl_len,
-                   char** out_data, int* out_len); // → 0 success
-
-// Read a .3mf archive via OrcaSlicer's own reader → merged STL + config JSON.
-// No session required (pure format conversion, like orc_obj_to_stl/orc_cad_to_stl).
-int _orc_read_3mf(const void* data, int data_len,
-                  char** out_stl, int* out_stl_len,
-                  char** out_config_json, int* out_config_len); // → 0 success
-
-void        _orc_free(void* ptr);
-const char* _orc_decode_exception(void* session);  // → last error C string; pass 0/null for the session-less functions
+```text
+orc_session_create / orc_session_destroy
+orc_init
+orc_slice / orc_slice_multi / orc_prepare_plate
+orc_obj_to_stl / orc_cad_to_stl
+orc_write_3mf / orc_read_3mf
+orc_free / orc_decode_exception
 ```
 
-See [Integration Guide](https://hiosdra.github.io/orca-wasm/docs/integration/) for full usage examples and the exact JS-side signatures (`sliceStl`, `sliceMultiStl`, `objToStl`, `cadToStl`).
+The JavaScript side calls the Emscripten exports with their `_orc_*` names.
+`bridge/slicer.cpp` is the authoritative ABI implementation.
 
-## Architecture
+## CI and releases
 
-```
-orca-wasm/
-└── slicer.cpp (bridge)
-    └── libslic3r (OrcaSlicer core, patched for WASM)
-        ├── TBB shims     → ST: sequential stubs; MT: real oneTBB (ADR-011)
-        ├── OCCT          → compiled in for STEP import; SVG/TextShape export
-        │                   still disabled (overrides — unrelated to STEP)
-        ├── No OpenVDB    → hollowing disabled (overrides)
-        ├── No OpenCV     → OBJ colour calibration disabled (overrides)
-        ├── No Draco      → Draco mesh import disabled (overrides)
-        └── libnoise      → compiled for WASM; FuzzySkin patched in-place
+The `Build WASM` workflow validates pull requests and builds both `st` and
+`mt` variants on the default branch. Each successful build runs the real
+engine smoke test before publishing immutable GitHub Release assets:
+
+```text
+wasm-v2.4.2
+wasm-v2.4.2-patchN
+wasm-v2.4.2-patchN-multithreaded
 ```
 
-See the [Architecture docs](https://hiosdra.github.io/orca-wasm/docs/architecture/#engine-clean-layer-override-approach) for the full table of stubs.
+A rebuild never overwrites an existing release. Consumers should resolve the
+highest patch number in the desired release family and use the JavaScript and
+WASM files from the same tag.
 
-## CI workflow
+## Licence and notices
 
-`.github/workflows/build-wasm.yml` — triggered by:
-- **Manual dispatch:** provide the upstream OrcaSlicer tag, for example `v2.4.2`
-- **Push to master** touching `orca-wasm/**` or the workflow itself — auto-publishes the next immutable patch release
-- **Pull requests** touching the same paths — validation build only, nothing is published
-
-Steps:
-1. Installs Emscripten 3.1.74
-2. Restores cached WASM deps (Boost, GMP, MPFR, CGAL)
-3. Checks out OrcaSlicer at the requested tag
-4. Runs `patches/apply.py`
-5. Builds with `cmake + ninja`
-6. Publishes `slicer.js` + `slicer.wasm` to a new, immutable GitHub Release:
-   `wasm-$ORCA_VERSION` for the first build of a given OrcaSlicer version,
-   `wasm-$ORCA_VERSION-patchN` for every later fix to `orca-wasm/` targeting
-   the same OrcaSlicer version — a rebuild never overwrites a previous
-   release's assets. The release description carries an auto-generated
-   changelog: the commits touching `orca-wasm/**` or the build workflow
-   since the previous `wasm-*` release.
-
-The main deploy workflow (`.github/workflows/deploy.yml`) resolves the
-highest-numbered release for the pinned OrcaSlicer version at deploy time,
-downloads its artifacts, and embeds them in the artifact mirror deployment
-under `app/wasm/`, served from the same origin as the app.
-
-## Licence
-
-OrcaSlicer source is © 2022 SoftFever and contributors, AGPL-3.0.
-The bridge code in `bridge/slicer.cpp` and build infrastructure in this directory
-are the original work of the orca-wasm project, MIT licence.
+OrcaSlicer and the linked libraries retain their upstream licences. See
+[`LICENSE`](LICENSE) and [`NOTICE.md`](NOTICE.md) for source and attribution
+details. The bridge and build infrastructure are original project code under the
+licence stated in `LICENSE`.
