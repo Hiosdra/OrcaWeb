@@ -79,7 +79,9 @@ wasm-v2.4.2-patchN-multithreaded
 
 A rebuild never overwrites an existing release. Consumers should resolve the
 highest patch number in the desired release family and use the JavaScript and
-WASM files from the same tag.
+WASM files from the same tag. This repository publishes engine releases only;
+the frontend deployment is handled separately by the JustSlice-PoC Cloudflare
+Pages project.
 
 ## Licence and notices
 
