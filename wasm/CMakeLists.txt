@@ -87,14 +87,16 @@ target_link_options(slicer PRIVATE
   # keeps MEMFS available for the bridge's /tmp STL-in / G-code-out files.
   -sFORCE_FILESYSTEM=1
   # Exported C functions consumed by the JS runtime and the common
-  # one-wasm-slicer-api 0.1 contract.
+  # one-wasm-slicer-api 0.2 contract.
   "-sEXPORTED_FUNCTIONS=[\
 '_onewasm_session_create',\
 '_onewasm_session_destroy',\
 '_onewasm_init',\
 '_onewasm_init_profile',\
 '_onewasm_set_progress_callback',\
+'_onewasm_cancel',\
 '_onewasm_get_capabilities',\
+'_onewasm_get_last_statistics',\
 '_onewasm_slice_stl',\
 '_onewasm_slice_stl_multi',\
 '_onewasm_prepare_plate',\

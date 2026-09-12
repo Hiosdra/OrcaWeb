@@ -64,8 +64,8 @@ function getCapabilitiesOnce(module) {
     const len = module.getValue(outLenPtr, 'i32')
     try {
       const capabilities = JSON.parse(new TextDecoder().decode(module.HEAPU8.slice(ptr, ptr + len)))
-      if (capabilities.api?.name !== 'one-wasm-slicer-api' || capabilities.api?.version !== '0.1.0') {
-        throw new Error('capabilities document does not identify one-wasm-slicer-api 0.1.0')
+      if (capabilities.api?.name !== 'one-wasm-slicer-api' || capabilities.api?.version !== '0.2.0') {
+        throw new Error('capabilities document does not identify one-wasm-slicer-api 0.2.0')
       }
       return capabilities
     } finally {
@@ -75,6 +75,43 @@ function getCapabilitiesOnce(module) {
     module._free(outLenPtr)
     module._free(outPtrPtr)
   }
+}
+
+function getStatisticsOnce(module, session) {
+  const outPtrPtr = checkedMalloc(module, 4, 'statistics output pointer')
+  const outLenPtr = checkedMalloc(module, 4, 'statistics output length')
+  try {
+    const rc = module._onewasm_get_last_statistics(session, outPtrPtr, outLenPtr)
+    if (rc !== 0) throw new Error(`onewasm_get_last_statistics failed (${rc}): ${decodeError(module, session)}`)
+    const ptr = module.getValue(outPtrPtr, 'i32')
+    const len = module.getValue(outLenPtr, 'i32')
+    try { return JSON.parse(new TextDecoder().decode(module.HEAPU8.slice(ptr, ptr + len))) } finally { module._onewasm_free(ptr) }
+  } finally {
+    module._free(outLenPtr)
+    module._free(outPtrPtr)
+  }
+}
+
+function assertNoStatistics(module, session, label) {
+  const outPtrPtr = checkedMalloc(module, 4, 'empty statistics output pointer')
+  const outLenPtr = checkedMalloc(module, 4, 'empty statistics output length')
+  try {
+    const rc = module._onewasm_get_last_statistics(session, outPtrPtr, outLenPtr)
+    if (rc !== -12) throw new Error(`${label}: expected ONEWASM_ERR_NO_DATA (-12), got ${rc}`)
+    if (module.getValue(outPtrPtr, 'i32') !== 0 || module.getValue(outLenPtr, 'i32') !== 0) {
+      throw new Error(`${label}: no-data getter returned a non-empty output`)
+    }
+  } finally {
+    module._free(outLenPtr)
+    module._free(outPtrPtr)
+  }
+}
+
+function assertStatistics(statistics, label) {
+  if (statistics?.schemaVersion !== '0.2') throw new Error(`${label}: invalid statistics schema version`)
+  if (!statistics.timeSeconds || !statistics.filament) throw new Error(`${label}: incomplete statistics document`)
+  if (!Array.isArray(statistics.filament.lengthMmByExtruder)) throw new Error(`${label}: missing per-extruder filament lengths`)
+  if (!Array.isArray(statistics.printingExtruders)) throw new Error(`${label}: missing printing extruder list`)
 }
 
 function initProfileOnce(module, session, mfBytes) {
@@ -471,6 +508,8 @@ async function main() {
 
   const session = module._onewasm_session_create()
   if (!session) throw new Error('onewasm_session_create failed (allocation failure)')
+  if (module._onewasm_cancel(session) !== 0) throw new Error('idle onewasm_cancel was not a no-op')
+  assertNoStatistics(module, session, 'before first successful slice')
 
   const scenarios = [
     {
@@ -507,6 +546,7 @@ async function main() {
         const gcode = sliceOnce(module, session, mesh.bytes)
         assertSaneGcode(gcode, label)
         assertRestsOnBed(gcode, label, scenario.config.initial_layer_print_height)
+        assertStatistics(getStatisticsOnce(module, session), label)
         scenario.assert?.(gcode, label)
         console.log(`PASS (${gcode.length} bytes)`)
       } catch (err) {
@@ -527,6 +567,7 @@ async function main() {
       const gcode = sliceMultiOnce(module, session, [mesh.bytes, mesh.bytes], Int32Array.from([1, 1]))
       assertSaneGcode(gcode, plateLabel)
       assertRestsOnBed(gcode, plateLabel, BASE_CONFIG.initial_layer_print_height)
+      assertStatistics(getStatisticsOnce(module, session), plateLabel)
       console.log(`PASS (${gcode.length} bytes)`)
     } catch (err) {
       failures++
@@ -545,6 +586,7 @@ async function main() {
       assertSaneGcode(gcode, dualLabel)
       assertRestsOnBed(gcode, dualLabel, BASE_CONFIG.initial_layer_print_height)
       assertToolChanges(gcode, dualLabel)
+      assertStatistics(getStatisticsOnce(module, session), dualLabel)
       console.log(`PASS (${gcode.length} bytes)`)
     } catch (err) {
       failures++
@@ -564,6 +606,7 @@ async function main() {
       if (!/; nozzle_temperature = 220,255\n/.test(gcode)) throw new Error('slot 2 assignment collapsed the per-filament nozzle temperatures')
       if (!/; nozzle_temperature_initial_layer = 220,255\n/.test(gcode)) throw new Error('slot 2 assignment collapsed the first-layer temperatures')
       if (!/(?:^|\n)T1(?:\s|$)/m.test(gcode)) throw new Error('slot 2 assignment did not select T1')
+      assertStatistics(getStatisticsOnce(module, session), singlePetgLabel)
       console.log(`PASS (${gcode.length} bytes)`)
     } catch (err) {
       failures++
@@ -583,6 +626,7 @@ async function main() {
       assertSaneGcode(gcode, towerLabel)
       assertToolChanges(gcode, towerLabel)
       assertWipeTowerOnBed(gcode, SMALL_BED_AMS_CONFIG.bed_size_x, SMALL_BED_AMS_CONFIG.bed_size_y, towerLabel)
+      assertStatistics(getStatisticsOnce(module, session), towerLabel)
       console.log(`PASS (${gcode.length} bytes)`)
     } catch (err) {
       failures++
@@ -617,6 +661,7 @@ async function main() {
         }
       }
       if (!rejected) throw new Error('expected the slice to be rejected, but it succeeded')
+      assertNoStatistics(module, session, `${guardLabel} after failed slice`)
       console.log('PASS (rejected as expected)')
     } catch (err) {
       failures++
@@ -631,6 +676,7 @@ async function main() {
       const gcode = sliceMultiOnce(module, session, [mesh.bytes, mesh.bytes], Int32Array.from([1, 2]))
       assertSaneGcode(gcode, overrideLabel)
       assertToolChanges(gcode, overrideLabel)
+      assertStatistics(getStatisticsOnce(module, session), overrideLabel)
       console.log(`PASS (${gcode.length} bytes)`)
     } catch (err) {
       failures++

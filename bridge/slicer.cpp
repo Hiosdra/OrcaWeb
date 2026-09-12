@@ -15,13 +15,15 @@
  *   onewasm_write_3mf(session, stl, stlLen, outPtr, outLen)        → 0 = ok
  *   onewasm_read_3mf(mf, mfLen, outStl, outStlLen)                 → 0 = ok
  *   onewasm_get_capabilities(outJson, outLen)
+ *   onewasm_get_last_statistics(session, outJson, outLen)
+ *   onewasm_cancel(session)
  *   onewasm_free(ptr)
  *   onewasm_last_error(session)                                   → null-terminated UTF-8 string
  *
  * onewasm_obj_to_stl / onewasm_cad_to_stl / onewasm_read_3mf are pure format conversions
  * — they never touch slicer config state, so they take no session handle.
  *
- * Error codes for the session-bound operations follow one-wasm-slicer-api 0.1:
+ * Error codes for the session-bound operations follow one-wasm-slicer-api 0.2:
  *   -1  invalid / uninitialized state (includes a null/invalid session handle)
  *   -2  JSON parse failure
  *   -3  STL write to MEMFS failed
@@ -31,6 +33,8 @@
  *   -7  slicing error
  *   -8  gcode export failed (or, for onewasm_write_3mf, 3MF export failed)
  *   -9  unexpected C++ exception
+ *   -11 active operation was cancelled
+ *   -12 no optional result is available
  *
  * onewasm_read_3mf reuses the same -1/-3/-4/-5/-8/-9 meanings (input write /
  * 3MF load / no geometry / STL export / exception), decoded via
@@ -40,6 +44,7 @@
 #include "onewasm_slicer_api.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -47,6 +52,7 @@
 #include <string>
 #include <stdexcept>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <new>
 #include <limits>
@@ -144,6 +150,87 @@ struct OrcSession {
     float adaptive_layer_height_quality = 0.5f;
     onewasm_progress_callback_t progress_callback = nullptr;
     void* progress_user_data = nullptr;
+    // `onewasm_cancel` is the one session operation allowed to run while a
+    // slice is active. All other session operations remain host-serialized.
+    std::mutex control_mutex;
+    std::shared_ptr<struct ActiveSlice> active_slice;
+    std::string last_statistics_json;
+    bool has_last_statistics = false;
+};
+
+// The native PrintBase cancellation flag is atomic, but the pointer to the
+// active Print is not. Keep both behind one small operation object so a cancel
+// request cannot call into a Print while the Print is being constructed or
+// destroyed. The shared_ptr also makes the idle/cancel race safe: a caller may
+// retain the operation object while the slicing function is unwinding.
+struct ActiveSlice {
+    std::atomic<bool> cancel_requested{false};
+    std::mutex print_mutex;
+    Slic3r::PrintBase* print = nullptr;
+
+    void attach(Slic3r::PrintBase& value) {
+        std::lock_guard<std::mutex> lock(print_mutex);
+        print = &value;
+        if (cancel_requested.load(std::memory_order_acquire))
+            print->cancel();
+    }
+
+    void detach() {
+        std::lock_guard<std::mutex> lock(print_mutex);
+        print = nullptr;
+    }
+
+    void cancel() {
+        cancel_requested.store(true, std::memory_order_release);
+        std::lock_guard<std::mutex> lock(print_mutex);
+        if (print)
+            print->cancel();
+    }
+};
+
+class ActiveSliceGuard {
+public:
+    explicit ActiveSliceGuard(OrcSession& session)
+        : session_(session), operation_(std::make_shared<ActiveSlice>()) {
+        std::lock_guard<std::mutex> lock(session_.control_mutex);
+        if (session_.active_slice)
+            return;
+        session_.active_slice = operation_;
+        session_.last_statistics_json.clear();
+        session_.has_last_statistics = false;
+        registered_ = true;
+    }
+
+    ~ActiveSliceGuard() {
+        if (!registered_)
+            return;
+        operation_->detach();
+        std::lock_guard<std::mutex> lock(session_.control_mutex);
+        if (session_.active_slice == operation_)
+            session_.active_slice.reset();
+    }
+
+    ActiveSliceGuard(const ActiveSliceGuard&) = delete;
+    ActiveSliceGuard& operator=(const ActiveSliceGuard&) = delete;
+
+    explicit operator bool() const { return registered_; }
+    bool cancelled() const { return operation_->cancel_requested.load(std::memory_order_acquire); }
+    void attach(Slic3r::PrintBase& print) { operation_->attach(print); }
+    void detach() { operation_->detach(); }
+
+private:
+    OrcSession& session_;
+    std::shared_ptr<ActiveSlice> operation_;
+    bool registered_ = false;
+};
+
+// Declaring this guard immediately after the stack Print makes it destruct
+// before Print itself. That ordering is what prevents a concurrent cancel
+// from observing a dangling native Print pointer during exception unwinding.
+struct ActivePrintGuard {
+    ActiveSliceGuard& operation;
+    explicit ActivePrintGuard(ActiveSliceGuard& value) : operation(value) {}
+    ~ActivePrintGuard() { operation.detach(); }
 };
 
 // Slicing blocks the worker's event loop. MAIN_THREAD_EM_ASM delivers this
@@ -616,6 +703,137 @@ static void set_is_bbl_printer(Slic3r::Print& print, const Slic3r::DynamicPrintC
     print.is_BBL_printer() = boost::starts_with(config.opt_string("printer_model"), "Bambu Lab");
 }
 
+static void throw_if_cancelled(const ActiveSliceGuard& operation) {
+    if (operation.cancelled())
+        throw Slic3r::CanceledException();
+}
+
+static double filament_length_from_volume(double volume_mm3, double diameter_mm) {
+    if (!std::isfinite(volume_mm3) || volume_mm3 <= 0.0 || !std::isfinite(diameter_mm) || diameter_mm <= 0.0)
+        return 0.0;
+    const double cross_section_mm2 = std::acos(-1.0) * std::pow(diameter_mm * 0.5, 2.0);
+    return volume_mm3 / cross_section_mm2;
+}
+
+static nlohmann::json optional_non_negative(double value) {
+    return std::isfinite(value) && value >= 0.0 ? nlohmann::json(value) : nlohmann::json(nullptr);
+}
+
+// Convert Orca's native GCodeProcessorResult into the versioned common
+// statistics document. The processor stores filament volumes in mm^3; the
+// common schema exposes both volume in cm^3 and length in mm, using the
+// engine's per-filament diameter/density/cost vectors for conversion.
+static std::string serialize_slice_statistics(const Slic3r::Print& print,
+                                              const Slic3r::GCodeProcessorResult& processor_result) {
+    const auto& native = processor_result.print_statistics;
+    const auto& config = print.config();
+    const auto normal_index = static_cast<std::size_t>(Slic3r::PrintEstimatedStatistics::ETimeMode::Normal);
+    const auto silent_index = static_cast<std::size_t>(Slic3r::PrintEstimatedStatistics::ETimeMode::Stealth);
+
+    std::size_t extruder_count = std::max({
+        processor_result.filament_diameters.size(),
+        processor_result.filament_densities.size(),
+        processor_result.filament_costs.size(),
+        config.filament_type.values.size(),
+        config.filament_diameter.values.size(),
+    });
+    for (const auto& [id, unused] : native.total_volumes_per_extruder)
+        extruder_count = std::max(extruder_count, id + 1);
+    for (const auto& [id, unused] : native.wipe_tower_volumes_per_extruder)
+        extruder_count = std::max(extruder_count, id + 1);
+    for (const auto& [id, unused] : native.flush_per_filament)
+        extruder_count = std::max(extruder_count, id + 1);
+
+    std::vector<double> length_mm(extruder_count, 0.0);
+    std::vector<double> volume_cm3(extruder_count, 0.0);
+    std::vector<double> mass_g(extruder_count, 0.0);
+    std::vector<nlohmann::json> cost(extruder_count, nlohmann::json(0.0));
+    std::vector<double> wipe_tower_length_mm(extruder_count, 0.0);
+    std::vector<double> flush_length_mm(extruder_count, 0.0);
+    std::vector<nlohmann::json> filament_types(extruder_count, nlohmann::json(nullptr));
+
+    auto vector_value = [](const auto& values, std::size_t id, double fallback) {
+        return id < values.size() && std::isfinite(values[id]) ? values[id] : fallback;
+    };
+    auto config_diameter = [&config](std::size_t id) {
+        return id < config.filament_diameter.values.size() ? config.filament_diameter.values[id] : 0.0;
+    };
+    auto diameter_for = [&](std::size_t id) {
+        return vector_value(processor_result.filament_diameters, id, config_diameter(id));
+    };
+
+    for (std::size_t id = 0; id < extruder_count; ++id) {
+        if (id < config.filament_type.values.size())
+            filament_types[id] = config.filament_type.values[id];
+    }
+
+    double total_length_mm = 0.0;
+    double total_volume_cm3 = 0.0;
+    double total_mass_g = 0.0;
+    double total_filament_cost = 0.0;
+    for (const auto& [id, volume] : native.total_volumes_per_extruder) {
+        const double diameter = diameter_for(id);
+        const double length = filament_length_from_volume(volume, diameter);
+        const double volume_cm3_value = std::max(0.0, volume * 0.001);
+        const double density = vector_value(processor_result.filament_densities, id, 0.0);
+        const double mass = volume_cm3_value * std::max(0.0, density);
+        const double filament_cost = vector_value(processor_result.filament_costs, id, 0.0);
+        const double cost_value = mass * std::max(0.0, filament_cost) * 0.001;
+        length_mm[id] = length;
+        volume_cm3[id] = volume_cm3_value;
+        mass_g[id] = mass;
+        cost[id] = cost_value;
+        total_length_mm += length;
+        total_volume_cm3 += volume_cm3_value;
+        total_mass_g += mass;
+        total_filament_cost += cost_value;
+    }
+
+    auto map_volume_to_length = [&](const std::map<std::size_t, double>& values,
+                                    std::vector<double>& destination) {
+        for (const auto& [id, volume] : values)
+            destination[id] = filament_length_from_volume(volume, diameter_for(id));
+    };
+    map_volume_to_length(native.wipe_tower_volumes_per_extruder, wipe_tower_length_mm);
+    map_volume_to_length(native.flush_per_filament, flush_length_mm);
+
+    nlohmann::json result;
+    result["schemaVersion"] = "0.2";
+    result["timeSeconds"] = {
+        {"normal", normal_index < native.modes.size() ? optional_non_negative(native.modes[normal_index].time) : nlohmann::json(nullptr)},
+        {"silent", silent_index < native.modes.size() && native.modes[silent_index].time > 0.0f
+            ? optional_non_negative(native.modes[silent_index].time) : nlohmann::json(nullptr)},
+        {"firstLayer", optional_non_negative(processor_result.initial_layer_time)},
+    };
+    result["filament"] = {
+        {"lengthMmByExtruder", length_mm},
+        {"volumeCm3ByExtruder", volume_cm3},
+        {"massGByExtruder", mass_g},
+        {"costByExtruder", cost},
+        {"totalLengthMm", total_length_mm},
+        {"totalVolumeCm3", total_volume_cm3},
+        {"totalMassG", total_mass_g},
+        {"totalCost", total_filament_cost},
+        {"wipeTowerLengthMmByExtruder", wipe_tower_length_mm},
+        {"flushLengthMmByExtruder", flush_length_mm},
+        {"filamentTypesByExtruder", filament_types},
+    };
+    result["toolChanges"] = processor_result.print_statistics.total_extruder_changes;
+    result["initialExtruderId"] = print.print_statistics().initial_tool;
+    result["printingExtruders"] = nlohmann::json::array();
+    for (const auto& [id, volume] : native.total_volumes_per_extruder) {
+        if (volume > 0.0)
+            result["printingExtruders"].push_back(id);
+    }
+    return result.dump();
+}
+
+static void publish_slice_statistics(OrcSession& session, std::string statistics_json) {
+    std::lock_guard<std::mutex> lock(session.control_mutex);
+    session.last_statistics_json = std::move(statistics_json);
+    session.has_last_statistics = true;
+}
+
 // Compute a per-object adaptive layer height profile and store it on each
 // object, matching what desktop OrcaSlicer's "Adaptive" button does before a
 // slice (GLCanvas3D::LayersEditing::adaptive_layer_height_profile). Must run
@@ -984,6 +1202,22 @@ onewasm_status_t onewasm_set_progress_callback(
     return ONEWASM_OK;
 }
 
+/** Request native cancellation of the active operation without waiting. */
+EMSCRIPTEN_KEEPALIVE
+onewasm_status_t onewasm_cancel(onewasm_session_t session_ptr) {
+    OrcSession* session = as_session(session_ptr);
+    if (!session) return ONEWASM_ERR_INVALID_ARGUMENT;
+
+    std::shared_ptr<ActiveSlice> operation;
+    {
+        std::lock_guard<std::mutex> lock(session->control_mutex);
+        operation = session->active_slice;
+    }
+    if (operation)
+        operation->cancel();
+    return ONEWASM_OK;
+}
+
 EMSCRIPTEN_KEEPALIVE
 onewasm_status_t onewasm_get_capabilities(uint8_t** out_json, uint32_t* out_len) {
     g_conversion_last_error.clear();
@@ -1002,11 +1236,11 @@ onewasm_status_t onewasm_get_capabilities(uint8_t** out_json, uint32_t* out_len)
     constexpr const char* requires_sab = "false";
 #endif
     const std::string json = std::string(R"({
-  "api":{"name":"one-wasm-slicer-api","version":"0.1.0"},
+  "api":{"name":"one-wasm-slicer-api","version":"0.2.0"},
   "engine":{"family":"OrcaSlicer","version":"2.4.2"},
-  "runtime":{"threadingModel":")") + threading_model + R"(","supportedHosts":["web","worker","node"],"requiresSharedArrayBuffer":)" + requires_sab + R"(,"requiresCrossOriginIsolated":)" + requires_sab + R"(,"cancellationMode":"worker-terminate"},
+  "runtime":{"threadingModel":")") + threading_model + R"(","supportedHosts":["web","worker","node"],"requiresSharedArrayBuffer":)" + requires_sab + R"(,"requiresCrossOriginIsolated":)" + requires_sab + R"(,"cancellationMode":"cooperative"},
   "configuration":{"initFormats":["orca.native-json"],"fullProfileFormats":["project.3mf"]},
-  "features":{"configuration.native":"supported","configuration.fullprofile":"supported","progress.callback":"supported","slicing.single":"supported","slicing.multi":"supported","plate.autoorient":"supported","plate.arrange":"supported","conversion.objtostl":"supported","conversion.cadtostl":"supported","project.write3mf":"supported","project.read3mf":"supported"}
+  "features":{"configuration.native":"supported","configuration.fullprofile":"supported","progress.callback":"supported","runtime.cancellation":"supported","runtime.statistics":"supported","slicing.single":"supported","slicing.multi":"supported","plate.autoorient":"supported","plate.arrange":"supported","conversion.objtostl":"supported","conversion.cadtostl":"supported","project.write3mf":"supported","project.read3mf":"supported"}
 })";
     if (json.size() > UINT32_MAX) {
         record_error("capability document is too large");
@@ -1020,6 +1254,38 @@ onewasm_status_t onewasm_get_capabilities(uint8_t** out_json, uint32_t* out_len)
     std::memcpy(buffer, json.data(), json.size());
     *out_json = buffer;
     *out_len = static_cast<uint32_t>(json.size());
+    return ONEWASM_OK;
+}
+
+EMSCRIPTEN_KEEPALIVE
+onewasm_status_t onewasm_get_last_statistics(
+    onewasm_session_t session_ptr,
+    uint8_t** out_json,
+    uint32_t* out_len
+) {
+    OrcSession* session = as_session(session_ptr);
+    if (out_json) *out_json = nullptr;
+    if (out_len) *out_len = 0;
+    if (!session || !out_json || !out_len)
+        return ONEWASM_ERR_INVALID_ARGUMENT;
+
+    std::lock_guard<std::mutex> lock(session->control_mutex);
+    if (!session->has_last_statistics) {
+        session->last_error = "no statistics are available; run a successful slice first";
+        return ONEWASM_ERR_NO_DATA;
+    }
+    if (session->last_statistics_json.size() > UINT32_MAX) {
+        session->last_error = "statistics document is too large";
+        return ONEWASM_ERR_OUTPUT;
+    }
+    auto* buffer = static_cast<uint8_t*>(std::malloc(std::max<std::size_t>(1, session->last_statistics_json.size())));
+    if (!buffer) {
+        session->last_error = "out of memory";
+        return ONEWASM_ERR_OUTPUT;
+    }
+    std::memcpy(buffer, session->last_statistics_json.data(), session->last_statistics_json.size());
+    *out_json = buffer;
+    *out_len = static_cast<uint32_t>(session->last_statistics_json.size());
     return ONEWASM_OK;
 }
 
@@ -1046,6 +1312,12 @@ onewasm_status_t onewasm_slice_stl(
     if (!stl_data || stl_len == 0 || !out_gcode || !out_len)
         return -1;
 
+    ActiveSliceGuard operation(*session);
+    if (!operation) {
+        record_error(*session, "session already has an active operation");
+        return ONEWASM_ERR_INVALID_ARGUMENT;
+    }
+
     // Write raw STL bytes into Emscripten's MEMFS so OrcaSlicer can read it.
     {
         FILE* f = std::fopen("/tmp/ow_in.stl", "wb");
@@ -1055,6 +1327,7 @@ onewasm_status_t onewasm_slice_stl(
     }
 
     try {
+        throw_if_cancelled(operation);
         // ── load model ───────────────────────────────────────────────
         Slic3r::Model model;
         const bool stl_ok = Slic3r::load_stl("/tmp/ow_in.stl", &model, "object");
@@ -1067,6 +1340,7 @@ onewasm_status_t onewasm_slice_stl(
             record_error(*session, "model contains no objects");
             return -5;
         }
+        throw_if_cancelled(operation);
 
         // ── place model on bed ───────────────────────────────────────
         // Center the mesh in X/Y, then offset to bed centre. Per-object
@@ -1082,6 +1356,8 @@ onewasm_status_t onewasm_slice_stl(
 
         // ── configure & slice ────────────────────────────────────────
         Slic3r::Print print;
+        operation.attach(print);
+        ActivePrintGuard print_guard(operation);
         print.apply(model, session->config);
         zero_plate_origin(print);
         set_is_bbl_printer(print, session->config);
@@ -1112,7 +1388,12 @@ onewasm_status_t onewasm_slice_stl(
         }
 
         try {
+            throw_if_cancelled(operation);
             print.process();
+            throw_if_cancelled(operation);
+        } catch (const Slic3r::CanceledException&) {
+            record_error(*session, "slice cancelled");
+            return ONEWASM_ERR_CANCELLED;
         } catch (const Slic3r::SlicingError& e) {
             record_error(*session, e.what());
             return -7;
@@ -1122,10 +1403,13 @@ onewasm_status_t onewasm_slice_stl(
         // Guard covers the do_export() call too: if it throws partway through
         // writing, the partial file is still removed on the way out.
         TempFileGuard out_guard("/tmp/ow_out.gcode");
+        Slic3r::GCodeProcessorResult processor_result;
         {
             Slic3r::GCode gcode_gen;
-            gcode_gen.do_export(&print, "/tmp/ow_out.gcode", nullptr, nullptr);
+            gcode_gen.do_export(&print, "/tmp/ow_out.gcode", &processor_result, nullptr);
         }
+        throw_if_cancelled(operation);
+        const std::string statistics_json = serialize_slice_statistics(print, processor_result);
 
         // ── read result back ─────────────────────────────────────────
         FILE* gf = std::fopen("/tmp/ow_out.gcode", "rb");
@@ -1152,8 +1436,12 @@ onewasm_status_t onewasm_slice_stl(
         }
         *out_gcode = reinterpret_cast<uint8_t*>(buf);
         *out_len   = static_cast<uint32_t>(sz);
+        publish_slice_statistics(*session, statistics_json);
         return ONEWASM_OK;
 
+    } catch (const Slic3r::CanceledException&) {
+        record_error(*session, "slice cancelled");
+        return ONEWASM_ERR_CANCELLED;
     } catch (const std::exception& e) {
         record_error(*session, e.what());
         return -9;
@@ -1415,9 +1703,16 @@ onewasm_status_t onewasm_slice_stl_multi(
     if (!all_stl || all_stl_len == 0 || !offsets || n_files == 0 || !out_gcode || !out_len)
         return -1;
 
+    ActiveSliceGuard operation(*session);
+    if (!operation) {
+        record_error(*session, "session already has an active operation");
+        return ONEWASM_ERR_INVALID_ARGUMENT;
+    }
+
     const char* base = reinterpret_cast<const char*>(all_stl);
 
     try {
+        throw_if_cancelled(operation);
         Slic3r::Model model;
 
         // ── load each STL segment into the shared model ───────────────────────
@@ -1443,6 +1738,7 @@ onewasm_status_t onewasm_slice_stl_multi(
                 record_error(*session, "STL load failed for file " + std::to_string(i));
                 return -4;
             }
+            throw_if_cancelled(operation);
         }
 
         if (model.objects.empty()) { record_error(*session, "no objects loaded"); return -5; }
@@ -1546,6 +1842,8 @@ onewasm_status_t onewasm_slice_stl_multi(
         // clamp_wipe_tower_to_bed). bed_cx/cy are half-extents.
         clamp_wipe_tower_to_bed(session->config, model, 2.0 * session->bed_cx, 2.0 * session->bed_cy);
         Slic3r::Print print;
+        operation.attach(print);
+        ActivePrintGuard print_guard(operation);
         print.apply(model, session->config);
         zero_plate_origin(print);
         set_is_bbl_printer(print, session->config);
@@ -1571,17 +1869,25 @@ onewasm_status_t onewasm_slice_stl_multi(
         }
 
         try {
+            throw_if_cancelled(operation);
             print.process();
+            throw_if_cancelled(operation);
+        } catch (const Slic3r::CanceledException&) {
+            record_error(*session, "slice cancelled");
+            return ONEWASM_ERR_CANCELLED;
         } catch (const Slic3r::SlicingError& e) {
             record_error(*session, e.what());
             return -7;
         }
 
         TempFileGuard out_guard("/tmp/ow_out.gcode");
+        Slic3r::GCodeProcessorResult processor_result;
         {
             Slic3r::GCode gcode_gen;
-            gcode_gen.do_export(&print, "/tmp/ow_out.gcode", nullptr, nullptr);
+            gcode_gen.do_export(&print, "/tmp/ow_out.gcode", &processor_result, nullptr);
         }
+        throw_if_cancelled(operation);
+        const std::string statistics_json = serialize_slice_statistics(print, processor_result);
 
         FILE* gf = std::fopen("/tmp/ow_out.gcode", "rb");
         if (!gf) { record_error(*session, "gcode export produced no output"); return -8; }
@@ -1607,8 +1913,12 @@ onewasm_status_t onewasm_slice_stl_multi(
         }
         *out_gcode = reinterpret_cast<uint8_t*>(buf);
         *out_len   = static_cast<uint32_t>(sz);
+        publish_slice_statistics(*session, statistics_json);
         return ONEWASM_OK;
 
+    } catch (const Slic3r::CanceledException&) {
+        record_error(*session, "slice cancelled");
+        return ONEWASM_ERR_CANCELLED;
     } catch (const std::exception& e) {
         record_error(*session, e.what());
         return -9;

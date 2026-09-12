@@ -8,9 +8,9 @@ extern "C" {
 #endif
 
 #define ONEWASM_API_VERSION_MAJOR 0
-#define ONEWASM_API_VERSION_MINOR 1
+#define ONEWASM_API_VERSION_MINOR 2
 #define ONEWASM_API_VERSION_PATCH 0
-#define ONEWASM_API_VERSION_STRING "0.1.0"
+#define ONEWASM_API_VERSION_STRING "0.2.0"
 
 typedef void* onewasm_session_t;
 typedef int32_t onewasm_status_t;
@@ -33,7 +33,8 @@ enum {
     ONEWASM_ERR_OUTPUT = -8,
     ONEWASM_ERR_INTERNAL = -9,
     ONEWASM_ERR_UNSUPPORTED = -10,
-    ONEWASM_ERR_CANCELLED = -11
+    ONEWASM_ERR_CANCELLED = -11,
+    ONEWASM_ERR_NO_DATA = -12
 };
 
 enum {
@@ -65,6 +66,8 @@ onewasm_status_t onewasm_set_progress_callback(
     onewasm_progress_callback_t callback,
     void* user_data
 );
+
+onewasm_status_t onewasm_cancel(onewasm_session_t session);
 
 onewasm_status_t onewasm_slice_stl(
     onewasm_session_t session,
@@ -128,6 +131,12 @@ onewasm_status_t onewasm_read_3mf(
 );
 
 onewasm_status_t onewasm_get_capabilities(
+    uint8_t** out_json,
+    uint32_t* out_len
+);
+
+onewasm_status_t onewasm_get_last_statistics(
+    onewasm_session_t session,
     uint8_t** out_json,
     uint32_t* out_len
 );

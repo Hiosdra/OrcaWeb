@@ -51,17 +51,18 @@ node scripts/gen-wsl-build-script.mjs
 
 ## C API
 
-The module exports the `one-wasm-slicer-api` 0.1 ABI. The old `orc_*` symbols
+The module exports the `one-wasm-slicer-api` 0.2 ABI. The old `orc_*` symbols
 are intentionally not kept in a new artifact; hosts must use the clean-break
 surface below:
 
 ```text
 onewasm_session_create / onewasm_session_destroy
 onewasm_init / onewasm_init_profile / onewasm_set_progress_callback
+onewasm_cancel
 onewasm_slice_stl / onewasm_slice_stl_multi / onewasm_prepare_plate
 onewasm_obj_to_stl / onewasm_cad_to_stl
 onewasm_write_3mf / onewasm_read_3mf
-onewasm_get_capabilities
+onewasm_get_capabilities / onewasm_get_last_statistics
 onewasm_free / onewasm_last_error
 ```
 
@@ -69,13 +70,13 @@ The Emscripten exports therefore use `_onewasm_*` names. The canonical header
 is vendored at [`bridge/onewasm_slicer_api.h`](bridge/onewasm_slicer_api.h) and
 is synchronized with the private
 [`one-wasm-slicer-api`](https://github.com/Hiosdra/one-wasm-slicer-api)
-repository at `v0.1.0`. `onewasm_read_3mf` returns geometry only; an Orca
+repository at `v0.2.0`. `onewasm_read_3mf` returns geometry only; an Orca
 project `.3mf` can be loaded as a native profile with
 `onewasm_init_profile(session, "project.3mf", ...)`.
 
 ## one-wasm-slicer-api compatibility
 
-| Target capability | OrcaWasm 0.1 status | Evidence |
+| Target capability | OrcaWasm 0.2 status | Evidence |
 |---|---|---|
 | Session lifecycle | supported | `onewasm_session_create/destroy` |
 | Native config initialization | supported | `onewasm_init`, format `orca.native-json` |
@@ -88,8 +89,9 @@ project `.3mf` can be loaded as a native profile with
 | OBJ / STEP to STL | supported | `onewasm_obj_to_stl` / `onewasm_cad_to_stl` |
 | 3MF read / write | supported | `onewasm_read_3mf` geometry-only; `onewasm_write_3mf` native config |
 | Capability metadata | supported | `onewasm_get_capabilities` |
-| Stable status and ownership | supported | 0.1 status values and `onewasm_free` |
-| Cooperative cancellation / statistics | planned for 0.2 | browser worker termination remains the host fallback |
+| Stable status and ownership | supported | 0.2 status values and `onewasm_free` |
+| Cooperative cancellation | supported | `onewasm_cancel`, native `PrintBase::cancel()`, `-11` completion status |
+| Canonical slice statistics | supported | `onewasm_get_last_statistics`, schema `0.2`, `-12` no-data status |
 
 ## CI and releases
 
