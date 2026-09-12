@@ -86,20 +86,24 @@ target_link_options(slicer PRIVATE
   # Dropping the ~200 MB preload removes slicer.data entirely.  FORCE_FILESYSTEM
   # keeps MEMFS available for the bridge's /tmp STL-in / G-code-out files.
   -sFORCE_FILESYSTEM=1
-  # Exported C functions consumed by the JS runtime
+  # Exported C functions consumed by the JS runtime and the common
+  # one-wasm-slicer-api 0.1 contract.
   "-sEXPORTED_FUNCTIONS=[\
-'_orc_session_create',\
-'_orc_session_destroy',\
-'_orc_init',\
-'_orc_slice',\
-'_orc_slice_multi',\
-'_orc_prepare_plate',\
-'_orc_obj_to_stl',\
-'_orc_cad_to_stl',\
-'_orc_write_3mf',\
-'_orc_read_3mf',\
-'_orc_free',\
-'_orc_decode_exception',\
+'_onewasm_session_create',\
+'_onewasm_session_destroy',\
+'_onewasm_init',\
+'_onewasm_init_profile',\
+'_onewasm_set_progress_callback',\
+'_onewasm_get_capabilities',\
+'_onewasm_slice_stl',\
+'_onewasm_slice_stl_multi',\
+'_onewasm_prepare_plate',\
+'_onewasm_obj_to_stl',\
+'_onewasm_cad_to_stl',\
+'_onewasm_write_3mf',\
+'_onewasm_read_3mf',\
+'_onewasm_free',\
+'_onewasm_last_error',\
 '_malloc',\
 '_free'\
 ]"

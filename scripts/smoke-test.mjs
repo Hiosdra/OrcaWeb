@@ -2,8 +2,8 @@
 /**
  * WASM engine smoke test.
  *
- * Loads the built slicer.js/slicer.wasm and runs several real orc_init +
- * orc_slice(_multi)/orc_write_3mf/orc_read_3mf calls end-to-end, so a broken
+ * Loads the built slicer.js/slicer.wasm and runs several real onewasm_init +
+ * onewasm_slice_stl(_multi)/onewasm_write_3mf/onewasm_read_3mf calls end-to-end, so a broken
  * engine build is caught before it's ever published as a GitHub Release
  * (build-wasm.yml) or trusted by a host after the artifacts are prepared.
  *
@@ -54,8 +54,44 @@ function generateTortureStl() {
   return sphereStl(4, 10) // 20 * 4^4 = 5120 triangles, 10mm-radius sphere
 }
 
+function getCapabilitiesOnce(module) {
+  const outPtrPtr = checkedMalloc(module, 4, 'capability output pointer')
+  const outLenPtr = checkedMalloc(module, 4, 'capability output length')
+  try {
+    const rc = module._onewasm_get_capabilities(outPtrPtr, outLenPtr)
+    if (rc !== 0) throw new Error(`onewasm_get_capabilities failed (${rc}): ${decodeError(module, 0)}`)
+    const ptr = module.getValue(outPtrPtr, 'i32')
+    const len = module.getValue(outLenPtr, 'i32')
+    try {
+      const capabilities = JSON.parse(new TextDecoder().decode(module.HEAPU8.slice(ptr, ptr + len)))
+      if (capabilities.api?.name !== 'one-wasm-slicer-api' || capabilities.api?.version !== '0.1.0') {
+        throw new Error('capabilities document does not identify one-wasm-slicer-api 0.1.0')
+      }
+      return capabilities
+    } finally {
+      module._onewasm_free(ptr)
+    }
+  } finally {
+    module._free(outLenPtr)
+    module._free(outPtrPtr)
+  }
+}
+
+function initProfileOnce(module, session, mfBytes) {
+  const formatBytes = new TextEncoder().encode('project.3mf')
+  const formatPtr = writeBytes(module, formatBytes)
+  const profilePtr = writeBytes(module, mfBytes)
+  try {
+    const rc = module._onewasm_init_profile(session, formatPtr, formatBytes.length, profilePtr, mfBytes.length)
+    if (rc !== 0) throw new Error(`onewasm_init_profile failed (${rc}): ${decodeError(module, session)}`)
+  } finally {
+    free(module, profilePtr)
+    free(module, formatPtr)
+  }
+}
+
 // ── engine harness ──────────────────────────────────────────────────────────
-// loadModule() + the orc_* heap marshaling (writeBytes/decodeError/
+// loadModule() + the onewasm_* heap marshaling (writeBytes/decodeError/
 // initSession/sliceOnce/sliceMultiOnce) live in ./lib/engine-harness.mjs.
 
 function write3mfOnce(module, session, stlBytes) {
@@ -65,11 +101,11 @@ function write3mfOnce(module, session, stlBytes) {
     try {
       const outLenPtr = checkedMalloc(module, 4, '3MF output length')
       try {
-        const rc = module._orc_write_3mf(session, stlPtr, stlBytes.length, outPtrPtr, outLenPtr)
-        if (rc !== 0) throw new Error(`orc_write_3mf failed (${rc}): ${decodeError(module, session)}`)
+        const rc = module._onewasm_write_3mf(session, stlPtr, stlBytes.length, outPtrPtr, outLenPtr)
+        if (rc !== 0) throw new Error(`onewasm_write_3mf failed (${rc}): ${decodeError(module, session)}`)
         const dataPtr = module.getValue(outPtrPtr, 'i32')
         const dataLen = module.getValue(outLenPtr, 'i32')
-        try { return module.HEAPU8.slice(dataPtr, dataPtr + dataLen) } finally { module._orc_free(dataPtr) }
+        try { return module.HEAPU8.slice(dataPtr, dataPtr + dataLen) } finally { module._onewasm_free(dataPtr) }
       } finally { module._free(outLenPtr) }
     } finally { module._free(outPtrPtr) }
   } finally { free(module, stlPtr) }
@@ -82,17 +118,10 @@ function read3mfOnce(module, mfBytes) {
     try {
       const outStlLenPtr = checkedMalloc(module, 4, 'STL output length')
       try {
-        const outConfigPtrPtr = checkedMalloc(module, 4, 'config output pointer')
-        try {
-          const outConfigLenPtr = checkedMalloc(module, 4, 'config output length')
-          try {
-            const rc = module._orc_read_3mf(mfPtr, mfBytes.length, outStlPtrPtr, outStlLenPtr, outConfigPtrPtr, outConfigLenPtr)
-            if (rc !== 0) throw new Error(`orc_read_3mf failed (${rc}): ${decodeError(module, 0)}`)
-            const stlPtr = module.getValue(outStlPtrPtr, 'i32'), stlLen = module.getValue(outStlLenPtr, 'i32')
-            const configPtr = module.getValue(outConfigPtrPtr, 'i32'), configLen = module.getValue(outConfigLenPtr, 'i32')
-            try { return { stl: module.HEAPU8.slice(stlPtr, stlPtr + stlLen), configJson: module.UTF8ToString(configPtr, configLen) } } finally { module._orc_free(stlPtr); module._orc_free(configPtr) }
-          } finally { module._free(outConfigLenPtr) }
-        } finally { module._free(outConfigPtrPtr) }
+        const rc = module._onewasm_read_3mf(mfPtr, mfBytes.length, outStlPtrPtr, outStlLenPtr)
+        if (rc !== 0) throw new Error(`onewasm_read_3mf failed (${rc}): ${decodeError(module, 0)}`)
+        const stlPtr = module.getValue(outStlPtrPtr, 'i32'), stlLen = module.getValue(outStlLenPtr, 'i32')
+        try { return module.HEAPU8.slice(stlPtr, stlPtr + stlLen) } finally { module._onewasm_free(stlPtr) }
       } finally { module._free(outStlLenPtr) }
     } finally { module._free(outStlPtrPtr) }
   } finally { free(module, mfPtr) }
@@ -146,7 +175,7 @@ function listZipEntryNames(bytes) {
 }
 
 // A .3mf is a ZIP; verify it round-trips as one and carries the two pieces
-// orc_write_3mf's contract promises: the mesh (3D/3dmodel.model) and the
+// onewasm_write_3mf's contract promises: the mesh (3D/3dmodel.model) and the
 // embedded OrcaSlicer settings (a Metadata/*.config file — see
 // EMBEDDED_PRINT_FILE_FORMAT et al. in bbs_3mf.hpp for why the filename
 // isn't a fixed constant).
@@ -427,19 +456,21 @@ async function main() {
   console.log(`[smoke-test] loading engine "${engine}" from ${wasmDir}...`)
   const module = await loadModule(wasmDir, engine)
   console.log('[smoke-test] engine loaded')
+  const capabilities = getCapabilitiesOnce(module)
+  console.log(`[smoke-test] capabilities: ${capabilities.engine?.family ?? 'unknown'} ${capabilities.engine?.version ?? ''}`)
 
   const meshes = collectMeshes(fixture)
   for (const mesh of meshes) {
     console.log(`[smoke-test] mesh: ${mesh.label} (${mesh.bytes.length} bytes)`)
   }
 
-  const supportsPlateActions = typeof module._orc_prepare_plate === 'function'
+  const supportsPlateActions = typeof module._onewasm_prepare_plate === 'function'
   if (!supportsPlateActions) {
-    console.warn('[smoke-test] WARN: loaded engine has no _orc_prepare_plate export — skipping current-plate action scenarios')
+    console.warn('[smoke-test] WARN: loaded engine has no _onewasm_prepare_plate export — skipping current-plate action scenarios')
   }
 
-  const session = module._orc_session_create()
-  if (!session) throw new Error('orc_session_create failed (allocation failure)')
+  const session = module._onewasm_session_create()
+  if (!session) throw new Error('onewasm_session_create failed (allocation failure)')
 
   const scenarios = [
     {
@@ -487,7 +518,7 @@ async function main() {
 
     // Multi-object plate with a per-object "extruder" override (same value on
     // both objects, nozzle_diameter length 1) — the AMS-style path, probing
-    // the orc_slice_multi extruder_ids plumbing on its own. The genuinely
+    // the onewasm_slice_stl_multi extruder_ids plumbing on its own. The genuinely
     // multi-nozzle case is the scenario below.
     const plateLabel = `[${mesh.label}] plate: 2 objects, per-object extruder override (single nozzle)`
     process.stdout.write(`[smoke-test] ${plateLabel} ... `)
@@ -607,7 +638,7 @@ async function main() {
       console.error(`  ${err.message}`)
     }
 
-    // orc_write_3mf: mesh + embedded config, no plate/gcode data (see
+    // onewasm_write_3mf: mesh + embedded config, no plate/gcode data (see
     // bridge/slicer.cpp).
     // Use the real dual-nozzle shape here so the read side also proves it
     // preserves vector boundaries instead of returning one joined scalar per
@@ -626,14 +657,15 @@ async function main() {
       console.error(`  ${err.message}`)
     }
 
-    // orc_read_3mf: round-trip the .3mf just written back through the
-    // engine's own reader — mesh triangle count and a few config keys must
-    // survive (per issue #108's read-path test plan).
-    const read3mfLabel = `[${mesh.label}] read .3mf (round-trip mesh + config)`
+    // onewasm_read_3mf: round-trip the .3mf just written back through the
+    // engine's own reader. The common contract deliberately returns geometry
+    // only; native settings are loaded through onewasm_init_profile.
+    const read3mfLabel = `[${mesh.label}] read .3mf (round-trip geometry)`
     process.stdout.write(`[smoke-test] ${read3mfLabel} ... `)
     try {
       if (!written3mf) throw new Error('no .3mf available (write step failed above)')
-      const { stl, configJson } = read3mfOnce(module, written3mf)
+      initProfileOnce(module, session, written3mf)
+      const stl = read3mfOnce(module, written3mf)
 
       const expectedTris = stlTriangleCount(mesh.bytes)
       const actualTris = stlTriangleCount(stl)
@@ -641,20 +673,7 @@ async function main() {
         throw new Error(`triangle count mismatch: expected ${expectedTris}, got ${actualTris}`)
       }
 
-      const config = JSON.parse(configJson)
-      for (const key of ['layer_height', 'nozzle_temperature', 'filament_type', 'sparse_infill_density']) {
-        if (!(key in config)) throw new Error(`config key "${key}" missing from round-tripped .3mf (keys: ${Object.keys(config).join(', ')})`)
-      }
-      if (parseFloat(config.layer_height) !== DUAL_NOZZLE_CONFIG.layer_height) {
-        throw new Error(`layer_height mismatch: expected ${DUAL_NOZZLE_CONFIG.layer_height}, got ${config.layer_height}`)
-      }
-      for (const key of ['nozzle_diameter', 'filament_type', 'filament_colour', 'nozzle_temperature', 'filament_map', 'flush_volumes_matrix']) {
-        if (!Array.isArray(config[key])) {
-          throw new Error(`round-tripped .3mf vector "${key}" lost its array shape: ${JSON.stringify(config[key])}`)
-        }
-      }
-
-      console.log(`PASS (${actualTris} tris, ${Object.keys(config).length} config keys)`)
+      console.log(`PASS (${actualTris} tris; geometry-only read contract)`)
     } catch (err) {
       failures++
       console.log('FAIL')
@@ -703,7 +722,7 @@ async function main() {
     }
   }
 
-  module._orc_session_destroy(session)
+  module._onewasm_session_destroy(session)
 
   if (failures > 0) {
     console.error(`\n[smoke-test] ${failures} scenario(s) failed`)

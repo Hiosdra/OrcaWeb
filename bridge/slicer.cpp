@@ -2,27 +2,26 @@
  * orca-wasm WASM bridge — clean-room implementation.
  *
  * Exports C-linkage symbols consumed by the JavaScript runtime:
- *   orc_session_create()                                          → opaque session handle (0 = alloc failed)
- *   orc_session_destroy(session)
- *   orc_init(session, json, len)                                  → 0 = ok
- *   orc_slice(session, stl, stlLen, outPtr, outLen, transforms)    → 0 = ok
- *   orc_slice_multi(session, all, allLen, offsets, n,
- *                   extruderIds, out, outLen, transforms)         → 0 = ok
- *   orc_prepare_plate(session, all, allLen, offsets, n, transforms,
- *                     operation, out, outLen)                    → 0 = ok
- *   orc_obj_to_stl(obj, objLen, outPtr, outLen)                   → 0 = ok
- *   orc_cad_to_stl(cad, cadLen, outPtr, outLen)                   → 0 = ok (STEP)
- *   orc_write_3mf(session, stl, stlLen, outPtr, outLen)           → 0 = ok
- *   orc_read_3mf(mf, mfLen, outStl, outStlLen,
- *                outConfigJson, outConfigLen)                     → 0 = ok
- *   orc_free(ptr)
- *   orc_decode_exception(session)                                 → null-terminated UTF-8 string
+ *   onewasm_session_create()                                      → opaque session handle (0 = alloc failed)
+ *   onewasm_session_destroy(session)
+ *   onewasm_init(session, config, len)                             → 0 = ok
+ *   onewasm_slice_stl(session, stl, stlLen, outPtr, outLen)        → 0 = ok
+ *   onewasm_slice_stl_multi(session, all, allLen, offsets, n,
+ *                           extruderIds, transforms, out, outLen)  → 0 = ok
+ *   onewasm_prepare_plate(session, all, allLen, offsets, n,
+ *                         transforms, operation, out, outLen)     → 0 = ok
+ *   onewasm_obj_to_stl(obj, objLen, outPtr, outLen)                → 0 = ok
+ *   onewasm_cad_to_stl(cad, cadLen, outPtr, outLen)                → 0 = ok (STEP)
+ *   onewasm_write_3mf(session, stl, stlLen, outPtr, outLen)        → 0 = ok
+ *   onewasm_read_3mf(mf, mfLen, outStl, outStlLen)                 → 0 = ok
+ *   onewasm_get_capabilities(outJson, outLen)
+ *   onewasm_free(ptr)
+ *   onewasm_last_error(session)                                   → null-terminated UTF-8 string
  *
- * orc_obj_to_stl / orc_cad_to_stl / orc_read_3mf are pure format conversions
+ * onewasm_obj_to_stl / onewasm_cad_to_stl / onewasm_read_3mf are pure format conversions
  * — they never touch slicer config state, so they take no session handle.
  *
- * Error codes for orc_slice / orc_init / orc_slice_multi / orc_prepare_plate /
- * orc_write_3mf:
+ * Error codes for the session-bound operations follow one-wasm-slicer-api 0.1:
  *   -1  invalid / uninitialized state (includes a null/invalid session handle)
  *   -2  JSON parse failure
  *   -3  STL write to MEMFS failed
@@ -30,13 +29,15 @@
  *   -5  empty model
  *   -6  print validation failed
  *   -7  slicing error
- *   -8  gcode export failed (or, for orc_write_3mf, 3MF export failed)
+ *   -8  gcode export failed (or, for onewasm_write_3mf, 3MF export failed)
  *   -9  unexpected C++ exception
  *
- * orc_read_3mf reuses the same -1/-3/-4/-5/-8/-9 meanings (input write /
+ * onewasm_read_3mf reuses the same -1/-3/-4/-5/-8/-9 meanings (input write /
  * 3MF load / no geometry / STL export / exception), decoded via
- * orc_decode_exception(0) like orc_obj_to_stl / orc_cad_to_stl.
+ * onewasm_last_error(0) like onewasm_obj_to_stl / onewasm_cad_to_stl.
  */
+
+#include "onewasm_slicer_api.h"
 
 #include <algorithm>
 #include <cmath>
@@ -123,12 +124,12 @@ struct OrcSession {
     // Opt-in override of the engine's mixed-nozzle-temperature guard, matching
     // desktop OrcaSlicer's "Remove mixed temperature restriction" preference.
     // Off by default (the guard exists to prevent nozzle clogging / damage);
-    // when set, orc_slice / orc_slice_multi call
+    // when set, onewasm_slice_stl / onewasm_slice_stl_multi call
     // Print::set_check_multi_filaments_compatibility(false) before validate().
     // See issue #164.
     bool remove_mixed_temp_restriction = false;
     // Variable (adaptive) layer height, matching desktop OrcaSlicer's Adaptive
-    // tool: when on, orc_slice / orc_slice_multi compute a per-object layer
+    // tool: when on, onewasm_slice_stl / onewasm_slice_stl_multi compute a per-object layer
     // height profile from the mesh geometry (layer_height_profile_adaptive)
     // before slicing, so detailed regions get thinner layers and flat regions
     // thicker ones. Off by default (a fixed layer height is the engine default
@@ -141,6 +142,8 @@ struct OrcSession {
     // finer detail (thinner layers, smaller cusp error); higher = faster
     // (thicker layers).
     float adaptive_layer_height_quality = 0.5f;
+    onewasm_progress_callback_t progress_callback = nullptr;
+    void* progress_user_data = nullptr;
 };
 
 // Slicing blocks the worker's event loop. MAIN_THREAD_EM_ASM delivers this
@@ -163,24 +166,32 @@ struct ProgressState {
     std::mutex mutex;
 };
 
-static void attach_progress_callback(Slic3r::Print& print) {
+static void attach_progress_callback(Slic3r::Print& print, OrcSession& session) {
     auto state = std::make_shared<ProgressState>();
 
-    print.set_status_callback([state](const Slic3r::PrintBase::SlicingStatus& status) {
+    print.set_status_callback([state, &session](const Slic3r::PrintBase::SlicingStatus& status) {
         if (status.percent < 0)
             return;
 
         const double now = emscripten_get_now();
-        std::lock_guard<std::mutex> lock(state->mutex);
-        const int percent = std::max(state->last_percent, std::min(status.percent, 100));
-        const bool should_emit =
-            status.text != state->last_stage
-            || (percent == 100 && state->last_percent != 100)
-            || (percent != state->last_percent && now - state->last_update_ms >= 100.0);
+        int percent = 0;
+        bool should_emit = false;
+        {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            percent = std::max(state->last_percent, std::min(status.percent, 100));
+            should_emit =
+                status.text != state->last_stage
+                || (percent == 100 && state->last_percent != 100)
+                || (percent != state->last_percent && now - state->last_update_ms >= 100.0);
+            if (should_emit) {
+                state->last_percent = percent;
+                state->last_stage = status.text;
+                state->last_update_ms = now;
+            }
+        }
         if (should_emit) {
-            state->last_percent = percent;
-            state->last_stage = status.text;
-            state->last_update_ms = now;
+            if (session.progress_callback)
+                session.progress_callback(percent, status.text.c_str(), session.progress_user_data);
             post_slice_progress(percent, status.text);
         }
     });
@@ -191,10 +202,10 @@ static OrcSession* as_session(void* ptr) { return static_cast<OrcSession*>(ptr);
 static void record_error(OrcSession& s, const char* msg) { s.last_error = msg ? msg : "unknown error"; }
 static void record_error(OrcSession& s, const std::string& str) { s.last_error = str; }
 
-// orc_obj_to_stl / orc_cad_to_stl are pure format conversions with no config
+// onewasm_obj_to_stl / onewasm_cad_to_stl are pure format conversions with no config
 // state, so they don't need a session — but the JS caller still wants
-// orc_decode_exception() to work for them. Keep a small dedicated error slot
-// for these two functions; orc_decode_exception(0) (JS's existing call
+// onewasm_last_error() to work for them. Keep a small dedicated error slot
+// for these functions; onewasm_last_error(0) (the host's call
 // pattern for conversion errors) falls back to it when no session is passed.
 static std::string g_conversion_last_error;
 static void record_error(const char* msg) { g_conversion_last_error = msg ? msg : "unknown error"; }
@@ -260,7 +271,7 @@ struct Loaded3mfResourcesGuard {
 // still pick their own record_error() overload (session-aware vs. the
 // conversion-functions' shared slot) and error code, since those differ
 // per call site — this only owns the mechanical fopen/fseek/malloc/fread
-// sequence that orc_write_3mf and orc_read_3mf both need to read back the
+// sequence that onewasm_write_3mf and onewasm_read_3mf both need to read back the
 // file they just asked OrcaSlicer to produce.
 static char* read_file_to_buffer(const char* path, long* out_len, const char** out_err, bool* out_oom) {
     *out_oom = false;
@@ -543,7 +554,7 @@ static nlohmann::json serialize_object_transform(const Slic3r::ModelInstance& in
 
 static int write_transform_json(OrcSession& session, const Slic3r::Model& model,
                                 const std::vector<bool>& keep_positions,
-                                char** out_transforms, int* out_len) {
+                                uint8_t** out_transforms, uint32_t* out_len) {
     nlohmann::json result = nlohmann::json::array();
     for (std::size_t i = 0; i < model.objects.size(); ++i) {
         if (model.objects[i]->instances.empty()) {
@@ -554,7 +565,7 @@ static int write_transform_json(OrcSession& session, const Slic3r::Model& model,
         result.push_back(serialize_object_transform(*model.objects[i]->instances.front(), session, keep));
     }
     const std::string json = result.dump();
-    if (json.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()) - 1) {
+    if (json.size() > static_cast<std::size_t>(UINT32_MAX) - 1) {
         record_error(session, "plate transform output is too large");
         return -9;
     }
@@ -565,8 +576,8 @@ static int write_transform_json(OrcSession& session, const Slic3r::Model& model,
     }
     std::memcpy(buffer, json.data(), json.size());
     buffer[json.size()] = '\0';
-    *out_transforms = buffer;
-    *out_len = static_cast<int>(json.size());
+    *out_transforms = reinterpret_cast<uint8_t*>(buffer);
+    *out_len = static_cast<uint32_t>(json.size());
     return 0;
 }
 
@@ -741,13 +752,13 @@ extern "C" {
 
 /** Allocate a new engine session. Returns 0 (null) on allocation failure. */
 EMSCRIPTEN_KEEPALIVE
-void* orc_session_create() {
+onewasm_session_t onewasm_session_create() {
     return new (std::nothrow) OrcSession();
 }
 
-/** Free a session created by orc_session_create(). Safe to call with null. */
+/** Free a session created by onewasm_session_create(). Safe to call with null. */
 EMSCRIPTEN_KEEPALIVE
-void orc_session_destroy(void* session_ptr) {
+void onewasm_session_destroy(onewasm_session_t session_ptr) {
     delete as_session(session_ptr);
 }
 
@@ -778,13 +789,19 @@ static void ensure_nozzle_info_json() {
 }
 
 EMSCRIPTEN_KEEPALIVE
-int orc_init(void* session_ptr, const char* json_data, int json_len) {
+onewasm_status_t onewasm_init(onewasm_session_t session_ptr, const uint8_t* config_data, uint32_t config_len) {
     OrcSession* session = as_session(session_ptr);
     if (!session) return -1;
     session->last_error.clear();
+    session->initialized = false;
     ensure_nozzle_info_json();
+    if (!config_data || config_len == 0) {
+        record_error(*session, "config data is empty");
+        return ONEWASM_ERR_CONFIG;
+    }
     try {
-        auto j = nlohmann::json::parse(json_data, json_data + json_len);
+        const char* json_data = reinterpret_cast<const char*>(config_data);
+        auto j = nlohmann::json::parse(json_data, json_data + config_len);
         if (!j.is_object()) { record_error(*session, "config must be a JSON object"); return -2; }
 
         // Extract bed dimensions (not native OrcaSlicer config keys — used only
@@ -871,27 +888,162 @@ int orc_init(void* session_ptr, const char* json_data, int json_len) {
         }
 
         session->initialized = true;
-        return 0;
+        return ONEWASM_OK;
     } catch (const std::exception& e) {
         record_error(*session, e.what());
-        return -2;
+        return ONEWASM_ERR_CONFIG;
     }
+}
+
+EMSCRIPTEN_KEEPALIVE
+onewasm_status_t onewasm_init_profile(
+    onewasm_session_t session_ptr,
+    const char* format_utf8,
+    uint32_t format_len,
+    const uint8_t* profile_data,
+    uint32_t profile_len
+) {
+    OrcSession* session = as_session(session_ptr);
+    if (!session) return ONEWASM_ERR_INVALID_ARGUMENT;
+    session->last_error.clear();
+    session->initialized = false;
+    if (!format_utf8 || format_len == 0 || !profile_data || profile_len == 0) {
+        record_error(*session, "profile format or data is empty");
+        return ONEWASM_ERR_INVALID_ARGUMENT;
+    }
+
+    const std::string format(format_utf8, format_utf8 + format_len);
+    if (format != "project.3mf") {
+        record_error(*session, "unsupported OrcaSlicer profile format: " + format);
+        return ONEWASM_ERR_UNSUPPORTED;
+    }
+
+    const char* tmp_in = "/tmp/ow_profile.3mf";
+    try {
+        TempFileGuard in_guard(tmp_in);
+        FILE* file = std::fopen(tmp_in, "wb");
+        if (!file) {
+            record_error(*session, "cannot open profile temp file for writing");
+            return ONEWASM_ERR_INPUT_IO;
+        }
+        const std::size_t written = std::fwrite(profile_data, 1, profile_len, file);
+        std::fclose(file);
+        if (written != profile_len) {
+            record_error(*session, "failed to write complete profile data to MEMFS");
+            return ONEWASM_ERR_INPUT_IO;
+        }
+
+        Slic3r::Model model;
+        ModelBackupPathGuard backup_guard(model);
+        Slic3r::DynamicPrintConfig loaded_config;
+        Slic3r::ConfigSubstitutionContext substitutions(
+            Slic3r::ForwardCompatibilitySubstitutionRule::EnableSilent
+        );
+        Slic3r::PlateDataPtrs plate_data_list;
+        std::vector<Slic3r::Preset*> project_presets;
+        Loaded3mfResourcesGuard loaded_resources(plate_data_list, project_presets);
+        Slic3r::Semver file_version;
+        const bool ok = Slic3r::load_bbs_3mf(
+            tmp_in, &loaded_config, &substitutions, &model,
+            &plate_data_list, &project_presets,
+            nullptr, nullptr, &file_version, nullptr,
+            Slic3r::LoadStrategy::AddDefaultInstances
+                | Slic3r::LoadStrategy::LoadModel
+                | Slic3r::LoadStrategy::LoadConfig
+        );
+        if (!ok) {
+            record_error(*session, "OrcaSlicer could not load the project profile");
+            return ONEWASM_ERR_INPUT_FORMAT;
+        }
+
+        session->config = Slic3r::DynamicPrintConfig();
+        session->config.apply(g_defaults);
+        session->config.apply(loaded_config);
+        session->remove_mixed_temp_restriction = false;
+        session->adaptive_layer_height = false;
+        session->adaptive_layer_height_quality = 0.5f;
+        session->initialized = true;
+        return ONEWASM_OK;
+    } catch (const std::exception& e) {
+        record_error(*session, std::string("OrcaSlicer profile load failed: ") + e.what());
+        return ONEWASM_ERR_INTERNAL;
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE
+onewasm_status_t onewasm_set_progress_callback(
+    onewasm_session_t session_ptr,
+    onewasm_progress_callback_t callback,
+    void* user_data
+) {
+    OrcSession* session = as_session(session_ptr);
+    if (!session) return ONEWASM_ERR_INVALID_ARGUMENT;
+    session->last_error.clear();
+    session->progress_callback = callback;
+    session->progress_user_data = user_data;
+    return ONEWASM_OK;
+}
+
+EMSCRIPTEN_KEEPALIVE
+onewasm_status_t onewasm_get_capabilities(uint8_t** out_json, uint32_t* out_len) {
+    g_conversion_last_error.clear();
+    if (out_json) *out_json = nullptr;
+    if (out_len) *out_len = 0;
+    if (!out_json || !out_len) {
+        record_error("capability output pointers must not be null");
+        return ONEWASM_ERR_INVALID_ARGUMENT;
+    }
+
+#ifdef SLIC3R_WASM_MT
+    constexpr const char* threading_model = "pthreads";
+    constexpr const char* requires_sab = "true";
+#else
+    constexpr const char* threading_model = "single-threaded";
+    constexpr const char* requires_sab = "false";
+#endif
+    const std::string json = std::string(R"({
+  "api":{"name":"one-wasm-slicer-api","version":"0.1.0"},
+  "engine":{"family":"OrcaSlicer","version":"2.4.2"},
+  "runtime":{"threadingModel":")") + threading_model + R"(","supportedHosts":["web","worker","node"],"requiresSharedArrayBuffer":)" + requires_sab + R"(,"requiresCrossOriginIsolated":)" + requires_sab + R"(,"cancellationMode":"worker-terminate"},
+  "configuration":{"initFormats":["orca.native-json"],"fullProfileFormats":["project.3mf"]},
+  "features":{"configuration.native":"supported","configuration.fullprofile":"supported","progress.callback":"supported","slicing.single":"supported","slicing.multi":"supported","plate.autoorient":"supported","plate.arrange":"supported","conversion.objtostl":"supported","conversion.cadtostl":"supported","project.write3mf":"supported","project.read3mf":"supported"}
+})");
+    if (json.size() > UINT32_MAX) {
+        record_error("capability document is too large");
+        return ONEWASM_ERR_OUTPUT;
+    }
+    auto* buffer = static_cast<uint8_t*>(std::malloc(std::max<std::size_t>(1, json.size())));
+    if (!buffer) {
+        record_error("out of memory");
+        return ONEWASM_ERR_OUTPUT;
+    }
+    std::memcpy(buffer, json.data(), json.size());
+    *out_json = buffer;
+    *out_len = static_cast<uint32_t>(json.size());
+    return ONEWASM_OK;
 }
 
 /**
  * Slice an STL file (raw binary, ASCII or binary format).
  * On success *out_gcode points to a malloc'd, null-terminated G-code string
  * and *out_len contains its byte length (excluding the null terminator).
- * Caller must free the buffer with orc_free().
+ * Caller must free the buffer with onewasm_free().
  */
 EMSCRIPTEN_KEEPALIVE
-int orc_slice(void* session_ptr, const void* stl_data, int stl_len,
-              char** out_gcode, int* out_len, const float* transforms) {
+onewasm_status_t onewasm_slice_stl(
+    onewasm_session_t session_ptr,
+    const uint8_t* stl_data,
+    uint32_t stl_len,
+    uint8_t** out_gcode,
+    uint32_t* out_len
+) {
     OrcSession* session = as_session(session_ptr);
     if (!session) return -1;
     session->last_error.clear();
-    if (!session->initialized) { record_error(*session, "call orc_init first"); return -1; }
-    if (!stl_data || stl_len <= 0 || !out_gcode || !out_len)
+    if (out_gcode) *out_gcode = nullptr;
+    if (out_len) *out_len = 0;
+    if (!session->initialized) { record_error(*session, "call onewasm_init first"); return -1; }
+    if (!stl_data || stl_len == 0 || !out_gcode || !out_len)
         return -1;
 
     // Write raw STL bytes into Emscripten's MEMFS so OrcaSlicer can read it.
@@ -917,29 +1069,14 @@ int orc_slice(void* session_ptr, const void* stl_data, int stl_len,
         }
 
         // ── place model on bed ───────────────────────────────────────
-        // The null-transform path is intentionally the historical placement
-        // code: old JS callers and old WASM artifacts remain byte-compatible.
-        if (!transforms) {
-            // Center the mesh in X/Y, then offset to bed centre.
-            for (auto* obj : model.objects) {
-                center_object_xy_only(obj);
-                if (obj->instances.empty()) {
-                    auto* inst = obj->add_instance();
-                    // Place at bed centre, derived from bed_size_x / bed_size_y in config.
-                    inst->set_offset(Slic3r::Vec3d(session->bed_cx, session->bed_cy, 0.0));
-                }
-            }
-        } else {
-            ObjectTransformInput transform;
-            std::string transform_error;
-            if (!read_object_transform(transforms, 0, transform, transform_error)) {
-                record_error(*session, transform_error);
-                return -1;
-            }
-            for (auto* obj : model.objects) {
-                center_object_xy_only(obj);
-                add_transformed_instance(obj, *session, transform, true);
-                obj->ensure_on_bed();
+        // Center the mesh in X/Y, then offset to bed centre. Per-object
+        // transforms use the multi-object entry point in the common ABI.
+        for (auto* obj : model.objects) {
+            center_object_xy_only(obj);
+            if (obj->instances.empty()) {
+                auto* inst = obj->add_instance();
+                // Place at bed centre, derived from bed_size_x / bed_size_y in config.
+                inst->set_offset(Slic3r::Vec3d(session->bed_cx, session->bed_cy, 0.0));
             }
         }
 
@@ -960,7 +1097,7 @@ int orc_slice(void* session_ptr, const void* stl_data, int stl_len,
         // (slicing parameters are populated), before validate()/process().
         if (session->adaptive_layer_height)
             apply_adaptive_layer_height(print, session->adaptive_layer_height_quality);
-        attach_progress_callback(print);
+        attach_progress_callback(print, *session);
 
         {
             // Print::validate() returns a StringObjectException whose
@@ -1008,9 +1145,14 @@ int orc_slice(void* session_ptr, const void* stl_data, int stl_len,
         std::fclose(gf);
         buf[sz] = '\0';
 
-        *out_gcode = buf;
-        *out_len   = static_cast<int>(sz);
-        return 0;
+        if (sz < 0 || static_cast<unsigned long long>(sz) > UINT32_MAX) {
+            std::free(buf);
+            record_error(*session, "G-code output exceeds the C ABI length limit");
+            return ONEWASM_ERR_OUTPUT;
+        }
+        *out_gcode = reinterpret_cast<uint8_t*>(buf);
+        *out_len   = static_cast<uint32_t>(sz);
+        return ONEWASM_OK;
 
     } catch (const std::exception& e) {
         record_error(*session, e.what());
@@ -1028,34 +1170,37 @@ int orc_slice(void* session_ptr, const void* stl_data, int stl_len,
  * are pinned and NaN offsets remain movable.
  */
 EMSCRIPTEN_KEEPALIVE
-int orc_prepare_plate(
-    void* session_ptr,
-    const void* all_stl, int all_stl_len,
-    const int* offsets, int n_files,
+onewasm_status_t onewasm_prepare_plate(
+    onewasm_session_t session_ptr,
+    const uint8_t* all_stl, uint32_t all_stl_len,
+    const uint32_t* offsets, uint32_t n_files,
     const float* transforms,
-    int operation,
-    char** out_transforms, int* out_len)
+    int32_t operation,
+    uint8_t** out_transforms, uint32_t* out_len)
 {
     OrcSession* session = as_session(session_ptr);
     if (!session) return -1;
     session->last_error.clear();
-    if (!session->initialized) { record_error(*session, "call orc_init first"); return -1; }
-    if (!all_stl || all_stl_len <= 0 || !offsets || n_files <= 0 ||
+    if (out_transforms) *out_transforms = nullptr;
+    if (out_len) *out_len = 0;
+    if (!session->initialized) { record_error(*session, "call onewasm_init first"); return -1; }
+    if (!all_stl || all_stl_len == 0 || !offsets || n_files == 0 ||
         !out_transforms || !out_len || (operation != 1 && operation != 2)) {
         record_error(*session, "invalid current-plate arguments");
         return -1;
     }
 
-    const char* base = static_cast<const char*>(all_stl);
+    const char* base = reinterpret_cast<const char*>(all_stl);
     try {
         Slic3r::Model model;
-        for (int i = 0; i < n_files; ++i) {
-            const int start = offsets[i * 2];
-            const int len = offsets[i * 2 + 1];
-            if (start < 0 || len <= 0 || start > all_stl_len || len > all_stl_len - start) {
+        for (uint32_t i = 0; i < n_files; ++i) {
+            const uint32_t start = offsets[i * 2];
+            const uint32_t end = offsets[i * 2 + 1];
+            if (end <= start || end > all_stl_len) {
                 record_error(*session, "invalid offset table");
                 return -1;
             }
+            const uint32_t len = end - start;
             const std::string path = "/tmp/ow_prepare_" + std::to_string(i) + ".stl";
             TempFileGuard input_guard(path);
             FILE* file = std::fopen(path.c_str(), "wb");
@@ -1116,7 +1261,7 @@ int orc_prepare_plate(
 /**
  * Convert an OBJ file (raw bytes) to a binary STL.
  * On success *out_stl points to a malloc'd buffer containing the STL and
- * *out_len contains its byte length.  Caller must free with orc_free().
+ * *out_len contains its byte length.  Caller must free with onewasm_free().
  *
  * Error codes:
  *   -3  could not write OBJ to MEMFS
@@ -1126,10 +1271,16 @@ int orc_prepare_plate(
  *   -9  unexpected C++ exception
  */
 EMSCRIPTEN_KEEPALIVE
-int orc_obj_to_stl(const char* obj_data, int obj_len,
-                   char** out_stl, int* out_len) {
+onewasm_status_t onewasm_obj_to_stl(
+    const uint8_t* obj_data,
+    uint32_t obj_len,
+    uint8_t** out_stl,
+    uint32_t* out_len
+) {
     g_conversion_last_error.clear();
-    if (!obj_data || obj_len <= 0 || !out_stl || !out_len) return -1;
+    if (out_stl) *out_stl = nullptr;
+    if (out_len) *out_len = 0;
+    if (!obj_data || obj_len == 0 || !out_stl || !out_len) return -1;
 
     {
         FILE* f = std::fopen("/tmp/ow_in.obj", "wb");
@@ -1194,9 +1345,15 @@ int orc_obj_to_stl(const char* obj_data, int obj_len,
                                 record_error("STL read incomplete");
                                 status = -8;
                             } else {
-                                *out_stl = buf;
-                                *out_len = static_cast<int>(sz);
+                                if (static_cast<unsigned long long>(sz) > UINT32_MAX) {
+                                    std::free(buf);
+                                    record_error("STL output exceeds the C ABI length limit");
+                                    status = -8;
+                                } else {
+                                *out_stl = reinterpret_cast<uint8_t*>(buf);
+                                *out_len = static_cast<uint32_t>(sz);
                                 status = 0;
+                                }
                             }
                         }
                     }
@@ -1218,7 +1375,7 @@ int orc_obj_to_stl(const char* obj_data, int obj_len,
  * Slice multiple STL files arranged on a single plate.
  *
  * all_stl      concatenation of all STL file bytes
- * offsets      int32 pairs [start0, len0, start1, len1, …] — one per file
+ * offsets      uint32 pairs [start0, end0, start1, end1, …] — one per file
  * n_files      number of files (= offsets length / 2)
  * extruder_ids nullable int32 array of length n_files — 1-based "extruder"
  *              override per object (0 = inherit the config's default),
@@ -1238,37 +1395,40 @@ int orc_obj_to_stl(const char* obj_data, int obj_len,
  *              rotation xyz (radians), mirror xyz, and X/Y offset in mm
  *              relative to bed centre. NaN X/Y delegates placement to arrange.
  *
- * Error codes: same convention as orc_slice.
+ * Error codes: same convention as onewasm_slice_stl.
  */
 EMSCRIPTEN_KEEPALIVE
-int orc_slice_multi(
-    void* session_ptr,
-    const void* all_stl, int all_stl_len,
-    const int* offsets, int n_files,
-    const int* extruder_ids,
-    char** out_gcode, int* out_len,
-    const float* transforms)
+onewasm_status_t onewasm_slice_stl_multi(
+    onewasm_session_t session_ptr,
+    const uint8_t* all_stl, uint32_t all_stl_len,
+    const uint32_t* offsets, uint32_t n_files,
+    const int32_t* extruder_ids,
+    const float* transforms,
+    uint8_t** out_gcode, uint32_t* out_len)
 {
     OrcSession* session = as_session(session_ptr);
     if (!session) return -1;
     session->last_error.clear();
-    if (!session->initialized) { record_error(*session, "call orc_init first"); return -1; }
-    if (!all_stl || all_stl_len <= 0 || !offsets || n_files <= 0 || !out_gcode || !out_len)
+    if (out_gcode) *out_gcode = nullptr;
+    if (out_len) *out_len = 0;
+    if (!session->initialized) { record_error(*session, "call onewasm_init first"); return -1; }
+    if (!all_stl || all_stl_len == 0 || !offsets || n_files == 0 || !out_gcode || !out_len)
         return -1;
 
-    const char* base = static_cast<const char*>(all_stl);
+    const char* base = reinterpret_cast<const char*>(all_stl);
 
     try {
         Slic3r::Model model;
 
         // ── load each STL segment into the shared model ───────────────────────
-        for (int i = 0; i < n_files; i++) {
-            const int start = offsets[i * 2];
-            const int len   = offsets[i * 2 + 1];
-            if (start < 0 || len <= 0 || start > all_stl_len || len > all_stl_len - start) {
+        for (uint32_t i = 0; i < n_files; i++) {
+            const uint32_t start = offsets[i * 2];
+            const uint32_t end   = offsets[i * 2 + 1];
+            if (end <= start || end > all_stl_len) {
                 record_error(*session, "invalid offset table");
                 return -1;
             }
+            const uint32_t len = end - start;
             const std::string path = "/tmp/ow_multi_" + std::to_string(i) + ".stl";
             {
                 FILE* f = std::fopen(path.c_str(), "wb");
@@ -1389,22 +1549,22 @@ int orc_slice_multi(
         print.apply(model, session->config);
         zero_plate_origin(print);
         set_is_bbl_printer(print, session->config);
-        // See orc_slice: opt-in override of the mixed-nozzle-temperature guard
+        // See onewasm_slice_stl: opt-in override of the mixed-nozzle-temperature guard
         // for single-nozzle multi-material plates (issue #164).
         if (session->remove_mixed_temp_restriction)
             print.set_check_multi_filaments_compatibility(false);
-        // Variable (adaptive) layer height (issue #138); see orc_slice. With a
+        // Variable (adaptive) layer height (issue #138); see onewasm_slice_stl. With a
         // multi-object plate the engine requires all objects share the same
         // layering when a prime tower is on (Print::validate), so an adaptive
         // multi-material plate with a tower surfaces that as a -6 validation
         // error rather than silently ignoring the setting.
         if (session->adaptive_layer_height)
             apply_adaptive_layer_height(print, session->adaptive_layer_height_quality);
-        attach_progress_callback(print);
+        attach_progress_callback(print, *session);
 
         {
             // `warning` absorbs the non-fatal mixed-temperature notice when the
-            // guard above is off; see orc_slice for why the pointer is required.
+            // guard above is off; see onewasm_slice_stl for why the pointer is required.
             Slic3r::StringObjectException warning;
             Slic3r::StringObjectException err = print.validate(&warning);
             if (!err.string.empty()) { record_error(*session, err.string); return -6; }
@@ -1440,9 +1600,14 @@ int orc_slice_multi(
         std::fclose(gf);
         buf[sz] = '\0';
 
-        *out_gcode = buf;
-        *out_len   = static_cast<int>(sz);
-        return 0;
+        if (sz < 0 || static_cast<unsigned long long>(sz) > UINT32_MAX) {
+            std::free(buf);
+            record_error(*session, "G-code output exceeds the C ABI length limit");
+            return ONEWASM_ERR_OUTPUT;
+        }
+        *out_gcode = reinterpret_cast<uint8_t*>(buf);
+        *out_len   = static_cast<uint32_t>(sz);
+        return ONEWASM_OK;
 
     } catch (const std::exception& e) {
         record_error(*session, e.what());
@@ -1459,9 +1624,9 @@ int orc_slice_multi(
  * Arguments:
  *   cad_data / cad_len  — raw STEP file bytes
  *   out_stl / out_len   — on success: malloc'd binary STL buffer + byte length
- *                         Caller must free with orc_free().
+ *                         Caller must free with onewasm_free().
  *
- * Error codes (same conventions as orc_obj_to_stl):
+ * Error codes (same conventions as onewasm_obj_to_stl):
  *   -1  invalid arguments
  *   -3  could not write STEP data to MEMFS
  *   -4  STEP load failed (bad file / unsupported feature)
@@ -1470,10 +1635,16 @@ int orc_slice_multi(
  *   -9  unexpected C++ exception
  */
 EMSCRIPTEN_KEEPALIVE
-int orc_cad_to_stl(const char* cad_data, int cad_len,
-                   char** out_stl, int* out_len) {
+onewasm_status_t onewasm_cad_to_stl(
+    const uint8_t* cad_data,
+    uint32_t cad_len,
+    uint8_t** out_stl,
+    uint32_t* out_len
+) {
     g_conversion_last_error.clear();
-    if (!cad_data || cad_len <= 0 || !out_stl || !out_len) return -1;
+    if (out_stl) *out_stl = nullptr;
+    if (out_len) *out_len = 0;
+    if (!cad_data || cad_len == 0 || !out_stl || !out_len) return -1;
 
     const char* tmp_in  = "/tmp/ow_in.step";
     const char* tmp_out = "/tmp/ow_cad_out.stl";
@@ -1555,9 +1726,15 @@ int orc_cad_to_stl(const char* cad_data, int cad_len,
                                 record_error("STL read incomplete");
                                 status = -8;
                             } else {
-                                *out_stl = buf;
-                                *out_len = static_cast<int>(sz);
+                                if (static_cast<unsigned long long>(sz) > UINT32_MAX) {
+                                    std::free(buf);
+                                    record_error("STL output exceeds the C ABI length limit");
+                                    status = -8;
+                                } else {
+                                *out_stl = reinterpret_cast<uint8_t*>(buf);
+                                *out_len = static_cast<uint32_t>(sz);
                                 status = 0;
+                                }
                             }
                         }
                     }
@@ -1582,19 +1759,26 @@ int orc_cad_to_stl(const char* cad_data, int cad_len,
  * On success *out_3mf points to a malloc'd buffer containing the .3mf (a ZIP
  * archive — contains embedded NUL bytes, so callers must use the returned
  * length, never a NUL-terminated string read). Caller must free with
- * orc_free().
+ * onewasm_free().
  *
- * Error codes: same convention as orc_slice, with -8 meaning the 3MF export
+ * Error codes: same convention as onewasm_slice_stl, with -8 meaning the 3MF export
  * itself (store_bbs_3mf) failed rather than gcode export.
  */
 EMSCRIPTEN_KEEPALIVE
-int orc_write_3mf(void* session_ptr, const void* stl_data, int stl_len,
-                  char** out_3mf, int* out_len) {
+onewasm_status_t onewasm_write_3mf(
+    onewasm_session_t session_ptr,
+    const uint8_t* stl_data,
+    uint32_t stl_len,
+    uint8_t** out_3mf,
+    uint32_t* out_len
+) {
     OrcSession* session = as_session(session_ptr);
     if (!session) return -1;
     session->last_error.clear();
-    if (!session->initialized) { record_error(*session, "call orc_init first"); return -1; }
-    if (!stl_data || stl_len <= 0 || !out_3mf || !out_len)
+    if (out_3mf) *out_3mf = nullptr;
+    if (out_len) *out_len = 0;
+    if (!session->initialized) { record_error(*session, "call onewasm_init first"); return -1; }
+    if (!stl_data || stl_len == 0 || !out_3mf || !out_len)
         return -1;
 
     try {
@@ -1625,7 +1809,7 @@ int orc_write_3mf(void* session_ptr, const void* stl_data, int stl_len,
             return -5;
         }
 
-        // Same placement convention as orc_slice, so the mesh lands back in
+        // Same placement convention as onewasm_slice_stl, so the mesh lands back in
         // the same spot on re-import instead of at the model-space origin.
         for (auto* obj : model.objects) {
             center_object_xy_only(obj);
@@ -1670,9 +1854,14 @@ int orc_write_3mf(void* session_ptr, const void* stl_data, int stl_len,
             return oom ? -9 : -8;
         }
 
-        *out_3mf = buf;
-        *out_len = static_cast<int>(sz);
-        return 0;
+        if (sz < 0 || static_cast<unsigned long long>(sz) > UINT32_MAX) {
+            std::free(buf);
+            record_error(*session, "3MF output exceeds the C ABI length limit");
+            return ONEWASM_ERR_OUTPUT;
+        }
+        *out_3mf = reinterpret_cast<uint8_t*>(buf);
+        *out_len = static_cast<uint32_t>(sz);
+        return ONEWASM_OK;
 
     } catch (const std::exception& e) {
         record_error(*session, e.what());
@@ -1681,31 +1870,23 @@ int orc_write_3mf(void* session_ptr, const void* stl_data, int stl_len,
 }
 
 /**
- * Read a .3mf file's mesh + embedded OrcaSlicer config, using OrcaSlicer's
+ * Read a .3mf file's printable geometry, using OrcaSlicer's
  * own reader (load_bbs_3mf) rather than the JS-side XML walker
  * (host format adapter) — so this understands whatever OrcaSlicer itself
  * wrote (multi-object assemblies, per-object transforms) exactly the way
  * OrcaSlicer does, instead of re-deriving the 3MF core spec's transform math
- * in JS. A pure format conversion like orc_obj_to_stl / orc_cad_to_stl — no
+ * in JS. A pure format conversion like onewasm_obj_to_stl / onewasm_cad_to_stl — no
  * session/config state involved, so it takes none.
  *
- * On success:
- *   *out_stl points to a malloc'd binary STL buffer — all objects' meshes,
- *     each with its own instance/volume transforms already applied via
- *     ModelObject::mesh() (so position/rotation/scale in the file survive),
- *     merged into one. Byte length in *out_stl_len.
- *   *out_config_json points to a malloc'd, null-terminated JSON object
- *     string of every config key the file's Metadata/<name>.config had *set*
- *     (scalar values use the same string-valued shape OrcaSlicer's own
- *     .config files use; vector values stay arrays so the JS side can retain
- *     slot/nozzle boundaries before re-parsing it with the existing
- *     parseOrcaProfileJson(), the same parser already used for imported
- *     profile JSON). Byte length in
- *     *out_config_len (excludes the trailing NUL, matching orc_slice's
- *     gcode convention; JSON text itself never contains an embedded NUL).
- * Caller must free both buffers with orc_free().
+ * On success *out_stl points to a malloc'd binary STL buffer — all objects'
+ * meshes, each with its own instance/volume transforms already applied via
+ * ModelObject::mesh() (so position/rotation/scale in the file survive),
+ * merged into one. Byte length is returned in *out_stl_len. Native project
+ * settings are intentionally not converted to a common JSON envelope; pass
+ * the original bytes to onewasm_init_profile(session, "project.3mf", ...)
+ * when the host wants to load them.
  *
- * Error codes: same convention as orc_obj_to_stl.
+ * Error codes: same convention as onewasm_obj_to_stl.
  *   -3  could not write 3MF bytes to MEMFS
  *   -4  3MF load failed (bad archive / no recognizable model)
  *   -5  3MF contains no printable geometry
@@ -1713,11 +1894,16 @@ int orc_write_3mf(void* session_ptr, const void* stl_data, int stl_len,
  *   -9  unexpected C++ exception
  */
 EMSCRIPTEN_KEEPALIVE
-int orc_read_3mf(const void* mf_data, int mf_len,
-                 char** out_stl, int* out_stl_len,
-                 char** out_config_json, int* out_config_len) {
+onewasm_status_t onewasm_read_3mf(
+    const uint8_t* mf_data,
+    uint32_t mf_len,
+    uint8_t** out_stl,
+    uint32_t* out_stl_len
+) {
     g_conversion_last_error.clear();
-    if (!mf_data || mf_len <= 0 || !out_stl || !out_stl_len || !out_config_json || !out_config_len)
+    if (out_stl) *out_stl = nullptr;
+    if (out_stl_len) *out_stl_len = 0;
+    if (!mf_data || mf_len == 0 || !out_stl || !out_stl_len)
         return -1;
 
     const char* tmp_in = "/tmp/ow_3mf_read_in.3mf";
@@ -1740,11 +1926,11 @@ int orc_read_3mf(const void* mf_data, int mf_len,
         // Constructed before load_bbs_3mf() runs, so its destructor (the
         // get_backup_path()/"Auxiliaries" dir cleanup that call lazily
         // triggers) still fires even if load_bbs_3mf throws instead of
-        // returning false — same rationale as orc_write_3mf's backup_guard.
+        // returning false — same rationale as onewasm_write_3mf's backup_guard.
         ModelBackupPathGuard backup_guard(model);
         Slic3r::DynamicPrintConfig config;
         // EnableSilent: substitute unknown/incompatible option values with
-        // defaults instead of throwing — mirrors orc_init's own "silently
+        // defaults instead of throwing — mirrors onewasm_init's own "silently
         // skip unknown / incompatible keys" policy for the same reason (a
         // 3MF authored by a different OrcaSlicer/Bambu Studio version may
         // carry option values this pinned engine version doesn't recognize).
@@ -1770,7 +1956,7 @@ int orc_read_3mf(const void* mf_data, int mf_len,
         }
 
         // ModelObject::mesh() bakes in every instance's + volume's transform
-        // (position/rotation/scale) — unlike orc_obj_to_stl/orc_cad_to_stl's
+        // (position/rotation/scale) — unlike onewasm_obj_to_stl/onewasm_cad_to_stl's
         // raw vol->mesh() merge, which is fine for OBJ/STEP (no separate
         // instance concept there) but would silently drop a 3MF's actual
         // placement if used here.
@@ -1802,43 +1988,13 @@ int orc_read_3mf(const void* mf_data, int mf_len,
         std::unique_ptr<char, decltype(&std::free)> stl_owner(stl_buf, &std::free);
         int stl_len = static_cast<int>(stl_sz);
 
-        // Serialize every config key the file actually had set. Scalar values
-        // match OrcaSlicer's flat .config shape (string values), while vector
-        // options deliberately use vserialize() and remain JSON arrays. A
-        // plain ConfigOption::serialize() joins vectors into one string
-        // ("PLA;PETG", "220,255", ...), which loses the slot/nozzle
-        // boundaries when parseOrcaProfileJson() imports this 3MF result.
-        nlohmann::json j = nlohmann::json::object();
-        for (const auto& key : config.keys()) {
-            const Slic3r::ConfigOption* opt = config.option(key);
-            if (!opt) continue;
-            // The loaded config object is authoritative here. Looking the key
-            // up again in print_config_def would make a future/foreign 3MF
-            // option lose its vector shape merely because this pinned bridge
-            // does not know its definition (and would make the cast below
-            // depend on two independently obtained type values).
-            if (opt->is_vector()) {
-                const auto* vector_opt = static_cast<const Slic3r::ConfigOptionVectorBase*>(opt);
-                j[key] = vector_opt->vserialize();
-            } else {
-                j[key] = opt->serialize();
-            }
+        if (static_cast<unsigned long long>(stl_len) > UINT32_MAX) {
+            record_error("STL output exceeds the C ABI length limit");
+            return -8;
         }
-        std::string json_str = j.dump();
-
-        char* json_buf = static_cast<char*>(std::malloc(json_str.size() + 1));
-        if (!json_buf) {
-            record_error("out of memory");
-            return -9;
-        }
-        std::memcpy(json_buf, json_str.data(), json_str.size());
-        json_buf[json_str.size()] = '\0';
-
-        *out_stl = stl_owner.release();
-        *out_stl_len = stl_len;
-        *out_config_json = json_buf;
-        *out_config_len = static_cast<int>(json_str.size());
-        return 0;
+        *out_stl = reinterpret_cast<uint8_t*>(stl_owner.release());
+        *out_stl_len = static_cast<uint32_t>(stl_len);
+        return ONEWASM_OK;
 
     } catch (const std::exception& e) {
         record_error(e.what());
@@ -1846,25 +2002,25 @@ int orc_read_3mf(const void* mf_data, int mf_len,
     }
 }
 
-/** Free a buffer returned by orc_slice, orc_slice_multi, orc_obj_to_stl, orc_cad_to_stl, orc_write_3mf, or orc_read_3mf. */
+/** Free a buffer returned by onewasm_slice_stl, onewasm_slice_stl_multi, onewasm_obj_to_stl, onewasm_cad_to_stl, onewasm_write_3mf, or onewasm_read_3mf. */
 EMSCRIPTEN_KEEPALIVE
-void orc_free(void* ptr) {
+void onewasm_free(void* ptr) {
     std::free(ptr);
 }
 
 /**
  * Return the last error message as a null-terminated string.
- * The pointer is valid until the next orc_* call on the same session (or,
- * for a null session, the next orc_obj_to_stl / orc_cad_to_stl call).
+ * The pointer is valid until the next onewasm_* call on the same session (or,
+ * for a null session, the next onewasm_obj_to_stl / onewasm_cad_to_stl call).
  *
- * Pass the session used for the failing orc_init / orc_slice / orc_slice_multi
- * call. Pass 0/null after a failing orc_obj_to_stl / orc_cad_to_stl call
+ * Pass the session used for the failing onewasm_init / onewasm_slice_stl / onewasm_slice_stl_multi
+ * call. Pass 0/null after a failing onewasm_obj_to_stl / onewasm_cad_to_stl call
  * (those take no session) — this is also why the parameter used to be
  * documented as "unused" and JS always passed literal 0: that call pattern
  * still works unchanged for conversion errors.
  */
 EMSCRIPTEN_KEEPALIVE
-const char* orc_decode_exception(void* session_ptr) {
+const char* onewasm_last_error(onewasm_session_t session_ptr) {
     OrcSession* session = as_session(session_ptr);
     return session ? session->last_error.c_str() : g_conversion_last_error.c_str();
 }

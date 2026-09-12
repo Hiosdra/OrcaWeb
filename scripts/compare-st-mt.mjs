@@ -39,7 +39,7 @@ function parseArgs(argv) {
 
 // ── test meshes ──────────────────────────────────────────────────────────────
 // A fixed set of STLs (small cube, a >100k-triangle organic mesh, a
-// multi-object plate through orc_slice_multi).
+// multi-object plate through onewasm_slice_stl_multi).
 // sphereStl()/trianglesToStl() live in ./lib/engine-harness.mjs.
 
 function cubeStl(sizeMm) {
@@ -67,7 +67,7 @@ const MESHES = {
 }
 
 // ── engine harness ──────────────────────────────────────────────────────────
-// loadModule() + orc_* heap marshaling live in ./lib/engine-harness.mjs.
+// loadModule() + onewasm_* heap marshaling live in ./lib/engine-harness.mjs.
 
 function layerCount(gcode) {
   const m = gcode.match(/;\s*total layers count\s*=\s*(\d+)/i)
@@ -169,9 +169,9 @@ async function main() {
   const mt = await loadModule(wasmDir, 'slicer-mt')
   console.log('[compare-st-mt] both engines loaded')
 
-  const stSession = st._orc_session_create()
-  const mtSession = mt._orc_session_create()
-  if (!stSession || !mtSession) throw new Error('orc_session_create failed (allocation failure)')
+  const stSession = st._onewasm_session_create()
+  const mtSession = mt._onewasm_session_create()
+  if (!stSession || !mtSession) throw new Error('onewasm_session_create failed (allocation failure)')
 
   let failures = 0
 
@@ -198,8 +198,8 @@ async function main() {
     }
   }
 
-  // Multi-object plate through orc_slice_multi (Phase 4 item 1's third case).
-  const plateLabel = 'plate: 2x small cube via orc_slice_multi'
+  // Multi-object plate through onewasm_slice_stl_multi (Phase 4 item 1's third case).
+  const plateLabel = 'plate: 2x small cube via onewasm_slice_stl_multi'
   process.stdout.write(`[compare-st-mt] ${plateLabel} ... `)
   try {
     const cube = cubeStl(20)
@@ -221,8 +221,8 @@ async function main() {
     console.error(`  ${err.message}`)
   }
 
-  st._orc_session_destroy(stSession)
-  mt._orc_session_destroy(mtSession)
+  st._onewasm_session_destroy(stSession)
+  mt._onewasm_session_destroy(mtSession)
 
   if (failures > 0) {
     console.error(`\n[compare-st-mt] ${failures} scenario(s) diverged`)
