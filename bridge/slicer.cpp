@@ -1007,7 +1007,7 @@ onewasm_status_t onewasm_get_capabilities(uint8_t** out_json, uint32_t* out_len)
   "runtime":{"threadingModel":")") + threading_model + R"(","supportedHosts":["web","worker","node"],"requiresSharedArrayBuffer":)" + requires_sab + R"(,"requiresCrossOriginIsolated":)" + requires_sab + R"(,"cancellationMode":"worker-terminate"},
   "configuration":{"initFormats":["orca.native-json"],"fullProfileFormats":["project.3mf"]},
   "features":{"configuration.native":"supported","configuration.fullprofile":"supported","progress.callback":"supported","slicing.single":"supported","slicing.multi":"supported","plate.autoorient":"supported","plate.arrange":"supported","conversion.objtostl":"supported","conversion.cadtostl":"supported","project.write3mf":"supported","project.read3mf":"supported"}
-})");
+})";
     if (json.size() > UINT32_MAX) {
         record_error("capability document is too large");
         return ONEWASM_ERR_OUTPUT;
